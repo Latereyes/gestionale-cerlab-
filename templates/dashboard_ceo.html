@@ -1,0 +1,471 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-chart-line"></i> Dashboard CEO</h1>
+{% endblock %}
+
+{% block body %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="dashboard-container">
+
+  <form method="GET" action="{{ url_for('dashboard_ceo') }}" class="card filter-card">
+    <div class="date-filter-controls">
+        <label for="start_date">Da:</label>
+        <input type="date" id="start_date" name="start_date" value="{{ start_date }}">
+        <label for="end_date">A:</label>
+        <input type="date" id="end_date" name="end_date" value="{{ end_date }}">
+        <button type="submit" class="btn"><i class="fas fa-filter"></i> Applica</button>
+    </div>
+    <div id="period-filters" class="segmented-control">
+        <button type="button" class="btn period-btn" data-days="30">Ultimi 30gg</button>
+        <button type="button" class="btn period-btn" data-days="90">Ultimi 90gg</button>
+        <button type="button" class="btn period-btn" data-month="this">Questo Mese</button>
+        <button type="button" class="btn period-btn" data-month="last">Mese Scorso</button>
+        <button type="button" class="btn period-btn" data-year="this">Anno Corrente</button>
+    </div>
+  </form>
+
+  <div class="tabs-navigation">
+    <button class="tab-link active" data-tab="tab-overview"><i class="fas fa-tachometer-alt"></i> Overview</button>
+    <button class="tab-link" data-tab="tab-cashflow"><i class="fas fa-dollar-sign"></i> Cash Flow</button>
+    <button class="tab-link" data-tab="tab-commerciale"><i class="fas fa-bullseye"></i> Commerciale</button>
+  </div>
+
+  <div class="tabs-content">
+
+    <div id="tab-overview" class="tab-content active">
+      
+      <div class="ceo-grid-large">
+        <div class="stat-card">
+          <div class="stat-icon" style="--bg: #e7f5e9; --color: #198754;"><i class="fas fa-euro-sign"></i></div>
+          <div class="stat-content">
+            <h4>Fatturato Lordo</h4>
+            <div class="stat-value">{{ ceo_data.overview.fatturato | money_ui }}</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="--bg: #e6f7ff; --color: #0d6efd;"><i class="fas fa-piggy-bank"></i></div>
+          <div class="stat-content">
+            <h4>Utile Netto Stimato</h4>
+            <div class="stat-value">{{ ceo_data.overview.utile_stimato | money_ui }}</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="--bg: #fff8e1; --color: #ffc107;"><i class="fas fa-truck-loading"></i></div>
+          <div class="stat-content">
+            <h4>Costi Ordini (Netto)</h4>
+            <div class="stat-value">{{ ceo_data.overview.costi_ordini_netto | money_ui }}</div>
+          </div>
+        </div>
+         <div class="stat-card">
+          <div class="stat-icon" style="--bg: #fbeae7; --color: #dc3545;"><i class="fas fa-hand-holding-usd"></i></div>
+          <div class="stat-content">
+            <h4>Fee Versata Stimata</h4>
+            <div class="stat-value">{{ ceo_data.overview.fee | money_ui }}</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="--bg: #f0eaff; --color: #6f42c1;"><i class="fas fa-file-invoice-dollar"></i></div>
+          <div class="stat-content">
+            <h4>IVA a Debito</h4>
+            <div class="stat-value">{{ ceo_data.overview.iva_debito | money_ui }}</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="--bg: #e5e7eb; --color: #4b5563;"><i class="fas fa-clock"></i></div>
+          <div class="stat-content">
+            <h4>Tempo Medio Chiusura</h4>
+            <div class="stat-value">{{ "%.1f" | format(ceo_data.overview.tempo_medio_chiusura) if ceo_data.overview.tempo_medio_chiusura != 'N/D' else 'N/D' }} gg</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2-col">
+        <div class="card">
+          <div class="card-header"><h3><i class="fas fa-chart-pie"></i> Redditività</h3></div>
+          <div class="card-body">
+            <ul class="kpi-list">
+              <li>
+                <span>Utile Medio %</span>
+                <strong>{{ "%.2f" | format(ceo_data.redditivita.utile_medio_effettivo_pct) }} %</strong>
+              </li>
+              <li>
+                <span>Fee Media Versata %</span>
+                <strong>{{ "%.2f" | format(ceo_data.redditivita.fee_media_pct) }} %</strong>
+              </li>
+              <li>
+                <span>Scostamento Costi</span>
+                <strong class="{{ 'text-danger' if ceo_data.redditivita.scostamento_costi > 0 else 'text-success' }}">
+                  {{ ceo_data.redditivita.scostamento_costi | money_ui }}
+                </strong>
+                <small>(Costi Ordini vs Costi Preventivo)</small>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3><i class="fas fa-trophy"></i> Top 5 Clienti</h3></div>
+          <div class="card-body">
+            <ul class="kpi-list">
+              {% for cliente, fatturato in ceo_data.top_5_clienti %}
+              <li>
+                <span>{{ loop.index }}. {{ cliente }}</span>
+                <strong>{{ fatturato | money_ui }}</strong>
+              </li>
+              {% else %}
+              <li><span>Nessun dato</span><strong>-</strong></li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3><i class="fas fa-users"></i> Performance Venditori</h3></div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Venditore</th>
+                <th>Fatturato Lordo</th>
+                <th>Utile Netto Stimato</th>
+                <th>Preventivi Confermati</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for venditore in ceo_data.performance_venditori %}
+              <tr>
+                <td>{{ venditore.nome }}</td>
+                <td>{{ venditore.fatturato | money_ui }}</td>
+                <td>{{ venditore.utile | money_ui }}</td><td>{{ venditore.utile_effettivo | money_ui }}</td>
+                <td>{{ venditore.confermati }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4">Nessun dato per questo intervallo.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <div id="tab-cashflow" class="tab-content">
+      <div class="ceo-grid">
+        <div class="stat-card">
+          <div class="stat-icon" style="--bg: #e7f5e9; --color: #198754;"><i class="fas fa-wallet"></i></div>
+          <div class="stat-content">
+            <h4>Incassato (Reale)</h4>
+            <div class="stat-value">{{ ceo_data.cash_flow.incassato | money_ui }}</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="--bg: #fff8e1; --color: #ffc107;"><i class="fas fa-calendar-alt"></i></div>
+          <div class="stat-content">
+            <h4>Da Incassare (Pianificato)</h4>
+            <div class="stat-value">{{ ceo_data.cash_flow.da_incassare | money_ui }}</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="--bg: #fbeae7; --color: #dc3545;"><i class="fas fa-receipt"></i></div>
+          <div class="stat-content">
+            <h4>Costi Sostenuti (Netto)</h4>
+            <div class="stat-value">{{ ceo_data.overview.costi_ordini_netto | money_ui }}</div>
+          </div>
+        </div>
+        <div class="stat-card">
+      <div class="stat-icon" style="--bg: #fff8e1; --color: #ffc107;"><i class="fas fa-file-invoice-dollar"></i></div>
+      <div class="stat-content">
+        <h4>Da Saldare (Residuo)</h4>
+        <div class="stat-value">{{ ceo_data.cash_flow.da_saldare | money_ui }}</div>
+        <small class="muted">(Totale Fatturato - Incassato)</small> </div>
+    </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>Andamento Mensile (Incassi vs Costi)</h3></div>
+        <div class="card-body">
+            <div class="chart-container">
+                <canvas id="ceoChart"></canvas>
+            </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-commerciale" class="tab-content">
+      <div class="grid-2-col">
+        <div class="card">
+          <div class="card-header">
+            <h3>Funnel Preventivi (per Numero)</h3>
+            <span>Tasso Firma: <strong>{{ "%.1f" | format(ceo_data.funnel_count.tasso_firma_num) }} %</strong></span>
+          </div>
+          <div class="card-body">
+            <div class="funnel-chart">
+              <div class="funnel-step">
+                <div class="funnel-label">
+                  <span>Creati</span>
+                  <strong>{{ ceo_data.funnel_count.creati }}</strong>
+                </div>
+                <div class="funnel-bar" style="width: 100%; --color: #6f42c1;"></div>
+              </div>
+              <div class="funnel-step">
+                <div class="funnel-label">
+                  <span>Inviati</span>
+                  <strong>{{ ceo_data.funnel_count.inviati }}</strong>
+                </div>
+                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_count.inviati / ceo_data.funnel_count.creati * 100) if ceo_data.funnel_count.creati else 0 }}%; --color: #0d6efd;"></div>
+              </div>
+              <div class="funnel-step">
+                <div class="funnel-label">
+                  <span>Confermati</span>
+                  <strong>{{ ceo_data.funnel_count.confermati }}</strong>
+                </div>
+                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_count.confermati / ceo_data.funnel_count.creati * 100) if ceo_data.funnel_count.creati else 0 }}%; --color: #198754;"></div>
+              </div>
+              <div class="funnel-step">
+                <div class="funnel-label">
+                  <span>Annullati</span>
+                  <strong>{{ ceo_data.funnel_count.annullati }}</strong>
+                </div>
+                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_count.annullati / ceo_data.funnel_count.creati * 100) if ceo_data.funnel_count.creati else 0 }}%; --color: #dc3545;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>Funnel Preventivi (per Valore)</h3>
+            <span>Tasso Firma: <strong>{{ "%.1f" | format(ceo_data.funnel_value.tasso_firma_val) }} %</strong></span>
+          </div>
+          <div class="card-body">
+            <div class="funnel-chart">
+              <div class="funnel-step">
+                <div class="funnel-label">
+                  <span>Valore Inviato</span>
+                  <strong>{{ ceo_data.funnel_value.inviato | money_ui }}</strong>
+                </div>
+                <div class="funnel-bar" style="width: 100%; --color: #0d6efd;"></div>
+              </div>
+              <div class="funnel-step">
+                <div class="funnel-label">
+                  <span>Valore Confermato</span>
+                  <strong>{{ ceo_data.funnel_value.confermato | money_ui }}</strong>
+                </div>
+                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_value.confermato / ceo_data.funnel_value.inviato * 100) if ceo_data.funnel_value.inviato else 0 }}%; --color: #198754;"></div>
+              </div>
+              <div class="funnel-step">
+                <div class="funnel-label">
+                  <span>Valore Annullato</span>
+                  <strong>{{ ceo_data.funnel_value.annullato | money_ui }}</strong>
+                </div>
+                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_value.annullato / ceo_data.funnel_value.inviato * 100) if ceo_data.funnel_value.inviato else 0 }}%; --color: #dc3545;"></div>
+              </div>
+              <div class="funnel-step">
+                <div class="funnel-label">
+                  <span>Valore in Trattativa</span>
+                  <strong>{{ ceo_data.funnel_value.in_trattativa | money_ui }}</strong>
+                </div>
+                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_value.in_trattativa / ceo_data.funnel_value.inviato * 100) if ceo_data.funnel_value.inviato else 0 }}%; --color: #ffc107;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  /* === CONTENITORI GENERALI === */
+  .dashboard-container { max-width: 1300px; margin: 0 auto; padding: 24px; font-family: 'Inter', sans-serif; }
+  .card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; }
+  .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+  .card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+  .card-body { padding: 24px; }
+  .btn.with-icon { display: inline-flex; align-items: center; gap: 8px; }
+  .grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .text-danger { color: #dc3545; }
+  .text-success { color: #198754; }
+
+  /* === FILTRI DATA === */
+  .filter-card { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  .date-filter-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .date-filter-controls label { font-weight: 500; }
+  .date-filter-controls input[type="date"] { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+  .date-filter-controls .btn { padding-top: 9px; padding-bottom: 9px; }
+  .segmented-control { display: flex; justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
+  #period-filters .btn { background-color: #f3f4f6; border: 1px solid #d1d5db; color: #374151; font-weight: 500; padding: 6px 12px; font-size: 13px; }
+  #period-filters .btn:hover { background-color: #e5e7eb; }
+
+  /* === SCHEDE (TABS) === */
+  .tabs-navigation { display: flex; gap: 4px; margin-bottom: -1px; }
+  .tab-link {
+    font-size: 16px; font-weight: 600; color: #4b5563;
+    background: #f3f4f6; border: 1px solid #e2e8f0; border-bottom: none;
+    padding: 12px 20px; border-radius: 8px 8px 0 0;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+    margin-bottom: -1px; z-index: 1;
+  }
+  .tab-link.active {
+    background: #fff; color: var(--primary-color, #0d6efd);
+    border-bottom: 1px solid #fff;
+  }
+  .tab-content { display: none; background: #fff; border: 1px solid #e2e8f0; border-radius: 0 12px 12px 12px; padding: 24px; }
+  .tab-content.active { display: block; }
+
+  /* === KPI CARDS === */
+  .ceo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 24px; }
+  .ceo-grid-large { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 24px; }
+  .stat-card { display: flex; align-items: center; gap: 20px; background-color: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; }
+  .stat-icon { font-size: 24px; min-width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; background-color: var(--bg); color: var(--color); }
+  .stat-content h4 { margin: 0 0 8px 0; font-size: 15px; color: #4a5568; font-weight: 500; }
+  .stat-content .stat-value { font-size: 26px; font-weight: 700; color: #1a202c; }
+
+  /* === TABELLE E LISTE KPI === */
+  .table-container { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+  th { background-color: #f8f9fa; font-weight: 600; color: #374151; }
+  tbody tr:hover { background-color: #f9f9f9; }
+  .kpi-list { list-style: none; padding: 0; margin: 0; }
+  .kpi-list li { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f3f4f6; }
+  .kpi-list li:last-child { border-bottom: none; }
+  .kpi-list li span { font-size: 15px; color: #374151; }
+  .kpi-list li small { font-size: 12px; color: #6b7280; display: block; margin-left: 10px; }
+  .kpi-list li strong { font-size: 18px; font-weight: 600; color: #111827; }
+
+  /* === GRAFICO E FUNNEL === */
+  .chart-container { position: relative; height: 45vh; min-height: 350px; }
+  .funnel-chart { display: flex; flex-direction: column; gap: 16px; }
+  .funnel-step { }
+  .funnel-label { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .funnel-label span { font-size: 15px; color: #374151; }
+  .funnel-label strong { font-size: 16px; font-weight: 600; color: #111827; }
+  .funnel-bar {
+    height: 24px; background-color: var(--color, #ccc);
+    border-radius: 4px; transition: width 0.5s ease-out;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  }
+  .stat-content small.muted {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 4px;
+    display: block; /* Per farla andare a capo */
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Riceve la nuova struttura dati da Python
+    const ceoData = {{ ceo_data | tojson | safe }};
+    const moneyFormatter = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' });
+
+    // === GESTIONE SCHEDE (TABS) ===
+    const tabLinks = document.querySelectorAll('.tab-link');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    tabLinks.forEach(link => {
+        link.addEventListener('click', () => {
+            const tabId = link.dataset.tab;
+
+            tabLinks.forEach(l => l.classList.remove('active'));
+            tabContents.forEach(c => c.classList.remove('active'));
+
+            link.classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        });
+    });
+
+    // === GESTIONE FILTRI DATA PREDEFINITI ===
+    const startDateInput = document.getElementById('start_date');
+    const endDateInput = document.getElementById('end_date');
+    const form = startDateInput.closest('form');
+
+    function setDatesAndSubmit(start, end) {
+        startDateInput.value = start.toISOString().split('T')[0];
+        endDateInput.value = end.toISOString().split('T')[0];
+        form.submit();
+    }
+
+    document.querySelectorAll('.period-btn').forEach(button => {
+        button.addEventListener('click', () => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            let start = new Date(today);
+
+            if (button.dataset.days) {
+                start.setDate(today.getDate() - (parseInt(button.dataset.days) - 1));
+                setDatesAndSubmit(start, today);
+            } else if (button.dataset.month) {
+                if (button.dataset.month === 'this') {
+                    start = new Date(today.getFullYear(), today.getMonth(), 1);
+                    setDatesAndSubmit(start, today);
+                } else if (button.dataset.month === 'last') {
+                    start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                    const end = new Date(today.getFullYear(), today.getMonth(), 0);
+                    setDatesAndSubmit(start, end);
+                }
+            } else if (button.dataset.year) {
+                if (button.dataset.year === 'this') {
+                    start = new Date(today.getFullYear(), 0, 1);
+                    setDatesAndSubmit(start, today);
+                }
+            }
+        });
+    });
+
+    // === GRAFICO CASH FLOW ===
+    const chartCanvas = document.getElementById('ceoChart');
+    if (chartCanvas) {
+        new Chart(chartCanvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: ceoData.grafico_data.labels || [],
+                datasets: [
+                    {
+                        label: 'Incassato',
+                        data: ceoData.grafico_data.incassato || [],
+                        borderColor: '#198754',
+                        backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 2
+                    },
+                    {
+                        label: 'Costi Sostenuti (Netto)',
+                        data: ceoData.grafico_data.costi_sostenuti || [],
+                        borderColor: '#dc3545',
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { 
+                    y: { 
+                        beginAtZero: true, 
+                        ticks: { callback: value => moneyFormatter.format(value) } 
+                    } 
+                },
+                plugins: { 
+                    legend: { position: 'top' }, 
+                    tooltip: { 
+                        callbacks: { label: context => `${context.dataset.label}: ${moneyFormatter.format(context.raw)}` } 
+                    } 
+                },
+                interaction: { intersect: false, mode: 'index' }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,134 @@
+
+[ {
+    "version": "1.9.7",
+    "date": "2025-11-05",
+    "title": "Versione 1.9.7 - 09 Novembre 2025 (Refactoring UI e Logica)",
+    "changes": [
+      "CORREZIONE URGENTE: Risolto un problema critico nella logica di calcolo dei badge e riepiloghi per Ordini, Consegne e Saldo nella Dashboard Clienti e nella Dashboard principale. Ora mostrano correttamente 'N/D' se il preventivo non è ancora stato 'Confermato'.",
+      "CORREZIONE URGENTE: La ricerca live su dashboard clienti ora funziona correttamente",
+      "CORREZIONE URGENTE: Debug logica di stati di consegna e ordine, ora funzionano correttamente",
+      "CORREZIONE MINORE: Disabilitato grab-and-move nei preventivi quando sono in stato diverso da 'Bozza,",
+      "CORREZIONE MINORE: Rimossi da dashboard pagamenti e dashboard fatture i preventivi in stato di SALDATO o FATTURA EMESSA",
+      "CORREZIONE MINORE: Rimossi preventivi chiusi o annullati da dashboard clienti",
+      "NEW: Ora è possibile inserire fatture esenti IVA (no_iva) e i preventivi verranno gestiti correttamente. Lo stato fattura mostrerà 'IVA ESENTE' (badge grigio scuro) e il preventivo passerà a 'Chiuso' se Saldato e Consegnato.",
+      "NEW: Ora è possibile tornare indietro alla pagina precedente cliccando l'icona freccia in alto a sinistra nell'intestazione globale (tranne che nella Dashboard principale).",
+      "IMPORTANTE PER IL CEO: Dopo questo aggiornamento cliccare su 'Aggiorna stati' sulla dashboard per fixare gli stati di tutti i preventivi in base alle nuove regole. Assicurarsi che nessun operatore stia usando il sistema durante questa operazione."
+    ]
+  },
+  {
+    "version": "1.9.6",
+    "date": "2025-11-05",
+    "title": "Versione 1.9.6 - 08 Novembre 2025 (Refactoring UI e Logica)",
+    "changes": [
+      "CORREZIONE URGENTE: Risolto un problema critico nella logica di calcolo dei badge e riepiloghi per Ordini, Consegne e Saldo nella Dashboard Clienti e nella Dashboard principale. Ora mostrano correttamente 'N/D' se il preventivo non è ancora stato 'Confermato'."
+    ]
+  },
+{
+    "version": "1.9.5",
+    "date": "2025-11-05",
+    "title": "Versione 1.9.5 - 05 Novembre 2025 (Refactoring UI e Logica)",
+    "changes": [
+      "NUOVO: Refactoring Intestazione Globale: L'intestazione della pagina (es. 'Gestione Ordini') è stata spostata nella barra superiore del browser, eliminando le vecchie barre del titolo da tutte le pagine per un look più pulito e integrato.",
+      "NUOVO: Barra Navigazione Dashboard: Aggiunta una nuova barra di navigazione fissa in fondo alle pagine della dashboard (Clienti, Ordini, Consegne, Saldo, Fatture) per muoversi rapidamente tra le sezioni principali.",
+      "Miglioramento (Dashboard Clienti): La pagina 'Preventivi per Cliente' è stata completamente ridisegnata. Ora mostra badge di riepilogo per Ordini, Consegna, Saldo e Fattura.",
+      "Miglioramento (Dashboard Clienti): Aggiunta una riga 'Riepilogo' a scomparsa (cliccando la freccia) che mostra i dettagli (conteggi x/y, importi, link a PDF e Analisi).",
+      "Miglioramento (Dashboard Clienti): Aggiunto un filtro multi-stato (Tutti, Bozza, Inviato, ecc.) in cima alla pagina per filtrare i preventivi.",
+      "Miglioramento (Dashboard Home): La dashboard principale ora raggruppa i preventivi in base al ruolo: 'Venditore' (vede solo i suoi), 'Admin/CEO' (vede i suoi separati dagli altri), 'Segreteria' (vede tutti raggruppati per venditore).",
+      "Miglioramento (Logica 'S' - Servizio): L'unità 'S' ora è flessibile. Se il ricarico è 0, il P.Catalogo è puro guadagno (costo zero). Se si inserisce un ricarico, il P.Catalogo viene trattato come un costo da cui calcolare il profitto.",
+      "Miglioramento (Editor): L'interfaccia dell'editor ora blocca tutti i campi di calcolo (P.Catalogo, Ricarico, IVA, ecc.) finché non viene selezionata un'Unità di Misura (UNT).",
+      "Miglioramento (Archivio): La pagina 'Archivio Globale' ora mostra solo preventivi 'Chiusi' o 'Annullati' e include le colonne 'Totale' e 'Data Chiusura/Annullamento'.",
+      "Correzione (Logica Dashboard): I badge e i riepiloghi per Ordini, Consegne e Saldo ora mostrano correttamente 'N/D' se il preventivo non è ancora stato 'Confermato'."
+    ]
+  },
+  {
+    "version": "1.9.4",
+    "date": "2025-11-04",
+    "title": "Versione 1.9.4 - 04 Novembre 2025 (Aggiornamento cumulativo)",
+    "changes": [
+      "NUOVO: Unità di Misura 'S' (Servizi): È ora possibile inserire 'S' (Servizi) come unità di misura nell'editor. Questa voce viene trattata come puro guadagno (costo negozio zero) e viene esclusa automaticamente da ordini e consegne.",
+      "NUOVO: Barra di Navigazione Globale: Aggiunta una barra di navigazione fissa in fondo a tutte le pagine di un preventivo (Preventivo, Ordini, Consegna, Saldo, Fatture, Cliente) per un accesso rapido a tutte le sezioni.",
+      "NUOVO: Spunta 'Trasporto Incluso' (Gestione Ordini): Aggiunta una spunta nella modale di creazione/modifica ordine. Questo permette di specificare se il trasporto è già nel costo articoli o se va calcolato a parte, migliorando la precisione del costo effettivo.",
+      "Miglioramento (Gestione Ordini): Ridisegnata la card degli ordini per chiarezza: l'IVA è ora in intestazione e i totali 'Stimato' ed 'Effettivo' sono su righe separate.",
+      "Miglioramento (Gestione Consegna): I pulsanti di azione (Merce Arrivata, Crea Bolla, ecc.) sono stati spostati nella barra fissa in fondo alla pagina per coerenza.",
+      "Miglioramento (Dettaglio Cliente): È ora possibile eliminare gli 'Altri Documenti' dalla cartella del cliente. È stato anche corretto l'allineamento dei pulsanti (visualizza, scarica, elimina).",
+      "Correzione (Gestione Ordini): Il 'Costo Stimato' ora esclude l'EXTRA (ex 'Spese Incasso') per un confronto più corretto con il 'Costo Effettivo'.",
+      "Correzione (Stampa PDF): Risolto un problema per cui la scritta 'Pagina 1 di...' veniva tagliata in fondo al PDF generato.",
+    ]
+  },
+  {
+    "version": "1.9.3",
+    "date": "2025-11-03",
+    "title": "Versione 1.9.1 - 03 Novembre 2025",
+    "changes": [
+      "E' ora possibile creare preventivi senza totali per ogni RIGA, ma solo totali riepilogativi. UTILIZZABILE SOLO SU PREVENTIVI MONOIVA",
+      "NUOVO: Sdoppiamento Costi Ordine Fornitore: Nella 'Gestione Ordini', il campo 'Importo Totale Ordine' è stato sostituito da due campi separati: 'Importo Articoli (IVA incl)' e 'Importo Trasporto (IVA incl)'.",
+      "Miglioramento Analisi Costi e Retrocompatibilità: Questo sdoppiamento permette un'analisi dei costi molto più precisa. Per i vecchi ordini, l'importo totale precedentemente inserito è ora trattato come 'Costo Articoli', e il 'Costo Trasporto Presunto' (calcolato dal preventivo) viene aggiunto automaticamente.",
+      "Correzione Critica (Gestione Ordini): Risolto un bug critico per cui l''IVA Scorporata' negli ordini fornitore risultava sempre 0. Il problema era causato da un errore di salvataggio nella funzione di modifica e da una logica di calcolo errata.",
+      "Allineamento Dashboard CEO: Tutte le dashboard della modalità CEO (Generale, Analisi Preventivo, Analisi Cliente) sono state aggiornate per utilizzare questa nuova e più accurata scomposizione dei costi. L''Utile Effettivo' e lo 'Scostamento Costi' ora riflettono i costi reali con precisione."
+    ]
+  },
+
+  {
+    "version": "1.9.0",
+    "date": "2025-10-25",
+    "title": "Versione 1.9.0 - 25 Ottobre 2025",
+    "changes": [
+      "Rivoluzione Dashboard CEO: La dashboard CEO è stata completamente riprogettata con un'interfaccia a schede (Overview, Cash Flow, Commerciale) e metriche di business avanzate.",
+      "Filtro Data Personalizzato (CEO): Sostituiti i filtri periodo statici (3m, 6m) con un selettore di intervallo date personalizzato, dotato di calendari e pulsanti rapidi (es. Ultimi 30gg, Questo Mese).",
+      "Correzione Critica (CEO): Risolto un bug critico per cui la dashboard sommava i costi ordini *lordi* (IVA inclusa) invece che *netti*. Il calcolo dei costi è ora corretto.",
+      "Nuovi KPI Finanziari (CEO): La scheda 'Overview' ora include Performance Venditori, Top 5 Clienti, Redditività Media % e Scostamento Costi.",
+      "Nuovi KPI Cash Flow (CEO): La scheda 'Cash Flow' mostra l'Incassato Reale, il Da Incassare (pianificato) e un nuovo grafico mensile 'Incassi vs Costi'.",
+      "Nuovo Funnel Commerciale (CEO): La scheda 'Commerciale' mostra l'efficacia del team con un funnel di conversione (sia per Numero che per Valore).",
+      "Nuovo KPI 'Tempo Medio Chiusura': Il sistema ora traccia la data di conferma e di chiusura per calcolare il tempo medio di lavorazione di un preventivo (visibile in Dashboard CEO e Analisi).",
+      "NUOVO: Analisi Preventivo (Admin/CEO): Aggiunta una nuova pagina di 'Analisi Preventivo' per un'analisi di redditività 'microscopica' (costi, utile, scostamento, margini %) del singolo preventivo. Il pulsante è disponibile nella Dashboard e nel Dettaglio Cliente.",
+      "NUOVO: Analisi Cliente (Admin/CEO): Aggiunta una nuova pagina di 'Analisi Cliente' per un'analisi aggregata di *tutti* i preventivi di un cliente (Fatturato Totale, Utile Totale, Funnel, ecc.). Il pulsante è disponibile nella Dashboard Clienti e nel Dettaglio Cliente.",
+      "Correzione Tecnica: Risolto un problema di registrazione del filtro 'money_ui' che impediva il caricamento della nuova dashboard."
+    ]
+  },
+  {
+    "version": "1.8.0",
+    "date": "2025-10-24",
+    "title": "Versione 1.7.5 - 24 Ottobre 2025",
+    "changes": [
+      "Nuovo Selettore IVA di Default: Sostituito il menu a tendina per l'IVA di default delle nuove righe con uno switch a 4 stati (0, 4, 10, 22) più rapido e moderno. La scelta viene ora salvata con il preventivo.",
+      "Correzione Arrotondamento Totali Riga: Risolto un problema per cui il totale imponibile di riga poteva differire di pochi centesimi dal calcolo manuale (prezzo unitario x quantità) a causa degli arrotondamenti.",
+      "Miglioramento Gestione Fatture Esenti IVA:",
+      "- Aggiunto un flag automatico 'no_iva' al preventivo se tutte le righe hanno IVA 0%.",
+      "- Introdotto lo stato fattura 'Non Disponibile' (badge nero) per i preventivi con 'no_iva' attivo.",
+      "- Lo stato fattura ora mostra 'N/D' (badge grigio neutro) se il preventivo è ancora in 'Bozza' o 'Inviato'.",
+      "Logica Stato 'Chiuso' Aggiornata: Un preventivo passa allo stato 'Chiuso' solo quando è contemporaneamente Saldato, Consegnato e Fatturato (oppure esente IVA/Non Disponibile).",
+      "Avviso Annullamento Preventivo 'In Lavorazione': Aggiunta una modale di avviso extra quando si tenta di annullare un preventivo che ha già ordini fornitore o pagamenti registrati."
+    ]
+  },
+  {
+    "version": "1.7.4",
+    "date": "2025-10-21",
+    "title": "Versione 1.7.4 - 21 Ottobre 2025",
+    "changes": [
+      "Migliorata la funzione 'Clona Preventivo': ora mostra una modale di conferma con il riepilogo del vecchio e nuovo numero di preventivo.",
+      "Sostituita la finestra di avviso del browser per 'Annulla Preventivo' con una modale personalizzata, in linea con il resto dell'interfaccia.",
+      "Aggiunta l'indicazione della Revisione (es. 'Rev: 1') direttamente sul PDF del preventivo generato.",
+      "Correzione Critica (Pagamenti): Risolto un bug per cui i pagamenti futuri ('Da Incassare') segnavano erroneamente un preventivo come 'Saldato'. Ora solo gli incassi reali contribuiscono al saldo.",
+      "Correzione Critica (Pagamenti): Risolto il problema di arrotondamento dei centesimi. I calcoli dei pagamenti sono ora precisi al centesimo, prevenendo saldi errati (es. -0,01 €).",
+      "Migliorata la logica interna delle 'Rettifiche' di pagamento, ora basata su ID univoci per garantire la correttezza contabile.",
+      "Aggiunto un pulsante rapido '50%' nella pagina di gestione pagamenti.",
+      "Resi i pulsanti rapidi (40%, 50%, SALDO) colorati per una migliore visibilità.",
+      "Aggiunta la colonna 'Da Incassare' (pagamenti futuri) alla dashboard principale dei pagamenti.",
+      "Unificato lo stile dei 'badge di stato' (es. Bozza, Inviato) della dashboard principale per coerenza con le altre pagine.",
+      "Aggiornata estetica della dashboard, dando tridimensionalità ai tasti."
+    ]
+  },
+  {
+    "version": "1.7.0",
+    "date": "2025-10-10",
+    "title": "Versione 1.7.0 - 11 Ottobre 2025",
+    "changes": [
+      "Introdotta posibilità di clonare il preventivo. Dopo il click verificate che il flash in altro riporti 'Preventivo Clonato'.",
+      "Ora le righe del preventivo si possono spostare con drag and drop.",
+      "Aggiunta casella codice univoco per anagrafica clienti.",
+      "I pagamenti post datati ora sono gestiti come 'da incassare' e non più come 'incassati'. Dovranno essere confermati manualmente alla data di incasso.",
+      "Ora Incasso si chiama EXTRA e viene ricaricato e aggiunta la fee. Considerare spese di incasso e altre spese speciali come EXTRA.",
+      "Risolto bug, ora il venditore non viene modificato se si entra in preventivi altrui"
+    ]
+  }
+]

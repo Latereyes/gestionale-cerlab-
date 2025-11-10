@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="utf-8">
+    <title>Preventivo {{ p.numero }}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        
+        :root {
+            --text-primary: #1a202c;
+            --text-secondary: #4a5568;
+            --border-color: #e2e8f0;
+            --bg-light: #f8f9fa;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            margin: 0;
+            padding: 40px;
+            color: var(--text-primary);
+            background-color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+            border-bottom: 2px solid var(--text-primary);
+        }
+
+        .logo {
+            height: 60px;
+        }
+
+        .company-details {
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+
+        .quote-info {
+            text-align: right;
+        }
+
+        .quote-info h1 {
+            margin: 0;
+            font-size: 28px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .quote-info p {
+            margin: 8px 0 0 0;
+            font-size: 14px;
+        }
+
+        .client-section {
+            background-color: var(--bg-light);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .client-section h3 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+        }
+
+        .client-details p {
+            margin: 0;
+            line-height: 1.7;
+        }
+
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        .items-table th, .items-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .items-table thead th {
+            font-size: 11px;
+            text-transform: uppercase;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background-color: var(--bg-light);
+        }
+        
+        .items-table tbody tr:nth-child(even) {
+            background-color: var(--bg-light);
+        }
+
+        .items-table td {
+            vertical-align: top;
+        }
+        
+        .right { text-align: right; }
+        .nowrap { white-space: nowrap; }
+
+        /* --- NUOVA REGOLA CSS PER NASCONDERE LE COLONNE --- */
+        .col-simple-hide {
+            display: none;
+        }
+
+        .totals-section {
+            margin-top: 20px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .totals-table {
+            width: 320px;
+        }
+        
+        .totals-table td {
+             padding: 8px 12px;
+        }
+        
+        .totals-table .grand-total td {
+            font-size: 18px;
+            font-weight: 700;
+            padding-top: 10px;
+            border-top: 2px solid var(--text-primary);
+        }
+
+        .notes-section {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .notes-section h3 {
+             font-size: 14px;
+        }
+
+        .notes-content {
+            font-size: 11px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+
+        footer {
+            margin-top: 50px;
+            text-align: left;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        @media print {
+            .print-footer-block {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+            @page {
+                size: A4;
+                margin: 40px 40px 60px 40px; /* Margini della pagina sopra destra sotto sinistra */ 
+                @bottom-center {
+                    content: "Pagina " counter(page) " di " counter(pages);
+                    font-family: 'Inter', sans-serif;
+                    font-size: 10px;
+                    color: var(--text-secondary);
+                }
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <img src="{{ url_for('static', filename='logo.png') }}" class="logo">
+                <div class="company-details">
+                    <strong>CER LAB srl</strong><br>
+                    Via Guarneville, 1 – 04011 Aprilia (LT)<br>
+                    C.F./P.IVA 03122400595 – KRRH6B9<br>
+                    info@cerlab.it – Tel. 06 69405711
+                </div>
+            </div>
+            <div class="quote-info">
+                <h1>Preventivo</h1>
+                <p>
+                    <strong>N.</strong> {{ p.numero }}<br>
+                    <strong>Data:</strong> {{ p.data }}<br>
+                    {% set rev_num = (p.storico_pdf|length) + 1 %}
+                    <strong>REV-{{ rev_num }}</strong>
+                </p>
+            </div>
+        </header>
+
+        <section class="client-section">
+            <h3>Spett.le</h3>
+            <div class="client-details">
+                 <p>
+                    <strong>{{ p.cliente }}</strong><br>
+                    {% if p.rag_sociale %}{{ p.rag_sociale }}<br>{% endif %}
+                    {{ p.indirizzo }}, {{ p.cap }} {{ p.comune }} ({{ p.provincia }})<br>
+                    {% if p.p_iva %}P.IVA/C.F.: {{ p.p_iva }}<br>{% endif %}
+                    {% if p.referente %}<em>Referente: {{ p.referente }}</em>{% endif %}
+                </p>
+            </div>
+        </section>
+
+        <section class="items-section">
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th style="width: 70%;">Articolo</th> <th>UM</th>
+                        <th class="right nowrap">Q.tà</th>
+                        <th class="right nowrap col-simple-hide">Prezzo Unitario €</th>
+                        <th class="right nowrap col-simple-hide">Imponibile €</th>
+                        <th class="right nowrap col-simple-hide">IVA %</th>
+                        <th class="right nowrap col-simple-hide">IVA €</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in p.righe if r.articolo %}
+                    <tr>
+                        <td>{{ r.articolo }}</td>
+                        <td>{{ r.unt }}</td>
+                        <td class="right nowrap">{{ r.qt }}</td>
+                        <td class="right nowrap col-simple-hide">{{ r.tot_prezzo_unitario }}</td>
+                        <td class="right nowrap col-simple-hide">{{ r.tot_prezzo }}</td>
+                        <td class="right nowrap col-simple-hide">{{ r.iva_pct.replace(' %', '') }}</td>
+                        <td class="right nowrap col-simple-hide">{{ r.tot_iva_riga }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+       <section class="totals-section">
+            <table class="totals-table">
+                <tbody>
+                    <tr>
+                        <td>Imponibile</td>
+                        <td class="right">{{ p.tot_imponibile_cliente }} €</td>
+                    </tr>
+                    
+                    {% for aliquota, iva_valore in p.tot_iva_dettaglio.items() %}
+                    <tr>
+                        <td>IVA ({{ aliquota }}%)</td>
+                        <td class="right">{{ iva_valore }} €</td>
+                    </tr>
+                    {% endfor %}
+                    
+                    <tr class="grand-total">
+                        <td><strong>TOTALE</strong></td>
+                        <td class="right"><strong>{{ p.totale }} €</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    <div class="print-footer-block">    
+        <section class="notes-section">
+            <h3>Note e Condizioni</h3>
+            <div class="notes-content">
+                <strong>IMPORTANTE</strong><br>
+                - Il presente preventivo è valido 7 giorni lavorativi e si intende parte del "Contratto di vendita" allegato.<br>
+                - Le metrature e le quantità sono fornite dal cliente o dal suo tecnico di riferimento.<br>
+                - Gli sfridi si intendono come aggiunta alle metrature fornite dal cliente per le lavorazioni e la spedizione.<br><br>
+                <strong>TEMPISTICHE</strong><br>
+                Al momento della ricezione dell’acconto, CER LAB s.r.l. contatterà i fornitori per ordinare i prodotti scelti. 
+                La corretta ricezione dell’ordine è confermata entro due giorni lavorativi dai fornitori e solo da quel momento si conosceranno le stime dei tempi di produzione e consegna.
+            </div>
+        </section>
+
+        <footer>
+            <p>Data e firma per accettazione:</p>
+            <br><br>
+            <p>_______________________</p>
+        </footer>
+    </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="results-container">
+    <div class="results-card">
+        <div class="results-header">
+            <h3>Risultati per: "{{ search_term }}"</h3>
+            <a href="{{ url_for('cerca_cliente', action=action) }}" class="btn btn-outline">
+                <i class="fas fa-search"></i> Esegui Nuova Ricerca
+            </a>
+        </div>
+
+        <div class="results-body">
+            {% if clients %}
+                <ul class="clients-list">
+                    {% for client in clients %}
+                    <li class="client-item">
+                        <div class="client-info">
+                            <strong>{{ client.cliente }}</strong>
+                            {% if client.rag_sociale %}<small>{{ client.rag_sociale }}</small>{% endif %}
+                        </div>
+                        <div class="client-actions">
+                            {% if action == 'new_quote' %}
+                                <a href="{{ url_for('nuovo_preventivo', client_id=client.id_cliente) }}" class="btn primary">
+                                    <i class="fas fa-plus"></i> Seleziona e Crea Preventivo
+                                </a>
+                            {% else %}
+                                <a href="{{ url_for('dettaglio_cliente', client_id=client.id_cliente) }}" class="btn">
+                                    <i class="fas fa-folder-open"></i> Apri Archivio
+                                </a>
+                            {% endif %}
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <div class="empty-state">
+                    <i class="fas fa-user-times"></i>
+                    <h4>Nessun cliente trovato</h4>
+                    <p>Non ci sono clienti che corrispondono alla tua ricerca. Puoi creare una nuova anagrafica.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="results-footer">
+            <div class="divider"><span>Oppure</span></div>
+            <a href="{{ url_for('crea_cliente') }}" class="btn">
+                <i class="fas fa-user-plus"></i> Crea Nuovo Cliente
+            </a>
+        </div>
+    </div>
+</div>
+
+<style>
+  .results-container { max-width: 800px; margin: 24px auto; padding: 24px; }
+  .results-card { background-color: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.07); overflow: hidden; }
+  .results-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background-color: #f8f9fa; border-bottom: 1px solid #e2e8f0; }
+  .results-header h3 { margin: 0; font-size: 18px; }
+  .results-body { padding: 8px 0; }
+  .clients-list { list-style: none; margin: 0; padding: 0; }
+  .client-item { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid #f1f5f9; }
+  .client-item:last-child { border-bottom: none; }
+  .client-info strong { display: block; font-size: 16px; }
+  .client-info small { color: #64748b; }
+  .empty-state { text-align: center; padding: 40px; }
+  .empty-state i { font-size: 32px; color: #cbd5e1; margin-bottom: 16px; }
+  .results-footer { text-align: center; padding: 24px; border-top: 1px solid #e2e8f0; }
+  .divider { display: flex; align-items: center; text-align: center; color: #94a3b8; margin-bottom: 16px; font-size: 13px; text-transform: uppercase; }
+  .divider::before, .divider::after { content: ''; flex: 1; border-bottom: 1px solid #e2e8f0; }
+  .divider span { padding: 0 16px; }
+</style>
+{% endblock %}

@@ -1,0 +1,574 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-users"></i> Dashboard Preventivi per Cliente</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+
+    {% include '_form_light_search.html' %}
+    <div class="filter-bar">
+    <div class="multi-switch" id="status-filter-switch">
+        <div class="switch-thumb"></div>
+        <div class="switch-label active" data-value="Tutti">Tutti</div>
+        <div class="switch-label" data-value="Bozza">Bozze</div>
+        <div class="switch-label" data-value="Inviato">Inviati</div>
+        <div class="switch-label" data-value="Confermato">Confermati</div>
+        <div class="switch-label" data-value="In Lavorazione">In Lavorazione</div>
+    </div>
+    <input type="hidden" id="active-status-filter" value="Tutti">
+</div>
+
+    {% if not clienti_preventivi %}
+        <div class="card">
+            <div class="empty-state">
+                <i class="fas fa-file-alt"></i>
+                <h4>Nessun preventivo trovato</h4>
+                <p>Non ci sono preventivi attivi associati ai clienti.</p>
+            </div>
+        </div>
+    {% endif %}
+
+    {% for nome_cliente, data_cliente in clienti_preventivi.items() %}
+    <div class="card">
+        <div class="card-header">
+            <div class="client-info">
+                <h3>Cliente: <strong>{{ nome_cliente }}</strong></h3>
+                <span class="client-total">Totale Attivo: <strong>{{ money_ui(data_cliente.totale_attivo) }}</strong></span>
+            </div>
+            <div class="header-actions-wrapper">
+                {% if session.user_role in ['amministratore', 'ceo'] %}
+                <a href="{{ url_for('analisi_cliente', client_id=data_cliente.id_cliente) }}" class="btn btn-outline" title="Analisi Cliente">
+                    <i class="fas fa-chart-pie"></i> Analisi Cliente
+                </a>
+                {% endif %}
+                <a href="{{ url_for('dettaglio_cliente', client_id=data_cliente.id_cliente) }}" class="btn btn-outline" title="Apri cartella documenti cliente">
+                  <i class="fas fa-folder"></i> Dettaglio Documenti
+                </a>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="styled-table dashboard-table">
+                <thead>
+                    <tr>
+                        <th style="width: 1%;"></th> <th>Stato</th>
+                        <th class="right">Totale</th>
+                        <th>Ordini</th>
+                        <th>Consegna</th>
+                        <th>Saldo</th>
+                        <th>Fattura</th>
+                        <th class="actions-column">Azioni</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in data_cliente.preventivi %}
+                    <tr class="main-row" data-target-row="details-{{ p.numero }}">
+                        <td class="center expand-cell">
+                            <button type="button" class="btn icon-btn expand-btn"><i class="fas fa-chevron-down"></i></button>
+                        </td>
+                        
+                        <td>
+                            <span class="status-badge status-principale status-{{ p.stato | lower | replace(' ', '-') }}">{{ p.stato }}</span>
+                        </td>
+                        
+                        <td class="right"><strong>{{ money_ui(p.totale) }}</strong></td>
+                        
+                        <td>
+                            {# Controlla prima se il preventivo è in uno stato in cui gli ordini sono rilevanti #}
+                            {% if p.stato in ['Confermato', 'In Lavorazione', 'Chiuso'] %}
+                            
+                                {% if p.articoli_da_ordinare_count > 0 %}
+                                    
+                                    {# CASO 1: Ci sono articoli da ordinare #}
+                                    {% if p.articoli_da_ordinare_count == p.articoli_da_ordinare_totale and p.articoli_da_ordinare_totale > 0 %}
+                                        {# Se NESSUN articolo è stato ordinato #}
+                                        <span class="status-badge status-annullato">Da Ordinare</span>
+                                    {% else %}
+                                        {# Se ALCUNI articoli sono stati ordinati (ma non tutti) #}
+                                        <span class="status-badge status-parziale">Parziale</span>
+                                    {% endif %}
+
+                                {% elif p.articoli_in_attesa_conferma > 0 %}
+                                    {# CASO 2: Tutti ordinati (count == 0), ma alcuni ordini non confermati #}
+                                    <span class="status-badge status-in-lavorazione">In Attesa</span>
+                                    
+                                {% elif p.articoli_da_ordinare_totale > 0 %}
+                                    {# CASO 3: Tutti ordinati (count == 0), tutti confermati #}
+                                    <span class="status-badge status-confermato">Ordinato</span>
+                                    
+                                {% else %}
+                                    {# CASO 4: Confermato ma 0 articoli da ordinare (es. solo servizi) #}
+                                    <span class="status-badge status-nd">N/D</span>
+                                {% endif %}
+                                {% else %}
+                                {# Altrimenti (Bozza, Inviato, Annullato), mostra N/D #}
+                                <span class="status-badge status-nd">N/D</span>
+                            {% endif %}
+                        </td>
+                        
+                        <td>
+                            {% if p.articoli_da_consegnare_totale == 0 %}
+                                {# CASO 1: Nessun articolo confermato (N/D) #}
+                                <span class="status-badge status-nd">N/D</span>
+                                
+                            {% elif p.articoli_da_consegnare_count == 0 %}
+                                {# CASO 2: Tutti gli articoli CONFERMATI sono stati consegnati #}
+                                
+                                {% if p.articoli_da_ordinare_count > 0 or p.articoli_in_attesa_conferma > 0 %}
+                                    {# MA... ci sono altri articoli da ordinare/confermare. Quindi è Parziale. #}
+                                    <span class="status-badge status-parziale">Parziale</span>
+                                {% else %}
+                                    {# E non ci sono altri articoli in sospeso. Quindi è Completato/Consegnato. #}
+                                    <span class="status-badge status-completato">Consegnato</span>
+                                {% endif %}
+                                
+                            {% elif p.articoli_da_consegnare_count < p.articoli_da_consegnare_totale %}
+                                {# CASO 3: Alcuni (ma non tutti) articoli confermati sono stati consegnati #}
+                                <span class="status-badge status-parziale">Parziale</span>
+                                
+                            {% else %}
+                                {# CASO 4: Nessun articolo confermato è stato consegnato #}
+                                <span class="status-badge status-annullato">Da Consegnare</span>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% set stato_saldo = p.stato_pagamento_globale | default('N/D') %}
+                            <span class="status-badge status-{{ stato_saldo | lower | replace(' ', '-') | replace('/', '') }}">{{ stato_saldo }}</span>
+                        </td>
+
+                        <td>
+                            {% if p.stato in ['Bozza', 'Inviato'] %}
+                                <span class="status-badge status-nd">N/D</span>
+                            {% elif p.no_iva %}
+                                <span class="status-badge status-non-disponibile">IVA ESENTE</span>
+                            {% elif p.stato_fattura == 'Fatturato' %}
+                                <span class="status-badge status-fattura-emessa">Emessa</span>
+                            {% elif p.stato_fattura == 'Fatturato Parziale' %}
+                                <span class="status-badge status-in-attesa-di-fattura">In Attesa</span>
+                            {% else %}
+                                <span class="status-badge status-in-attesa-di-fattura">In Attesa</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="row-actions">
+                            <a href="{{ url_for('editor_preventivo', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Preventivo"><i class="fas fa-edit"></i></a>
+                            <a href="{{ url_for('conferma_ordine', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Ordini"><i class="fas fa-box-open"></i></a>
+                            <a href="{{ url_for('gestione_consegna', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Consegna"><i class="fas fa-truck"></i></a>
+                            <a href="{{ url_for('gestione_pagamenti', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Saldo"><i class="fas fa-coins"></i></a>
+                            <a href="{{ url_for('editor_fattura', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Fatture"><i class="fas fa-file-invoice"></i></a>
+                        </td>
+                    </tr>
+                    </tr>
+                    </tr>
+                    
+                    <tr class="details-row" id="details-{{ p.numero }}">
+                        <td colspan="8">
+                            <div class="kpi-riepilogo-grid">
+                                <div class="kpi-group">
+                                    <div class="kpi-title">Preventivo</div>
+                                    <div class="kpi-item">
+                                        <span>Numero:</span>
+                                        <strong>{{ p.numero }}</strong>
+                                    </div>
+                                    <div class="kpi-item">
+                                        <span>Data:</span>
+                                        <strong>{{ p.data }}</strong>
+                                    </div>
+                                    {% if p.pdf_attivo %}
+                                    <div class="kpi-item">
+                                        <a href="{{ url_for('pdf_inline', filename=p.pdf_attivo) }}" target="_blank" class="btn icon-btn" title="Visualizza PDF Attivo">
+                                            <i class="fas fa-file-pdf"></i> PDF Attivo
+                                        </a>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                <div class="kpi-group">
+                                    <div class="kpi-title">Pagamenti</div>
+                                    <div class="kpi-item success">
+                                        <span>Saldato:</span>
+                                        <strong>{% if p.stato in ['Confermato', 'In Lavorazione', 'Chiuso'] %} {{ money_ui(p.totale_pagato) }}
+                                            {% else %}N/D{% endif %}</strong>
+                                    </div>
+                                    <div class="kpi-item danger">
+                                        <span>Da Saldare:</span>
+                                        <strong>
+                                            {% if p.stato in ['Confermato', 'In Lavorazione', 'Chiuso'] %}
+                                                {{ money_ui(p.totale_da_saldare) }}
+                                            {% else %}
+                                                N/D
+                                            {% endif %}
+                                        </strong>
+                                        </div>
+                                </div>
+                                <div class="kpi-group">
+                                    <div class="kpi-title">Ordini</div>
+                                    <div class="kpi-item">
+                                        <span>Da Ordinare:</span>
+                                        <strong>
+                                            {% if p.articoli_da_ordinare_totale > 0 %}
+                                                {{ p.articoli_da_ordinare_count }} / {{ p.articoli_da_ordinare_totale }}
+                                            {% else %}
+                                                N/D
+                                            {% endif %}
+                                        </strong>
+                                        </div>
+                                    <div class="kpi-item">
+                                        <span>In Attesa Conf Ord:</span>
+                                        <strong>
+                                            {% if p.articoli_da_ordinare_totale > 0 %}
+                                                {{ p.articoli_in_attesa_conferma }} 
+                                            {% else %}
+                                                N/D
+                                            {% endif %}
+                                        </strong>
+                                        </div>
+                                </div>
+                                <div class="kpi-group">
+                                    <div class="kpi-title">Consegne</div>
+                                    <div class="kpi-item">
+                                        <span>Da Consegnare:</span>
+                                        <strong>
+                                            {% if p.articoli_da_consegnare_totale > 0 %}
+                                                {{ p.articoli_da_consegnare_count }} / {{ p.articoli_da_consegnare_totale }}
+                                            {% else %}
+                                                N/D
+                                            {% endif %}
+                                        </strong>
+                                        </div>
+                                </div>
+
+                                <div class="kpi-group">
+                                    <div class="kpi-title">Analisi</div>
+                                    {% if session.user_role in ['amministratore', 'ceo'] %}
+                                    <div class="kpi-item">
+                                        <a href="{{ url_for('analisi_preventivo', quote_id=p.numero) }}" class="btn icon-btn" title="Analisi Preventivo">
+                                            <i class="fas fa-chart-pie"></i> Analisi
+                                        </a>
+                                    </div>
+                                    {% else %}
+                                    <div class="kpi-item">
+                                        <span>N/D</span>
+                                    </div>
+                                    {% endif %}
+                                </div>
+
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+    </div>
+
+<style>
+    /* In dashboard_clienti.html, aggiungi questo dentro <style> */
+
+/* --- STILI PER FILTRO STATO --- */
+.filter-bar {
+    margin-bottom: 24px;
+    display: flex;
+    justify-content: center;
+}
+.multi-switch {
+    position: relative;
+    display: flex;
+    background-color: #e9ecef; /* Sfondo grigio */
+    border-radius: 8px;
+    padding: 3px;
+    height: 36px; /* Altezza fissa */
+    width: 450px; /* 5 stati * 90px */
+    cursor: pointer;
+    user-select: none;
+}
+.switch-thumb {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    width: 20%; /* 1/5 della larghezza */
+    background-color: #ffffff; /* Cursore bianco */
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    transition: transform 0.25s ease-out; /* Animazione fluida */
+    z-index: 1;
+}
+.switch-label {
+    flex: 1; /* Occupa 1/5 dello spazio */
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #495057;
+    line-height: 30px; /* Allineamento verticale */
+    position: relative;
+    z-index: 2; /* Sta sopra il cursore */
+}
+.switch-label.active {
+    color: #000;
+}
+@media (max-width: 768px) {
+    .multi-switch {
+        width: 100%;
+    }
+}
+/* --- FINE STILI FILTRO --- */
+/* Stili presi da altre pagine per coerenza */
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; flex-wrap: wrap; gap: 16px; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.table-wrap { overflow-x: auto; }
+.styled-table { width: 100%; border-collapse: collapse; }
+.styled-table th, .styled-table td { padding: 14px 18px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); white-space: nowrap; vertical-align: middle; }
+.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table tbody tr:last-child td { border-bottom: none; }
+.actions-column { text-align: right; width: 1%; }
+.row-actions { text-align: right; display: flex; gap: 8px; }
+.empty-state { text-align: center; padding: 40px; color: var(--muted); }
+.empty-state i { font-size: 32px; color: #ced4da; margin-bottom: 12px; }
+.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; }
+.empty-state p { margin: 0; font-size: 14px; }
+.muted { color: #64748b; }
+.right { text-align: right; }
+.center { text-align: center; }
+
+/* Intestazione Card Cliente */
+.client-info { display: flex; flex-direction: column; gap: 4px; }
+.client-info h3 { margin: 0; }
+.client-total {
+    font-size: 14px;
+    font-weight: 600;
+    color: #198754; /* Verde */
+}
+.header-actions-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Stili Badge di Stato (Inclusi i nuovi per Fattura) */
+.status-badge { display: inline-block; padding: 4px 10px; font-size: 11px; font-weight: 600; border-radius: 20px; color: #fff; min-width: 80px; text-align: center; text-transform: capitalize; }
+.status-badge.status-principale {
+  border-radius: 6px; /* Questo lo rende più squadrato */
+  font-weight: 700;   /* Già che ci siamo, lo rendiamo più evidente */
+  font-size: 12px;
+}
+.status-bozza { background-color: #6c757d; }
+.status-inviato { background-color: #0d6efd; }
+.status-confermato, .status-chiuso, .status-completato, .status-saldato { background-color: #198754; }
+.status-in-lavorazione, .status-parziale { background-color: #ffc107; color: #000; }
+.status-annullato, .status-da-saldare { background-color: #dc3545; }
+.status-nd { background-color: #e9ecef; color: #495057; }
+.status-in-attesa-di-fattura { background-color: #ffc107; color: #000; }
+.status-fatturato-parziale { background-color: #0d6efd; }
+.status-fattura-emessa { background-color: #198754; }
+.status-non-disponibile { 
+    background-color: #3f4348; 
+}
+
+/* Stile per pulsante icona */
+.btn.icon-btn {
+    padding: 8px; line-height: 1; border-radius: 8px; background-color: var(--bg-light, #f8f9fa);
+    color: var(--muted, #6c757d); border: 1px solid var(--border-color, #e2e8f0);
+}
+.btn.icon-btn:hover { background-color: var(--bg-hover, #f1f5f9); color: var(--text-primary); }
+.btn.icon-btn.primary {
+    background-color: #e7f0fe; color: #0d6efd; border-color: transparent;
+}
+.btn.icon-btn.primary:hover { background-color: #0d6efd; color: #fff; }
+
+/* --- Stili per Righe Espandibili --- */
+.main-row {
+    cursor: pointer;
+    transition: background-color 0.1s;
+}
+.main-row:hover {
+    background-color: #f8f9fa; /* Leggero hover */
+}
+.expand-cell {
+    text-align: center;
+}
+.expand-btn {
+    transition: transform 0.2s ease-in-out;
+}
+.main-row.is-open .expand-btn {
+    transform: rotate(180deg);
+}
+
+.details-row {
+    display: none; /* Nascosta di default */
+    background-color: #fdfdfe;
+}
+/* Stile per non avere il doppio bordo quando è aperta */
+.main-row.is-open td {
+    border-bottom: none;
+}
+.details-row.is-open {
+    display: table-row; /* Mostra la riga */
+}
+.details-row td {
+    padding: 16px 24px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+/* Griglia per il Riepilogo */
+.kpi-riepilogo-grid {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+}
+.kpi-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 170px;
+}
+.kpi-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #0d6efd;
+    text-transform: uppercase;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+}
+.kpi-item {
+    font-size: 13px;
+}
+.kpi-item span {
+    color: var(--muted);
+    margin-right: 4px;
+}
+.kpi-item strong {
+    font-weight: 600;
+    color: #1a202c;
+}
+.kpi-item a {
+    font-weight: 600;
+    text-decoration: none;
+}
+.kpi-item.success strong { color: #198754; }
+.kpi-item.danger strong { color: #dc3545; }
+/* In dashboard_clienti.html, aggiungi questo dentro <style> */
+
+.kpi-item a.btn.icon-btn {
+    padding: 6px 10px; /* Un po' più piccolo dei bottoni normali */
+    font-size: 12px;
+    font-weight: 600;
+}
+.kpi-item a.btn.icon-btn i {
+    font-size: 11px;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const contentContainer = document.querySelector('.editor-container');
+    const searchInput = document.getElementById('live-search-input');
+    const clientCards = contentContainer.querySelectorAll('.card:has(.card-header)');
+
+    // Riferimenti per il filtro stato
+    const statusSwitch = document.getElementById('status-filter-switch');
+    const statusThumb = statusSwitch.querySelector('.switch-thumb');
+    const statusLabels = statusSwitch.querySelectorAll('.switch-label');
+    const activeStatusInput = document.getElementById('active-status-filter');
+
+    let currentSearchTerm = '';
+    let currentStatusFilter = 'Tutti';
+
+    // Funzione di filtraggio unificata (CORRETTA)
+    function applyFilters() {
+        currentSearchTerm = searchInput.value.toLowerCase().trim();
+        currentStatusFilter = activeStatusInput.value;
+
+        clientCards.forEach(card => {
+            // 1. Controlla se la ricerca corrisponde all'intestazione della card (Nome Cliente)
+            const cardHeaderText = card.querySelector('.card-header')?.textContent.toLowerCase() || '';
+            const matchesClient = cardHeaderText.includes(currentSearchTerm);
+            
+            let clientHasVisibleRows = false;
+            const quoteRows = card.querySelectorAll('tr.main-row');
+
+            quoteRows.forEach(row => {
+                const detailsRow = document.getElementById(row.dataset.targetRow);
+                // 2. Controlla se la ricerca corrisponde ai dati della riga (inclusi i dettagli)
+                const searchableRowText = (row.textContent.toLowerCase() || '') + ' ' + (detailsRow?.textContent.toLowerCase() || '');
+                const matchesQuote = searchableRowText.includes(currentSearchTerm);
+                
+                // 3. Controlla lo stato
+                const rowStatusBadge = row.querySelector('.status-badge.status-principale');
+                const rowStatus = rowStatusBadge ? rowStatusBadge.textContent.trim() : '';
+                const matchesStatus = (rowStatus.toLowerCase() === currentStatusFilter.toLowerCase() || currentStatusFilter === "Tutti");
+
+                // La riga è visibile SE:
+                // Lo stato corrisponde E (la ricerca è vuota OPPURE corrisponde al cliente OPPURE corrisponde alla riga)
+                if (matchesStatus && (currentSearchTerm === "" || matchesClient || matchesQuote)) {
+                    row.style.display = 'table-row';
+                    clientHasVisibleRows = true;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+
+            // 4. Mostra/nascondi l'intera card del cliente
+            if (clientHasVisibleRows) {
+                card.style.display = '';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+
+    // --- 1. Logica di Ricerca ---
+    searchInput.addEventListener('input', () => {
+        applyFilters(); // Chiama la funzione unificata
+    });
+
+    // --- 2. Logica per Espandere la Riga (invariata) ---
+    contentContainer.addEventListener('click', (e) => {
+        // Impedisce all'accordion di chiudersi se si clicca sui pulsanti di azione
+        if (e.target.closest('.row-actions') || e.target.closest('.kpi-item a')) {
+            return; 
+        }
+        
+        const mainRow = e.target.closest('.main-row');
+        if (!mainRow) { return; }
+        
+        const targetId = mainRow.dataset.targetRow;
+        const detailsRow = document.getElementById(targetId);
+        
+        if (detailsRow) {
+            mainRow.classList.toggle('is-open');
+            detailsRow.classList.toggle('is-open');
+        }
+    });
+
+    // --- 3. Logica per il Filtro Stato ---
+    statusLabels.forEach((label, index) => {
+        label.addEventListener('click', () => {
+            // Aggiorna UI dello switch
+            statusLabels.forEach(l => l.classList.remove('active'));
+            label.classList.add('active');
+            statusThumb.style.transform = `translateX(${index * 100}%)`;
+            
+            // Salva il valore e applica il filtro
+            activeStatusInput.value = label.dataset.value;
+            applyFilters();
+        });
+    });
+
+});
+</script>
+{% block footer_nav %}
+<div class="dashboard-footer-nav">
+    {{ dashboard_navbar('clienti') }}
+</div>
+{% endblock %}
+
+{% endblock %}

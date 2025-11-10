@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-truck"></i> Dashboard Consegne</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+    {% include '_form_light_search.html' %}
+    <div class="card">
+        <div class="card-header">
+            <h3>Elenco Preventivi con Articoli da Consegnare</h3>
+        </div>
+        <div class="table-wrap">
+            <table class="styled-table">
+                <thead>
+                    <tr>
+                        <th>Numero Preventivo</th>
+                        <th>Data</th>
+                        <th>Cliente</th>
+                        <th>Stato Consegna</th>
+                        <th class="actions-column"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in preventivi %}
+                    <tr>
+                        <td><strong>{{ p.numero }}</strong></td>
+                        <td>{{ p.data }}</td>
+                        <td>{{ p.cliente }}</td>
+                        <td>
+                            <span class="muted">
+                                <strong>{{ p.articoli_da_consegnare_count }}</strong> articoli in attesa
+                            </span>
+                        </td>
+                        <td class="row-actions">
+                            <a href="{{ url_for('gestione_consegna', quote_id=p.numero) }}" class="btn primary">
+                                <i class="fas fa-dolly"></i> Gestisci Consegna
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5">
+                            <div class="empty-state">
+                                <i class="fas fa-check-circle"></i>
+                                <h4>Nessuna consegna in attesa</h4>
+                                <p>Ottimo lavoro! Tutti gli articoli sono stati consegnati.</p>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Stili presi da altre pagine per coerenza */
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.table-wrap { overflow-x: auto; }
+.styled-table { width: 100%; border-collapse: collapse; }
+.styled-table th, .styled-table td { padding: 16px 24px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); }
+.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table tbody tr:last-child td { border-bottom: none; }
+.actions-column { text-align: right; }
+.row-actions { text-align: right; }
+.empty-state { text-align: center; padding: 40px; color: var(--muted); }
+.empty-state i { font-size: 32px; color: #198754; margin-bottom: 12px; }
+.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; color: var(--text-primary); }
+.empty-state p { margin: 0; font-size: 14px; }
+.btn.primary { display: inline-flex; align-items: center; gap: 8px; }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('live-search-input');
+    const contentContainer = document.querySelector('.editor-container');
+
+    // SELEZIONE CORRETTA: Prendi la tabella e poi le righe del body
+    const table = contentContainer.querySelector('.styled-table');
+    if (!table) return; // Esce se non c'è la tabella
+
+    const tableBody = table.querySelector('tbody');
+    if (!tableBody) return; // Esce se non c'è il body
+
+    // Salva la riga "empty state" se esiste (quella con colspan)
+    const emptyStateRow = tableBody.querySelector('tr td[colspan]')?.closest('tr');
+
+    // Seleziona TUTTE le righe del body per il filtraggio
+    const allRows = Array.from(tableBody.querySelectorAll('tr'));
+
+    searchInput.addEventListener('input', () => {
+        const searchTerm = searchInput.value.toLowerCase().trim();
+
+        if (searchTerm.length > 0 && searchTerm.length < 3) {
+            return;
+        }
+        
+        let visibleDataRows = 0;
+
+        // Itera su TUTTE le righe
+        allRows.forEach(row => {
+            // Salta la riga "empty state" in questo ciclo
+            if (row === emptyStateRow) {
+                return;
+            }
+
+            const rowText = row.textContent.toLowerCase();
+
+            if (rowText.includes(searchTerm) || searchTerm === "") {
+                row.style.display = 'table-row'; // Mostra la riga
+                visibleDataRows++;
+            } else {
+                row.style.display = 'none'; // Nascondi la riga
+            }
+        });
+
+        // Gestisci la visibilità della riga "empty state"
+        if (emptyStateRow) {
+            if (visibleDataRows === 0 && searchTerm !== "") {
+                emptyStateRow.style.display = 'table-row';
+            } else if (visibleDataRows > 0) {
+                 emptyStateRow.style.display = 'none';
+            } else if (searchTerm === "") {
+                // Se la ricerca è vuota, ma c'erano 0 righe dati (preventivi) in partenza
+                // mostra l'empty state (gestisce il caso di tabella vuota di default)
+                if (allRows.length === 1 && allRows[0] === emptyStateRow) {
+                     emptyStateRow.style.display = 'table-row';
+                } else {
+                     emptyStateRow.style.display = 'none';
+                }
+            }
+        }
+    });
+});
+</script>
+{% block footer_nav %}
+<div class="dashboard-footer-nav">
+    {{ dashboard_navbar('consegne') }}
+</div>
+{% endblock %}
+
+{% endblock %}

@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+<style>
+    :root{
+      --ink:#111; --muted:#666; --line:#ddd; --bg:#fafafa; --lock:#f2f2f2;
+      --primary-color: #0d6efd;
+      --line: #e2e8f0;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;
+      color:var(--ink); margin:0; background:var(--bg);
+      font-size:14px;
+      /* Spazio per i footer fissi */
+      padding-bottom: 90px; 
+    }
+    main{ max-width:1400px; margin: 24px auto; padding: 0 24px; }
+    
+    /* --- STILI HEADER (Unificati e Corretti) --- */
+    .site-header {
+        background-color: #ffffff;
+        padding: 12px 32px;
+        border-bottom: 1px solid var(--line);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+    }
+    .header-container {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+    }
+    .header-main-content {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex: 1; /* Occupa lo spazio a sinistra */
+        min-width: 0; /* Permette di stringersi */
+    }
+    .brand-link {
+        display: flex;
+        align-items: center;
+        text-decoration: none;
+        flex-shrink: 0; /* Non stringere il logo */
+    }
+    .brand-link .logo {
+        height: 45px;
+        transition: transform 0.2s ease;
+    }
+    .back-link {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+    }
+    .back-link i {
+        font-size: 26px; /* Leggermente più piccola della casa per estetica */
+        color: #333;
+        transition: transform 0.2s ease;
+    }
+    .brand-link:hover .logo,
+    .back-link:hover i {
+        transform: scale(1.05);
+    }
+    .page-title-header {
+        display: flex;
+        align-items: center;
+        flex: 1;
+        min-width: 0;
+    }
+    .page-title-header h1 {
+        font-size: 22px;
+        margin: 0;
+        color: #1a202c;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        /* Verrà modificato dai media query */
+        white-space: nowrap; 
+        overflow: hidden;
+        text-overflow: ellipsis; 
+    }
+    .page-title-header .quote-number {
+        color: var(--muted);
+        font-weight: 500;
+    }
+    .page-title-header .header-client-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 16px;
+        color: #4a5568;
+        font-weight: 400;
+        border-left: 1px solid var(--line);
+        padding-left: 12px;
+        margin-left: 12px;
+        flex-shrink: 0; /* Non stringere */
+    }
+    .page-title-header .status-badge {
+        margin-left: 12px;
+        transform: scale(0.9);
+        flex-shrink: 0;
+    }
+    .user-menu {
+        flex-shrink: 0; /* Non stringere il menu utente */
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .user-info {
+        text-align: right;
+        font-size: 13px;
+    }
+    
+    /* Media Query per andare a capo (Corretto) */
+    @media (max-width: 900px) {
+        .header-container {
+            flex-direction: column; 
+            align-items: stretch; 
+            gap: 12px;
+        }
+        .header-main-content {
+            justify-content: space-between;
+        }
+        .user-menu {
+            justify-content: flex-end;
+            border-top: 1px solid var(--line);
+            padding-top: 12px;
+        }
+        .page-title-header h1 {
+            font-size: 20px;
+            white-space: normal; /* Permette al titolo di andare a capo */
+            flex-wrap: wrap; /* Permette ai badge/pulsanti di andare a capo */
+            overflow: visible;
+        }
+    }
+    @media (max-width: 450px) {
+        .header-main-content {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+    }
+    /* --- FINE STILI HEADER --- */
+    
+    /* --- STILI GENERICI (Bottoni, Card, Tabelle) --- */
+    .btn{
+      display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:10px;
+      border:1px solid var(--line); background:#fff; text-decoration:none; color:inherit;
+      cursor:pointer; height:40px; font-weight: 500;
+    }
+    .btn.primary{ background:#111; color:#fff; border-color:#111; }
+    .btn:hover { background-color: #f8f9fa; }
+    .btn.primary:hover { background-color: #333; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-outline { background: transparent; border-color: #cbd5e1; }
+    .btn-outline:hover { background: #f8f9fa; }
+    
+    .card{ border:1px solid var(--line); border-radius:12px; padding:16px; margin:12px 0; background:#fff; }
+    input,select,textarea{
+      padding:10px 12px; border:1px solid var(--line); border-radius:8px; width:100%;
+      height:40px; line-height:1.2; font-size:14px;
+    }
+    select{ appearance:auto; }
+    textarea{ height:auto; min-height:80px; }
+    label{ font-size:12px; color:var(--muted); display:block; margin:6px 0; }
+    .table-wrap { overflow-x: auto; }
+    .muted{ color:var(--muted); }
+
+    /* --- FOOTER FISSO WORKFLOW (Editor, Ordini, ecc.) --- */
+    .sticky-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background-color: #fff;
+        border-top: 1px solid #e2e8f0;
+        box-shadow: 0 -4px 15px rgba(0,0,0,0.08);
+        padding: 12px 32px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        z-index: 99;
+        min-height: 85px; 
+    }
+    .action-buttons-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 10px;
+      width: 100%;
+      max-width: 950px;
+    }
+    .action-buttons-grid .btn {
+      width: 100%;
+      justify-content: center;
+      font-size: 13px;
+      padding: 10px 8px;
+    }
+    .action-buttons-grid .btn.disabled {
+        background-color: #6c757d;
+        color: #fff;
+        opacity: 1;
+        pointer-events: none;
+        border-color: #6c757d;
+    }
+    @media (max-width: 1200px) {
+        .sticky-footer .footer-status-controls { display: none; }
+    }
+    @media (max-width: 992px) {
+        .action-buttons-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+    @media (max-width: 768px) {
+        .sticky-footer { 
+            flex-direction: column; 
+            gap: 12px; 
+            padding: 12px; 
+            height: auto; 
+            align-items: stretch; 
+        }
+        .sticky-footer .totals { display: none; }
+    }
+    @media (max-width: 500px) {
+        .action-buttons-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+
+    /* --- FOOTER FISSO DASHBOARD (Home, Clienti, ecc.) --- */
+    .dashboard-footer-nav {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background-color: #ffffff;
+        border-top: 1px solid #e2e8f0;
+        box-shadow: 0 -4px 15px rgba(0,0,0,0.08);
+        padding: 12px 32px;
+        display: flex;
+        justify-content: center; 
+        align-items: center;
+        z-index: 99;
+        min-height: 85px; 
+    }
+    .dashboard-nav-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 10px;
+        width: 100%;
+        max-width: 1100px;
+    }
+    .dashboard-nav-grid .btn {
+        width: 100%;
+        justify-content: center;
+        font-size: 13px;
+        padding: 10px 8px;
+    }
+    .dashboard-nav-grid .btn.btn-hub {
+        background-color: #e7f0fe;
+        color: #0d6efd;
+        border-color: #0d6efd;
+        font-weight: 600;
+    }
+    .dashboard-nav-grid .btn.btn-hub:hover {
+        background-color: #0d6efd;
+        color: #fff;
+    }
+    .dashboard-nav-grid .btn.disabled {
+        background-color: #6c757d;
+        color: #fff;
+        opacity: 1;
+        pointer-events: none;
+        border-color: #6c757d;
+    }
+    .dashboard-nav-grid .btn.btn-hub.disabled {
+        background-color: #0b5ed7; /* Blu scuro */
+        color: #fff;
+        border-color: #0a58ca;
+    }
+    @media (max-width: 992px) {
+        .dashboard-nav-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+    @media (max-width: 768px) {
+        .dashboard-footer-nav {
+            padding: 12px;
+            height: auto; 
+        }
+        .dashboard-nav-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+
+    /* --- STILI MODALI GLOBALI --- */
+    .modal-overlay { 
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+        background: rgba(0,0,0,0.5); display: flex; 
+        justify-content: center; align-items: center; z-index: 1000; 
+        animation: fadeIn 0.2s ease-out;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .modal-content { 
+        background: white; padding: 24px; border-radius: 12px; 
+        width: 90%; max-width: 450px; 
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3); 
+    }
+    .modal-content h3 { margin-top: 0; }
+    .modal-content p { line-height: 1.6; }
+    .modal-actions { 
+        margin-top: 16px; display: flex; 
+        justify-content: flex-end; gap: 8px; 
+    }
+    #unlock-password-input { margin-top: 4px; }
+  </style>
+</head>
+
+{% macro workflow_navbar(p, active_page) %}
+<div class="action-buttons-grid">
+    <a href="{{ url_for('editor_preventivo', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'preventivo' else '' }}" 
+       title="Modifica Preventivo">
+       <i class="fas fa-edit"></i> Preventivo
+    </a>
+
+    <a href="{{ url_for('conferma_ordine', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'ordini' else '' }}" 
+       title="Gestisci Ordini">
+       <i class="fas fa-box-open"></i> Ordini
+    </a>
+
+    <a href="{{ url_for('gestione_consegna', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'consegna' else '' }}" 
+       title="Gestisci Consegna">
+       <i class="fas fa-truck"></i> Consegna
+    </a>
+
+    <a href="{{ url_for('gestione_pagamenti', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'saldo' else '' }}" 
+       title="Gestisci Saldo">
+       <i class="fas fa-coins"></i> Saldo
+    </a>
+
+    <a href="{{ url_for('editor_fattura', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'fatture' else '' }}" 
+       title="Gestisci Fattura">
+       <i class="fas fa-file-invoice-dollar"></i> Fatture
+    </a>
+
+    <a href="{{ url_for('dettaglio_cliente', client_id=p.id_cliente, source_quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'cliente' else '' }}" 
+       title="Apri cartella documenti">
+       <i class="fas fa-folder-open"></i> Cliente
+    </a>
+</div>
+{% endmacro %}
+
+{% macro dashboard_navbar(active_page) %}
+<div class="dashboard-nav-grid"> 
+
+    <a href="{{ url_for('dashboard_clienti') }}" 
+       class="btn btn-hub {{ 'disabled' if active_page == 'clienti' else '' }}" 
+       title="Dashboard Preventivi per Cliente">
+       <i class="fas fa-users"></i> Dashboard Clienti
+    </a>
+    
+    <a href="{{ url_for('dashboard_ordini') }}" 
+       class="btn {{ 'disabled' if active_page == 'ordini' else '' }}" 
+       title="Dashboard Ordini">
+       <i class="fas fa-box-open"></i> Ordini
+    </a>
+    
+    <a href="{{ url_for('dashboard_consegne') }}" 
+       class="btn {{ 'disabled' if active_page == 'consegne' else '' }}" 
+       title="Dashboard Consegne">
+       <i class="fas fa-truck"></i> Consegne
+    </a>
+    
+    <a href="{{ url_for('dashboard_pagamenti') }}" 
+       class="btn {{ 'disabled' if active_page == 'pagamenti' else '' }}" 
+       title="Dashboard Pagamenti">
+       <i class="fas fa-coins"></i> Saldo
+    </a>
+    
+    <a href="{{ url_for('dashboard_fatture') }}" 
+       class="btn {{ 'disabled' if active_page == 'fatture' else '' }}" 
+       title="Dashboard Fatture">
+       <i class="fas fa-file-invoice"></i> Fatture
+    </a>
+
+</div> 
+{% endmacro %}
+
+<body>
+
+<body>
+<header class="site-header">
+    <div class="header-container">
+        
+        <div class="header-main-content">
+            {% if title != 'Dashboard' %}
+            <a href="javascript:history.back()" class="back-link" title="Torna indietro">
+                <i class="fas fa-arrow-left"></i>
+            </a>
+            {% endif %}
+            <a href="{{ url_for('dashboard') }}" class="brand-link">
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="CERLAB DESIGN Logo" class="logo">
+            </a>
+            
+            <div class="page-title-header">
+                {% block page_title %}{% endblock %}
+            </div>
+        </div>
+
+        <div class="user-menu">
+            {% if session.user_name %}
+            <div class="user-info">
+                <span>Ciao, <strong>{{ session.user_name }}</strong></span>
+            </div>
+            <a href="{{ url_for('cambia_password') }}" class="btn btn-outline">Cambia Password</a>
+            <a href="{{ url_for('logout') }}" class="btn">Logout</a>
+            {% endif %}
+        </div>
+    </div>
+</header>
+
+  {% block body %}
+  <main>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="card" style="background:#f4fff4;border-color:#cfe8cf">{{ messages[0] }}</div>
+      {% endif %}
+    {% endwith %}
+    
+    </main>
+  {% endblock %}
+  <script>
+    // ========== Funzioni Helper Globali ==========
+    function normalizeNumberString(raw) { if (raw == null) return ""; let s = String(raw).trim().replace(/[ €%]/g, ""); const lastDot = s.lastIndexOf("."); const lastComma = s.lastIndexOf(","); if (lastDot !== -1 && lastComma !== -1) { if (lastComma > lastDot) { s = s.replace(/\./g, "").replace(/,/g, "."); } else { s = s.replace(/,/g, ""); } } else if (lastComma !== -1) { s = s.replace(/,/g, "."); } return s; }
+    function parseNum(str) { const s = normalizeNumberString(str); const n = parseFloat(s); return isNaN(n) ? 0 : n; }
+    function hasValue(str) { return str != null && String(str).trim() !== ""; }
+    function fmtMoney(n) { return Number(n).toFixed(2).replace(".", ",") + " €"; }
+    function prezzoMatrioska(pc, s1, s2, s3) { let res = parseNum(pc);[s1, s2, s3].forEach(d => { res *= (1 - parseNum(d) / 100); }); return Math.max(0, res); }
+    function formatOnBlur(el) { const t = el.dataset.type; if (!t) return; const raw = el.value.trim(); if (raw === "") return; let cleaned = raw.replace(/[€%]/g, "").trim(); if (t === "percent") { el.value = cleaned + " %"; return; } if (t === "currency") { el.value = cleaned + " €"; return; } if (t === "int") { el.value = cleaned.replace(/[^0-9]/g, ""); return; } }
+    function stripForSubmit(form) { form.querySelectorAll('[data-type]').forEach(el => { el.value = normalizeNumberString(el.value); }); }
+
+    function handlePreview(ev) { handlePdfGeneration(ev, 'stampa_html'); }
+    function handlePdf(ev) { handlePdfGeneration(ev, 'generate_pdf_task'); }
+
+    function handlePdfGeneration(ev, targetEndpoint, onCompleteCallback) {
+        ev.preventDefault();
+        const form = document.getElementById('grid-form');
+        if (!form) return;
+        const saveBtn = document.getElementById('save-quote-btn');
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvataggio in corso...';
+        saveBtn.disabled = true;
+        const formData = new FormData(form);
+        formData.append('is_ajax', '1');
+        fetch(form.action, { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                saveBtn.innerHTML = '<i class="fas fa-check"></i> Salvato!';
+                setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.disabled = false; }, 2000);
+                const quoteId = form.dataset.quoteId;
+                if (targetEndpoint === 'stampa_html') {
+                    window.open(`/stampa-html/${quoteId}`, '_blank');
+                    return;
+                }
+                const newTab = window.open("{{ url_for('loading_static') }}", "_blank");
+                fetch(`/generate-pdf-task/${quoteId}`)
+                    .then(res => res.json())
+                    .then(pdfData => {
+                        if (newTab) {
+                            if (pdfData.pdf_url) {
+                                newTab.location.href = pdfData.pdf_url;
+                                if (typeof onCompleteCallback === 'function') { onCompleteCallback(pdfData); }    
+                            } else {
+                                newTab.close();
+                                alert(`Errore nella generazione del PDF: ${pdfData.error}`);
+                            }
+                        }
+                    });
+            } else {
+                alert("Errore durante il salvataggio. Impossibile generare il PDF.");
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+            }
+        }).catch(err => {
+            alert("Errore di connessione. Impossibile salvare e generare il PDF.");
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        
+        // --- NUOVO: Listener globale per la copia HTML ---
+        document.addEventListener('copy', function(e) {
+            if (document.body.hasAttribute('data-copy-html')) {
+                const htmlToCopy = document.body.getAttribute('data-copy-html');
+                const textToCopy = document.body.getAttribute('data-copy-text');
+                e.clipboardData.setData('text/html', htmlToCopy);
+                e.clipboardData.setData('text/plain', textToCopy);
+                e.preventDefault();
+                document.body.removeAttribute('data-copy-html');
+                document.body.removeAttribute('data-copy-text');
+            }
+        });
+
+        function showNotification(title, message, onOk) {
+            const modal = document.getElementById('notification-modal');
+            if (!modal) return;
+            modal.querySelector('#notification-modal-title').textContent = title;
+            modal.querySelector('#notification-modal-text').textContent = message;
+            modal.style.display = 'flex';
+            const okBtn = modal.querySelector('#notification-modal-ok');
+            const newOkBtn = okBtn.cloneNode(true); // Ricrea il bottone per evitare listener multipli
+            okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+            newOkBtn.addEventListener('click', () => {
+                modal.style.display = 'none';
+                if (onOk) onOk();
+            }, { once: true });
+        }
+
+        // --- NUOVA FUNZIONE PER LA MODALE DI CONFERMA ---
+        function showConfirmation(title, message, onConfirm) {
+            const modal = document.getElementById('confirm-modal');
+            if (!modal) return;
+            modal.querySelector('#confirm-modal-title').textContent = title;
+            modal.querySelector('#confirm-modal-text').innerHTML = message; // Usa innerHTML per il grassetto
+            modal.style.display = 'flex';
+            const okBtn = modal.querySelector('#confirm-modal-ok');
+            const cancelBtn = modal.querySelector('#confirm-modal-cancel');
+            
+            // Ricrea i bottoni per pulire i listener precedenti
+            const newOkBtn = okBtn.cloneNode(true);
+            okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+            const newCancelBtn = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+            const closeModal = () => { modal.style.display = 'none'; };
+            
+            newOkBtn.addEventListener('click', () => {
+                closeModal();
+                if (onConfirm) onConfirm();
+            }, { once: true });
+            newCancelBtn.addEventListener('click', closeModal, { once: true });
+        }
+
+        const editorForm = document.getElementById('grid-form');
+        if (editorForm) {
+            document.querySelectorAll('[data-type]').forEach(el => { el.addEventListener('blur', () => formatOnBlur(el)); if (el.value && el.value.trim() !== "") formatOnBlur(el); });
+            const feeHeader = document.querySelector('input[name="fee_pct"]');
+            if (feeHeader) { ['input', 'change', 'blur'].forEach(ev => { feeHeader.addEventListener(ev, () => { document.querySelectorAll('tbody tr').forEach(updateRow); updateTotals(); }); }); }
+            const ivaInput = document.querySelector('input[name="iva_pct"]');
+            if (ivaInput) { ['input', 'change', 'blur'].forEach(ev => { ivaInput.addEventListener(ev, () => updateTotals()); }); }
+            editorForm.addEventListener('submit', () => stripForSubmit(editorForm));
+            const fields = Array.from(document.querySelectorAll('#grid-form input, #grid-form select, #grid-form textarea'));
+            fields.forEach((el, i) => { el.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); const next = fields[i + 1]; if (next) { next.focus(); if (next.select) next.select(); } } }); });
+            
+            const card = document.getElementById('header-card');
+            const toggleBtn = document.getElementById('toggle-header-btn');
+            const venditoreInput = document.querySelector('input[name="venditore"]');
+            const numeroInput = document.querySelector('input[name="numero"]');
+            const dataInput = document.querySelector('input[name="data"]');
+            const clienteInput = document.querySelector('input[name="cliente"]');
+            const summaryVenditore = document.getElementById('summary-venditore');
+            const summaryNumero = document.getElementById('summary-numero');
+            const summaryData = document.getElementById('summary-data');
+            const summaryCliente = document.getElementById('summary-cliente');
+            const updateSummary = () => { if (summaryVenditore) summaryVenditore.textContent = venditoreInput.value || '...'; if (summaryNumero) summaryNumero.textContent = numeroInput.value || '...'; if (summaryData) summaryData.textContent = dataInput.value || '...'; if (summaryCliente) summaryCliente.textContent = clienteInput.value || '...'; };
+            if (card && toggleBtn) {
+                toggleBtn.addEventListener('click', () => { card.classList.toggle('is-collapsed'); if (card.classList.contains('is-collapsed')) { toggleBtn.innerHTML = '↓ Mostra Dettagli'; updateSummary(); } else { toggleBtn.innerHTML = '↑ Nascondi'; } });
+                if (venditoreInput) venditoreInput.addEventListener('input', updateSummary);
+                if (numeroInput) numeroInput.addEventListener('input', updateSummary);
+                if (dataInput) dataInput.addEventListener('input', updateSummary);
+                if (clienteInput) clienteInput.addEventListener('input', updateSummary);
+                updateSummary();
+            }
+
+            const modal = document.getElementById('modal-longtext');
+            const modalTextarea = document.getElementById('modal-textarea');
+            const modalSaveBtn = document.getElementById('modal-save');
+            const modalCloseBtn = document.getElementById('modal-close');
+            const itemRowsContainer = document.getElementById('tabella-righe');
+            let activeInput = null;
+
+            function openModal(inputElement) { activeInput = inputElement; modalTextarea.value = activeInput.value; modal.style.display = 'flex'; modalTextarea.focus(); }
+            function closeModal() { modal.style.display = 'none'; activeInput = null; }
+
+            if (itemRowsContainer && modal) {
+                itemRowsContainer.addEventListener('click', (e) => {
+                    const editButton = e.target.closest('.edit-icon'); 
+                    if (editButton) {
+                        const wrapper = editButton.closest('.article-cell-wrapper');
+                        const input = wrapper.querySelector('.main-article-input');
+                        if (input) { openModal(input); }
+                    }
+                });
+                modalSaveBtn.addEventListener('click', () => { if (activeInput) { activeInput.value = modalTextarea.value; } closeModal(); });
+                modalCloseBtn.addEventListener('click', closeModal);
+                modal.addEventListener('click', (e) => { if (e.target === modal) { closeModal(); } });
+            }
+
+            const lockBtn = document.getElementById('lock-btn');
+            const lockInput = document.querySelector('input[name="is_locked"]');
+            const unlockModal = document.getElementById('unlock-modal');
+            const unlockModalTitle = document.getElementById('unlock-modal-title');
+            const unlockModalText = document.getElementById('unlock-modal-text');
+            const unlockPasswordGroup = document.getElementById('unlock-password-group');
+            const unlockPasswordInput = document.getElementById('unlock-password-input');
+            const unlockModalCancel = document.getElementById('unlock-modal-cancel');
+            const unlockModalConfirm = document.getElementById('unlock-modal-confirm');
+            let currentUnlockStep = 1;
+
+            function applyLockState(isLocked) { if (isLocked) { editorForm.classList.add('is-locked'); lockBtn.innerHTML = '🔒'; lockInput.value = 'true'; } else { editorForm.classList.remove('is-locked'); lockBtn.innerHTML = '🔓'; lockInput.value = 'false'; } }
+            function closeUnlockModal() { unlockModal.style.display = 'none'; unlockPasswordGroup.style.display = 'none'; unlockPasswordInput.value = ''; }
+            
+            if (lockBtn && lockInput && editorForm) {
+                applyLockState(lockInput.value === 'true');
+                lockBtn.addEventListener('click', () => {
+                    if (!editorForm.classList.contains('is-locked')) return;
+                    const quoteNumber = document.querySelector('input[name="numero"]')?.value || 'N/D';
+                    const quoteStatus = document.querySelector('select[name="stato"]')?.value || 'N/D';
+                    currentUnlockStep = 1;
+                    unlockModalTitle.textContent = 'Conferma Sblocco Preventivo';
+                    unlockModalText.innerHTML = `Il preventivo N. <strong>${quoteNumber}</strong> risulta "${quoteStatus}".<br>Sei sicuro di volerlo sbloccare e riportare allo stato di <strong>BOZZA</strong>?`;
+                    unlockPasswordGroup.style.display = 'none';
+                    unlockModalConfirm.textContent = 'Sì, procedi';
+                    unlockModal.style.display = 'flex';
+                });
+
+                unlockModalConfirm.addEventListener('click', () => {
+                    if (currentUnlockStep === 1) {
+                        currentUnlockStep = 2;
+                        unlockModalTitle.textContent = 'Verifica Sicurezza';
+                        unlockModalText.textContent = 'Per confermare l\'operazione, inserisci la tua password.';
+                        unlockPasswordGroup.style.display = 'block';
+                        unlockModalConfirm.textContent = 'Sblocca Ora';
+                        unlockPasswordInput.focus();
+                    } else {
+                        const password = unlockPasswordInput.value;
+                        const quoteId = editorForm.dataset.quoteId;
+                        if (!password) { showNotification('Errore', 'Per favore, inserisci la password.'); return; }
+                        fetch(`/preventivo/${quoteId}/sblocca`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: password }) })
+                        .then(response => response.json())
+                        .then(data => {
+                            closeUnlockModal();
+                            if (data.success) { showNotification("Operazione Completata", "Preventivo sbloccato con successo!", () => window.location.reload()); }
+                            else { showNotification('Errore', data.error || 'Impossibile sbloccare il preventivo.'); }
+                        })
+                        .catch(error => { console.error("Errore Fetch:", error); showNotification('Errore di Rete', 'Impossibile comunicare con il server. Controlla la connessione.'); });
+                    }
+                });
+                unlockModalCancel.addEventListener('click', closeUnlockModal);
+                unlockModal.addEventListener('click', (e) => { if (e.target === unlockModal) closeUnlockModal(); });
+            }
+        }
+        
+        const geoData = JSON.parse('{{ geo_data|tojson|safe if geo_data else "[]" }}');
+        const selRegione = document.getElementById('select-regione');
+        if (geoData && geoData.length > 0 && selRegione) {
+            const selProvincia = document.getElementById('select-provincia');
+            const selComune = document.getElementById('select-comune');
+            const regioni = [...new Map(geoData.map(item => [item.regione.codice, item.regione])).values()].sort((a, b) => a.nome.localeCompare(b.nome));
+            regioni.forEach(regione => { selRegione.add(new Option(regione.nome, regione.codice)); });
+            selRegione.addEventListener('change', () => {
+                selProvincia.innerHTML = '<option value="">Seleziona provincia...</option>'; selComune.innerHTML = '<option value="">...</option>';
+                const codiceRegione = selRegione.value; if (!codiceRegione) return;
+                const nomeRegioneInput = document.getElementById('regione_nome');
+                if(nomeRegioneInput) nomeRegioneInput.value = selRegione.options[selRegione.selectedIndex].text;
+                const provinceInRegione = geoData.filter(c => c.regione.codice === codiceRegione);
+                const provinceUniche = [...new Map(provinceInRegione.map(item => [item.provincia.codice, {nome: item.provincia.nome, sigla: item.sigla}])).values()].sort((a, b) => a.nome.localeCompare(b.nome));
+                provinceUniche.forEach(prov => { selProvincia.add(new Option(`${prov.nome} (${prov.sigla})`, prov.sigla)); });
+            });
+            selProvincia.addEventListener('change', () => {
+                selComune.innerHTML = '<option value="">Seleziona comune...</option>';
+                const siglaProvincia = selProvincia.value; if (!siglaProvincia) return;
+                const comuni = geoData.filter(c => c.sigla === siglaProvincia).sort((a, b) => a.nome.localeCompare(b.nome));
+                comuni.forEach(comune => { selComune.add(new Option(comune.nome, comune.nome)); });
+            });
+            {% if p %}
+            const valoreSalvatoRegione = '{{ p.regione | default("", true) }}'; const valoreSalvatoProvincia = '{{ p.provincia | default("", true) }}'; const valoreSalvatoComune = '{{ p.comune | default("", true) }}';
+            if (valoreSalvatoRegione) {
+                selRegione.value = valoreSalvatoRegione; selRegione.dispatchEvent(new Event('change'));
+                setTimeout(() => {
+                    if (valoreSalvatoProvincia) selProvincia.value = valoreSalvatoProvincia; selProvincia.dispatchEvent(new Event('change'));
+                    setTimeout(() => { if (valoreSalvatoComune) selComune.value = valoreSalvatoComune; }, 100); 
+                }, 100);
+            }
+            {% endif %}
+        }
+        
+    });
+</script>
+
+<div id="modal-longtext" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Modifica Descrizione Articolo</h3>
+        <textarea id="modal-textarea"></textarea>
+        <div class="modal-actions">
+            <button id="modal-save" class="btn primary">Salva</button>
+            <button id="modal-close" class="btn">Chiudi</button>
+        </div>
+    </div>
+</div>
+<div id="unlock-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 450px;">
+        <h3 id="unlock-modal-title"></h3>
+        <p id="unlock-modal-text" style="line-height: 1.6; color: var(--muted);"></p>
+        <div id="unlock-password-group" style="display: none; margin-top: 16px;">
+            <label for="unlock-password-input">Password</label>
+            <input type="password" id="unlock-password-input" placeholder="Inserisci la tua password">
+        </div>
+        <div class="modal-actions">
+            <button type="button" id="unlock-modal-cancel" class="btn">Annulla</button>
+            <button type="button" id="unlock-modal-confirm" class="btn primary">Sì, procedi</button>
+        </div>
+    </div>
+</div>
+<div id="notification-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 400px; text-align: center;">
+        <h3 id="notification-modal-title"></h3>
+        <p id="notification-modal-text" style="line-height: 1.6;"></p>
+        <div class="modal-actions" style="justify-content: center; margin-top:20px;">
+            <button type="button" id="notification-modal-ok" class="btn primary">OK</button>
+        </div>
+    </div>
+</div>
+
+<div id="confirm-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 450px; text-align: center;">
+        <h3 id="confirm-modal-title">Conferma Azione</h3>
+        <p id="confirm-modal-text" style="line-height: 1.6;"></p>
+        <div class="modal-actions" style="justify-content: center;">
+            <button type="button" id="confirm-modal-cancel" class="btn">Annulla</button>
+            <button type="button" id="confirm-modal-ok" class="btn primary">Conferma</button>
+        </div>
+    </div>
+</div>
+
+
+
+</body>
+</html>

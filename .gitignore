@@ -1,0 +1,51 @@
+# ----------------------------------------------------------------
+# 1. DATI UTENTE E LOG (in modalità --debug)
+# ----------------------------------------------------------------
+# Ignora tutto il contenuto della cartella 'data',
+# che in modalità debug contiene i dati generati dall'utente.
+# Questo corrisponde alla tua logica [Excludes] nell'installer .
+data/*
+
+# ...MA NON ignorare i file "modello" che devono essere nel repo.
+# Questi sono i file che vuoi distribuire con l'app.
+!data/comuni.json
+!data/changelog.json
+
+# Se la cartella 'data' nel repo contiene SOLO questi file,
+# aggiungi un file .gitkeep e scommenta la riga sotto
+# !data/.gitkeep
+
+
+# ----------------------------------------------------------------
+# 2. FILE DI BUILD E DISTRIBUZIONE
+# ----------------------------------------------------------------
+# Ignora le cartelle di output di PyInstaller 
+build/
+dist/
+
+# Ignora i file .spec di PyInstaller
+*.spec
+
+# Ignora gli installer .exe creati da Inno Setup 
+setup_*.exe
+
+
+# ----------------------------------------------------------------
+# 3. CACHE PYTHON E AMBIENTI VIRTUALI
+# ----------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignora le cartelle degli ambienti virtuali
+venv/
+.venv/
+
+
+# ----------------------------------------------------------------
+# 4. FILE DI CONFIGURAZIONE IDE E OS
+# ----------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1>Dettaglio Fattura <span class="quote-number">#{{ p.numero }}</span>
+    {% if p.stato in ['Bozza', 'Inviato'] %}
+        <div class="status-badge status-nd"><i class="fas fa-minus-circle"></i> N/D</div>
+    {% elif p.no_iva %}
+        <div class="status-badge status-non-disponibile"><i class="fas fa-times-circle"></i> IVA ESENTE </div>
+    {% elif p.stato_fattura == 'Fatturato' %}
+        <div class="status-badge status-fattura-emessa"><i class="fas fa-check-circle"></i> FATTURATO</div>
+    {% elif p.stato_fattura == 'Fatturato Parziale' %}
+        <div class="status-badge status-fatturato-parziale"><i class="fas fa-exclamation-circle"></i> FATTURATO PARZIALE</div>
+    {% else %}
+        <div class="status-badge status-in-attesa-di-fattura"><i class="fas fa-clock"></i> IN ATTESA DI FATTURA</div>
+    {% endif %}
+</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+
+    
+    <div class="card">
+        <div class="card-header"><h3>Riepilogo Cliente</h3></div>
+        <div class="card-body client-summary">
+             <div><strong>Cliente:</strong> {{ p.cliente }}</div>
+            <div><strong>Indirizzo:</strong> {{ p.indirizzo }}, {{ p.cap }} {{ p.comune }} ({{ p.provincia }})</div>
+            <div><strong>P.IVA:</strong> {{ p.p_iva }}</div>
+            <div><strong>Data Preventivo:</strong> {{ p.data }}</div>
+        </div>
+    </div>
+
+    {% for iva_key, data in dati_fattura.items() %}
+    <div class="card iva-card">
+        <div class="card-header">
+            <h3><i class="fas fa-percentage"></i> Blocco IVA {{ iva_key }}%</h3>
+            <div class="header-totals-iva">
+                <span>Imponibile: <strong>{{ money_ui(data.imponibile_str) }}</strong></span>
+                <span>IVA: <strong>{{ money_ui(data.iva_str) }}</strong></span>
+                <span class="total-iva-card">Totale: <strong>{{ money_ui(data.totale) }}</strong></span>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table class="styled-table">
+                <thead>
+                    <tr>
+                        <th style="width: 1%;"></th>
+                        <th>Articolo</th>
+                        <th class="center">UM</th>
+                        <th class="right">Q.tà</th>
+                        <th class="right">Prezzo Tot. Unit.</th>
+                        <th class="right">Imponibile Tot.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in data.righe %}
+                    <tr>
+                        <td class="center"><button type="button" class="btn icon-btn copy-btn" title="Copia descrizione"><i class="fas fa-copy"></i></button></td>
+                        <td class="article-text">{{ r.articolo }}</td>
+                        <td class="center">{{ r.unt }}</td>
+                        <td class="right">{{ r.qt }}</td>
+                        <td class="right">{{ money_ui(r.tot_prezzo_unitario) }}</td>
+                        <td class="right"><strong>{{ money_ui(r.tot_prezzo) }}</strong></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card-footer actions-grid">
+            <div class="status-display">
+                {% if data.fatture_allegate %}
+                    <div class="status-badge status-fattura-emessa"><i class="fas fa-check-circle"></i> FATTURA EMESSA</div>
+                {% elif iva_key == '0' %}
+                     <div class="status-badge status-non-disponibile"><i class="fas fa-times-circle"></i> IVA ESENTE</div>
+                {% else %}
+                    <div class="status-badge status-in-attesa-di-fattura"><i class="fas fa-clock"></i> IN ATTESA DI FATTURA</div>
+                {% endif %}
+            </div>
+
+            {% if session.user_role in ['amministratore', 'segreteria', 'ceo'] %}
+                <button type="button" 
+                        class="btn primary btn-allega-fattura-iva" 
+                        data-iva-key="{{ iva_key }}"
+                        data-descrizione="N. Fattura IVA {{ iva_key }}%">
+                    <i class="fas fa-paperclip"></i> 
+                    {% if data.fatture_allegate %}Allega Altra Fattura{% else %}Allega Fattura{% endif %}
+                </button>
+            {% endif %}
+        </div>
+        
+        {% if data.fatture_allegate %}
+            <div class="attachments-section">
+                <h5>Fatture Allegatæ per IVA {{ iva_key }}%:</h5>
+                {% for fattura in data.fatture_allegate %}
+                <div class="document-item">
+                    <div><i class="fas fa-file-alt"></i> {{ fattura.descrizione }} ({{ fattura.filename }})</div>
+                    <div class="document-actions">
+                        {% if fattura.filename.lower().endswith('.pdf') %}
+                            <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=fattura.filename, action='view') }}" target="_blank" class="btn icon-btn" title="Visualizza PDF">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                        {% else %}
+                            <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=fattura.filename) }}" class="btn icon-btn" title="Scarica File">
+                                <i class="fas fa-download"></i>
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+    {% else %}
+        <div class="card">
+            <div class="card-body">Nessun dato da fatturare trovato.</div>
+        </div>
+    {% endfor %}
+    <div class="totals-recap">
+        <div class="total-item"><span>Imponibile Cliente</span><strong>{{ money_ui(p.tot_imponibile_cliente) }}</strong></div>
+        <div class="total-item"><span>IVA Totale</span><strong>{{ money_ui(p.tot_iva) }}</strong></div>
+        <div class="total-item grand-total"><span>Totale Fattura</span><strong>{{ money_ui(p.totale) }}</strong></div>
+    </div>
+</div>
+
+<div id="upload-invoice-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3 id="modal-upload-title">Allega Fattura Emessa</h3>
+        <form id="upload-invoice-form" action="{{ url_for('allega_fattura', quote_id=p.numero) }}" method="POST" enctype="multipart/form-data">
+            <input type="hidden" id="modal-upload-iva-key" name="iva_rate_key" value="">
+            
+            <div class="form-group"><label>Descrizione</label><input id="modal-upload-descrizione" name="descrizione" value="" required></div>
+            <div class="form-group"><label>File Fattura*</label><input name="file" type="file" required></div>
+            <div class="modal-actions">
+                <button type="button" id="modal-upload-cancel" class="btn">Annulla</button>
+                <button type="submit" class="btn primary">Carica Fattura</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+    .card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 24px; }
+    .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .card-header h3 { margin: 0; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .card-body { padding: 24px; }
+    .client-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .table-wrap { overflow-x: auto; }
+    .styled-table { width: 100%; border-collapse: collapse; }
+    .styled-table th, .styled-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    .styled-table thead th { background-color: #f8f9fa; font-size: 11px; text-transform: uppercase; color: #64748b; }
+    .styled-table th, .styled-table td { white-space: nowrap; }
+    .styled-table .article-text { white-space: normal; min-width: 300px; }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .btn.icon-btn { background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; }
+    .card-footer { padding: 16px 24px; background-color: #fdfdfe; border-top: 1px solid #e2e8f0; }
+    
+    /* Stili Badge Stato (Globali e Fattura) */
+    .status-badge { padding: 6px 14px; border-radius: 20px; font-size: 14px; font-weight: 600; text-transform: uppercase; color: #fff; display: inline-flex; align-items: center; gap: 8px; }
+    .status-bozza{background-color:#6c757d;} 
+    .status-inviato{background-color:#0d6efd;} 
+    .status-confermato, .status-chiuso {background-color:#198754;}
+    .status-in-lavorazione{background-color:#ffc107;color:#000;} 
+    .status-annullato{background-color:#dc3545;}
+    .status-in-attesa-di-fattura { background-color: #ffc107; color: #000; }
+    .status-fatturato-parziale { background-color: #0d6efd; }
+    .status-fattura-emessa { background-color: #198754; } 
+    .status-non-disponibile, .status-nd { background-color: #6c757d; }
+    
+    /* Stili per la Card IVA specifica */
+    .iva-card .card-header { background-color: #f8f9fa; }
+    .header-totals-iva { display: flex; gap: 20px; font-size: 14px; }
+    .header-totals-iva span { color: #6c757d; }
+    .header-totals-iva strong { color: #212529; }
+    .header-totals-iva .total-iva-card { font-weight: 700; font-size: 16px; color: #212529; border-left: 2px solid #0d6efd; padding-left: 20px; }
+
+    /* Stili per la sezione Azioni e Allegati */
+    .actions-grid { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .attachments-section { padding: 16px 24px; background-color: #f8f9fa; border-top: 1px solid #e2e8f0; }
+    .attachments-section h5 { margin: 0 0 10px 0; font-size: 13px; color: #495057; }
+    .document-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background-color: #fff; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 8px; }
+    .document-item i { margin-right: 8px; color: #6c757d; }
+    .document-actions { display: flex; gap: 4px; }
+    
+    /* Stili Riepilogo Totali in fondo */
+    .totals-recap { display: flex; justify-content: flex-end; align-items: center; gap: 24px; padding: 24px; background-color: #fff; border: 1px solid #e2e8f0; border-radius: 12px; }
+    .total-item span { display: block; font-size: 13px; color: #6c757d; text-align: right; }
+    .total-item strong { display: block; font-size: 18px; font-weight: 700; text-align: right; }
+    .total-item.grand-total strong { font-size: 24px; color: #000; }
+    
+    /* Stili Modale */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+    .modal-content { background: #fff; padding: 24px; border-radius: 12px; width: 90%; max-width: 500px; }
+    .modal-content h3 { margin: 0 0 12px 0; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 12px; margin-bottom: 4px; }
+    .form-group input { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
+</style>
+
+{% if p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
+<div class="sticky-footer">
+    <div class="status-actions">
+        <div>
+            <label>&nbsp;</label>
+            {{ workflow_navbar(p, 'fatture') }}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // Logica per il pulsante "Copia Articolo"
+        document.querySelectorAll('.copy-btn').forEach(button => {
+            button.addEventListener('click', (e) => {
+                const row = e.currentTarget.closest('tr');
+                const textToCopy = row.querySelector('.article-text').textContent.trim();
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    const icon = button.querySelector('i');
+                    icon.className = 'fas fa-check';
+                    setTimeout(() => { icon.className = 'fas fa-copy'; }, 1500);
+                });
+            });
+        });
+
+        // --- NUOVA LOGICA MODALE DINAMICA ---
+        const uploadModal = document.getElementById('upload-invoice-modal');
+        const closeUploadModalBtn = document.getElementById('modal-upload-cancel');
+        const modalTitle = document.getElementById('modal-upload-title');
+        const modalIvaKeyInput = document.getElementById('modal-upload-iva-key');
+        const modalDescrizioneInput = document.getElementById('modal-upload-descrizione');
+
+        // Apri la modale quando si clicca un pulsante "Allega"
+        document.querySelectorAll('.btn-allega-fattura-iva').forEach(button => {
+            button.addEventListener('click', (e) => {
+                const ivaKey = e.currentTarget.dataset.ivaKey;
+                const descrizione = e.currentTarget.dataset.descrizione;
+                
+                modalTitle.textContent = `Allega Fattura (IVA ${ivaKey}%)`;
+                modalIvaKeyInput.value = ivaKey;
+                modalDescrizioneInput.value = descrizione;
+                
+                uploadModal.style.display = 'flex';
+            });
+        });
+
+        // Chiudi la modale
+        if (closeUploadModalBtn) {
+            closeUploadModalBtn.addEventListener('click', () => {
+                uploadModal.style.display = 'none';
+            });
+        }
+        // --- FINE NUOVA LOGICA MODALE ---
+    });
+</script>
+{% endblock %}

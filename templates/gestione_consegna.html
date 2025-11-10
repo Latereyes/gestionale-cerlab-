@@ -1,0 +1,676 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-dolly"></i> Gestione Consegna
+    {% if p %}
+    <div class="header-client-info">
+        <i class="fas fa-file-invoice"></i>
+        <span>Preventivo #{{ p.numero }}</span>
+    </div>
+    {% endif %}
+</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+    <form id="delivery-form" data-quote-id="{{ p.numero }}">
+
+        {% for ordine in ordini_confermati %}
+        <div class="card order-card">
+            <div class="card-header">
+                <div class="order-info">
+                    <h3>Ordine Fornitore: <strong>{{ ordine.numero_conferma }}</strong></h3>
+                    <span class="muted">Fornitore: <strong>{{ ordine.azienda }}</strong></span>
+                </div>
+                 {% if (ordine.articoli | rejectattr('stato_consegna', 'equalto', 'Consegnato') | list | length) == 0 %}
+                    <span class="status-tag success header-status">Completato</span>
+                {% else %}
+                    <span class="status-tag status-inprogress header-status">In Lavorazione</span>
+                {% endif %}
+            </div>
+            <div class="table-wrap">
+                <table class="styled-table">
+                    <thead>
+                        <tr>
+                            <th class="col-check"></th>
+                            <th class="col-articolo">Articolo</th>
+                            <th class="col-um">UM</th>
+                            <th class="col-qta right">Q.tà</th>
+                            <th class="col-data">Arrivo Previsto</th>
+                            <th class="col-stato">Stato</th>
+                            <th class="col-data">Data Arrivo</th>
+                            <th class="col-data">Data Consegna</th>
+                            <th class="actions-column col-azioni"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in ordine.articoli %}
+                        <tr>
+                            <td>
+                                <input 
+                                        type="checkbox" 
+                                        class="large-checkbox"
+                                        name="selected_items" 
+                                        value="{{ item.original_index }}"
+                                        data-status="{{ item.stato_consegna | default('Da Consegnare', true) }}"
+                                        data-has-bolla="{{ 'true' if item.bolla_id else 'false' }}"
+                                        data-has-arrival-date="{{ 'true' if item.data_arrivo_in_house else 'false' }}">
+                            </td>
+                            <td>{{ item.articolo }}</td>
+                            <td>{{ item.unt }}</td> {# <-- COLONNA UM AGGIUNTA #}
+                            <td class="right">{{ item.qt }}</td>
+                            <td class="center muted">{{ ordine.data_arrivo or '...' }}</td> {# <-- COLONNA ARRIVO PREVISTO AGGIUNTA #}
+                            <td>
+                                {% set status = item.stato_consegna | default('Da Consegnare', true) %}
+                                {% if status == 'Consegnato' %}
+                                     <span class="status-tag success">Consegnato</span>
+                                {% elif status == 'In Bolla' %}
+                                     <span class="status-tag status-bolla">In Bolla ({{ item.bolla_id.split('-')[-1] }})</span>
+                                {% elif status == 'Pronto per Consegna' %}
+                                     <span class="status-tag warning">Pronto</span>
+                                {% else %}
+                                     <span class="status-tag danger">Da Consegnare</span>
+                                {% endif %}
+                            </td>
+                            <td class="center muted">{{ item.data_arrivo_in_house or '...' }}</td>
+                            <td class="center muted">{{ item.data_consegna or '...' }}</td>
+                            <td class="row-actions">
+                                {% if item.bolla_id %}
+                                <a href="{{ url_for('export_bolla_pdf', quote_id=p.numero, bolla_id=item.bolla_id) }}" target="_blank" class="btn icon-btn" title="Ristampa Bolla {{ item.bolla_id }}">
+                                    <i class="fas fa-print"></i>
+                                </a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+        <form id="delivery-form" data-quote-id="{{ p.numero }}">
+
+        {% for ordine in ordini_confermati %}
+        <div class="card order-card">
+            </div>
+
+        {% else %}
+        <div class="card">
+            <div class="empty-state">
+                <i class="fas fa-search-dollar"></i>
+                <h4>Nessun Articolo da Consegnare</h4>
+                <p>Nessuna conferma d'ordine trovata o tutti gli articoli sono già stati consegnati.
+                <br>Verificare lo stato nella pagina "Ordini".</p>
+            </div>
+        </div>
+
+        {% endfor %}
+
+    </form>
+</div>
+
+<div id="revert-status-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Annulla Stato Consegna</h3>
+        <p>Seleziona lo stato a cui vuoi riportare gli articoli selezionati.</p>
+        
+        <div class="revert-options">
+            <button type="button" id="btn-revert-pronto" class="btn btn-outline full-width">
+                <i class="fas fa-box"></i> Riporta a "Pronto per Consegna"
+            </button>
+            <button type="button" id="btn-revert-da-consegnare" class="btn btn-outline full-width">
+                <i class="fas fa-shipping-fast"></i> Riporta a "Da Consegnare"
+            </button>
+        </div>
+
+        <div id="revert-bolla-option" class="form-check-group hidden">
+            <input type="checkbox" id="keep-bolla-checkbox" checked>
+            <label for="keep-bolla-checkbox">Mantieni articoli legati alla bolla</label>
+        </div>
+
+        <div class="modal-actions">
+            <button type="button" id="revert-modal-cancel" class="btn">Annulla</button>
+        </div>
+    </div>
+</div>
+
+<div id="notification-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3 id="modal-title"></h3>
+        <p id="modal-text"></p>
+        <div class="modal-actions">
+            <button type="button" id="modal-cancel" class="btn">Annulla</button>
+            <button type="button" id="modal-confirm" class="btn primary">Conferma</button>
+        </div>
+    </div>
+</div>
+
+<div id="address-confirm-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Indirizzo di Consegna</h3>
+        <p>Vuoi consegnare all'indirizzo principale del cliente?</p>
+        <div class="address-display">
+            <strong>{{ p.cliente }}</strong><br>
+            {{ p.indirizzo }}, {{ p.cap }} {{ p.comune }} ({{ p.provincia }})
+        </div>
+        <div class="modal-actions">
+            <button type="button" id="btn-address-no" class="btn">No, usa un altro indirizzo</button>
+            <button type="button" id="btn-address-yes" class="btn primary">Sì, usa questo</button>
+        </div>
+    </div>
+</div>
+
+<div id="cantiere-address-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content wide">
+        <h3>Indirizzo Cantiere / Destinazione Alternativa</h3>
+        <form id="cantiere-form" data-client-id="{{ p.id_cliente }}">
+            <div id="cantiere-list-container">
+                <p>Seleziona un indirizzo cantiere esistente o creane uno nuovo.</p>
+                <div id="cantiere-list">
+                    </div>
+            </div>
+            
+            <div class="form-section">
+                <h3 class="section-title">Dati Nuovo Indirizzo</h3>
+                <input type="hidden" id="cantiere-id" name="id">
+                <div class="form-group">
+                    <label>Descrizione (es. "Cantiere Roma", "Magazzino Cliente")</label>
+                    <input name="descrizione" placeholder="Cantiere principale" required>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group full-width">
+                        <label>Indirizzo</label>
+                        <input name="indirizzo" placeholder="Via, Piazza, ...">
+                    </div>
+                    <div class="form-group">
+                        <label>Regione</label>
+                        <select name="regione" class="select-regione-cantiere"><option value="">Seleziona...</option></select>
+                        <input type="hidden" name="regione_nome">
+                    </div>
+                    <div class="form-group">
+                        <label>Provincia</label>
+                        <select name="provincia" class="select-provincia-cantiere"><option value="">...</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Comune</label>
+                        <select name="comune" class="select-comune-cantiere"><option value="">...</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label>CAP</label>
+                        <input name="cap" placeholder="00000">
+                    </div>
+                </div>
+            </div>
+        </form>
+        <div class="modal-actions">
+            <button type="button" id="cantiere-modal-cancel" class="btn">Annulla</button>
+            <button type="button" id="cantiere-modal-save" class="btn primary">Usa questo Indirizzo per la Bolla</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Stili presi da altre pagine per coerenza */
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content: space-between; align-items:center; flex-wrap:wrap; gap:16px; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+
+.actions-group { display: flex; align-items: center; gap: 12px; }
+.actions-group .btn { display: inline-flex; align-items: center; gap: 8px; }
+.table-wrap { overflow-x: auto; }
+.styled-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.styled-table th, .styled-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; vertical-align: middle; word-wrap: break-word; }
+.styled-table thead th { background-color: #f8f9fa; font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table tbody tr:last-child td { border-bottom: none; }
+.order-info h3 { font-size: 16px; margin:0; }
+.row-actions { text-align: right; }
+.center { text-align: center; }
+.muted { color: #6c757d; }
+
+/* Larghezze colonne */
+.col-check   { width: 4%; }
+.col-articolo { width: auto; }
+.col-um      { width: 6%; }
+.col-qta     { width: 6%; }
+.col-stato   { width: 14%; }
+.col-data    { width: 12%; text-align: center; }
+.col-azioni  { width: 8%; text-align: right; }
+
+
+/* Stili Badge di Stato e Bolla */
+.status-tag { display: inline-block; padding: 4px 10px; font-size: 11px; font-weight: 600; border-radius: 20px; color: #fff; text-align: center; min-width: 80px;}
+.status-tag.header-status { border-radius: 6px; }
+.status-tag.danger { background-color: #dc3545; } /* Da Consegnare */
+.status-tag.warning { background-color: #ffc107; color: #000; } /* Pronto */
+.status-tag.success { background-color: #198754; } /* Consegnato */
+.status-tag.status-bolla { background-color: #0d6efd; } /* In Bolla */
+.status-tag.status-inprogress { background-color: #6c757d; } /* In Lavorazione */
+
+.btn.warning { background-color: #ffc107; color: #000; }
+.btn.success { background-color: #198754; color: #fff; }
+.btn.icon-btn { background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; }
+
+
+/* Stili Modale */
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+.modal-content { background: #fff; padding: 24px; border-radius: 12px; width: 90%; max-width: 400px; text-align: center; }
+.modal-content h3 { margin: 0 0 12px 0; }
+.modal-actions { display: flex; justify-content: center; gap: 12px; margin-top: 24px; }
+
+/* Stili per le nuove modali */
+.address-display {
+    background-color: #f8f9fa;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 16px 0;
+    text-align: left;
+    line-height: 1.6;
+}
+.modal-content.wide { max-width: 800px; text-align: left; }
+.form-section { margin-top: 24px; }
+.section-title { font-size: 16px; font-weight: 600; margin: 0 0 16px 0; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-group { display: flex; flex-direction: column; }
+.form-group.full-width { grid-column: 1 / -1; }
+.form-group label { font-size: 11px; color: #64748b; margin-bottom: 4px; }
+.form-group input, .form-group select { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; width: 100%; font-size: 14px; }
+
+#cantiere-list { max-height: 150px; overflow-y: auto; }
+.cantiere-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: background-color 0.2s; }
+.cantiere-item:hover { background-color: #f8f9fa; }
+.cantiere-item.selected { background-color: #e0f2fe; border-color: #0d6efd; }
+.hidden { display: none !important; }
+
+/* NUOVI STILI PER CHECKBOX E MODALE DI ANNULLAMENTO */
+.checkbox-cell { text-align: center; }
+.large-checkbox {
+    transform: scale(2.5);
+    margin: 0;
+    cursor: pointer;
+}
+.revert-options { display: flex; flex-direction: column; gap: 12px; margin: 24px 0; }
+.revert-options .btn { justify-content: center; }
+.form-check-group { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; }
+.form-check-group label { margin: 0; font-size: 14px; cursor: pointer; }
+.btn-outline.full-width { width: 100%; }
+/* In gestione_consegna.html, AGGIUNGI queste regole dentro <style> */
+
+/* Stili per il footer della pagina consegna */
+.sticky-footer.delivery-footer {
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+}
+
+.delivery-footer .actions-group {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap; /* Permette ai bottoni di andare a capo se non c'è spazio */
+}
+
+/* Sovrascrivi il media query di base.html per il footer */
+@media (max-width: 1200px) {
+    /* Nascondiamo il workflow se lo schermo è troppo piccolo,
+       dando priorità alle azioni di consegna */
+    .delivery-footer .workflow-group {
+        display: none; 
+    }
+    .sticky-footer.delivery-footer {
+        justify-content: center; /* Centra le azioni di consegna */
+    }
+}
+
+@media (max-width: 768px) {
+    /* Su mobile, il footer è già in colonna (da base.html) */
+    .sticky-footer.delivery-footer {
+        gap: 16px;
+    }
+    .delivery-footer .actions-group {
+        justify-content: center;
+    }
+    .delivery-footer .workflow-group {
+        display: block; /* Su mobile lo rimostriamo, tanto è in colonna */
+    }
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--muted);
+}
+.empty-state i {
+    font-size: 32px;
+    color: #ced4da;
+    margin-bottom: 12px;
+}
+.empty-state h4 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    color: #1a202c;
+}
+.empty-state p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+}
+</style>
+{% if p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
+<div class="sticky-footer delivery-footer">
+
+    <div class="workflow-group">
+        {{ workflow_navbar(p, 'consegna') }}
+    </div>
+
+     <div class="actions-group">
+        <button type="button" id="btn-marca-pronto" class="btn warning hidden"><i class="fas fa-box"></i> Merce Arrivata</button>
+        {% if session.user_role in ['segreteria', 'amministratore', 'ceo'] %}
+        <button type="button" id="btn-crea-bolla" class="btn primary hidden"><i class="fas fa-receipt"></i> Crea Bolla</button>
+        <button type="button" id="btn-marca-consegnato" class="btn success hidden"><i class="fas fa-check-double"></i> Marca Consegnato</button>
+        <button type="button" id="btn-annulla-stato" class="btn btn-outline hidden"><i class="fas fa-history"></i> Annulla Stato</button>
+        {% endif %}
+    </div>
+
+</div>
+{% endif %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Riferimenti a tutti gli elementi HTML, vecchi e nuovi
+    const form = document.getElementById('delivery-form');
+    const quoteId = form.dataset.quoteId;
+    const checkboxes = document.querySelectorAll('input[name="selected_items"]');
+    
+    const btnCreaBolla = document.getElementById('btn-crea-bolla');
+    const btnMarcaPronto = document.getElementById('btn-marca-pronto');
+    const btnMarcaConsegnato = document.getElementById('btn-marca-consegnato');
+    const btnAnnullaStato = document.getElementById('btn-annulla-stato');
+
+    const revertModal = document.getElementById('revert-status-modal');
+    const btnRevertPronto = document.getElementById('btn-revert-pronto');
+    const btnRevertDaConsegnare = document.getElementById('btn-revert-da-consegnare');
+    const revertBollaOption = document.getElementById('revert-bolla-option');
+    const keepBollaCheckbox = document.getElementById('keep-bolla-checkbox');
+    const revertModalCancel = document.getElementById('revert-modal-cancel');
+    
+    const modal = document.getElementById('notification-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalText = document.getElementById('modal-text');
+    const modalConfirm = document.getElementById('modal-confirm');
+    const modalCancel = document.getElementById('modal-cancel');
+    const addressConfirmModal = document.getElementById('address-confirm-modal');
+    const cantiereAddressModal = document.getElementById('cantiere-address-modal');
+    const cantiereForm = document.getElementById('cantiere-form');
+    let selectedAddressId = null;
+    let needsRefresh = false;
+    const geoData = JSON.parse('{{ geo_data|tojson|safe if geo_data else "[]" }}');
+
+    // --- FUNZIONI HELPER ---
+
+    function getSelectedItemsData() {
+        return [...checkboxes].filter(cb => cb.checked);
+    }
+
+    function showModal({ title, text, confirmText = 'Conferma', cancelText = 'Annulla', onConfirm, isAlert = false }) {
+        modalTitle.textContent = title;
+        modalText.textContent = text;
+        modalConfirm.textContent = confirmText;
+        modalCancel.textContent = cancelText;
+        modalConfirm.style.display = isAlert ? 'none' : 'inline-flex';
+        modalCancel.style.display = isAlert ? 'none' : 'inline-flex';
+        if (isAlert) {
+            modalConfirm.style.display = 'none';
+            modalCancel.textContent = 'OK';
+            modalCancel.style.display = 'inline-flex';
+        }
+        modal.style.display = 'flex';
+        return new Promise((resolve) => {
+            modalConfirm.onclick = () => {
+                modal.style.display = 'none';
+                if (onConfirm) onConfirm();
+                resolve(true);
+            };
+            modalCancel.onclick = () => {
+                modal.style.display = 'none';
+                resolve(false);
+            };
+        });
+    }
+
+    // --- LOGICA PRINCIPALE ---
+
+    function updateButtonState() {
+        const checkedBoxes = getSelectedItemsData();
+        const anyChecked = checkedBoxes.length > 0;
+        const actionsHelperText = document.getElementById('actions-helper-text');
+        
+        const statuses = new Set(anyChecked ? checkedBoxes.map(cb => cb.dataset.status) : []);
+        
+        // Logica per pulsanti di avanzamento
+        const canMarkPronto = anyChecked && statuses.size === 1 && statuses.has('Da Consegnare');
+        const canCreateBolla = anyChecked && statuses.size === 1 && statuses.has('Pronto per Consegna');
+        
+        // --- LA CORREZIONE È QUI ---
+        // Controlla che OGNI articolo selezionato sia o "Pronto" o "In Bolla"
+        const validStatiPerConsegna = ['Pronto per Consegna', 'In Bolla'];
+        const canMarkConsegnato = anyChecked && [...statuses].every(s => validStatiPerConsegna.includes(s));
+        
+        // Logica per pulsante di annullamento
+        const canRevert = anyChecked && ![...statuses].includes('Da Consegnare');
+
+        btnMarcaPronto.classList.toggle('hidden', !canMarkPronto);
+        btnCreaBolla.classList.toggle('hidden', !canCreateBolla);
+        btnMarcaConsegnato.classList.toggle('hidden', !canMarkConsegnato);
+        btnAnnullaStato.classList.toggle('hidden', !canRevert);
+
+        const anyActionPossible = canMarkPronto || canCreateBolla || canMarkConsegnato || canRevert;
+        actionsHelperText.classList.toggle('hidden', anyActionPossible);
+    }
+
+    function handleRevertAction(targetStatus) {
+    // Chiude subito la modale per dare un feedback all'utente
+    revertModal.style.display = 'none';
+
+    const checkedItems = getSelectedItemsData();
+    const formData = new FormData();
+    formData.append('target_status', targetStatus);
+    formData.append('keep_bolla', keepBollaCheckbox.checked);
+    checkedItems.forEach(cb => formData.append('indices[]', cb.value));
+
+    fetch(`/consegna/${quoteId}/annulla-stato`, { method: 'POST', body: formData })
+        .then(res => {
+            if (!res.ok) { // Controlla anche errori del server (es. 500)
+                throw new Error('La richiesta al server è fallita.');
+            }
+            return res.json();
+        })
+        .then(data => {
+            if (data.success) {
+                window.location.reload(); // Se tutto va bene, ricarica la pagina
+            } else {
+                // Se il server restituisce un errore, lo mostra nella modale di notifica
+                showModal({ title: 'Errore', text: data.error || 'Operazione fallita.', isAlert: true });
+            }
+        })
+        .catch(error => {
+            // Se c'è un errore di rete, lo mostra
+            console.error('Errore durante l\'operazione di annullamento:', error);
+            showModal({ title: 'Errore di Rete', text: 'Impossibile comunicare con il server.', isAlert: true });
+        });
+}
+
+    function setupGeoDropdowns(container) {
+        if (!geoData || geoData.length === 0) return;
+        const selRegione = container.querySelector('.select-regione-cantiere');
+        const selProvincia = container.querySelector('.select-provincia-cantiere');
+        const selComune = container.querySelector('.select-comune-cantiere');
+        const regioni = [...new Map(geoData.map(item => [item.regione.codice, item.regione])).values()].sort((a, b) => a.nome.localeCompare(b.nome));
+        regioni.forEach(regione => { selRegione.add(new Option(regione.nome, regione.codice)); });
+        selRegione.addEventListener('change', () => {
+            selProvincia.innerHTML = '<option value="">Seleziona provincia...</option>';
+            selComune.innerHTML = '<option value="">...</option>';
+            const codiceRegione = selRegione.value; if (!codiceRegione) return;
+            const nomeRegioneInput = container.querySelector('[name="regione_nome"]');
+            if(nomeRegioneInput) nomeRegioneInput.value = selRegione.options[selRegione.selectedIndex].text;
+            const provinceInRegione = geoData.filter(c => c.regione.codice === codiceRegione);
+            const provinceUniche = [...new Map(provinceInRegione.map(item => [item.provincia.codice, {nome: item.provincia.nome, sigla: item.sigla}])).values()].sort((a, b) => a.nome.localeCompare(b.nome));
+            provinceUniche.forEach(prov => { selProvincia.add(new Option(`${prov.nome} (${prov.sigla})`, prov.sigla)); });
+        });
+        selProvincia.addEventListener('change', () => {
+            selComune.innerHTML = '<option value="">Seleziona comune...</option>';
+            const siglaProvincia = selProvincia.value; if (!siglaProvincia) return;
+            const comuni = geoData.filter(c => c.sigla === siglaProvincia).sort((a, b) => a.nome.localeCompare(b.nome));
+            comuni.forEach(comune => { selComune.add(new Option(comune.nome, comune.nome)); });
+        });
+    }
+
+    function proceedWithBollaCreation(indirizzoCantiereId = null) {
+        needsRefresh = true;
+        const formData = new FormData();
+        getSelectedItemsData().forEach(cb => { formData.append('selected_items[]', cb.value); });
+        if (indirizzoCantiereId) { formData.append('indirizzo_cantiere_id', indirizzoCantiereId); }
+        const newTab = window.open("{{ url_for('loading_static') }}", "_blank");
+        if (!newTab) {
+            showModal({ title: 'Errore', text: 'Per favore, disabilita il blocco popup per questo sito.', isAlert: true});
+            needsRefresh = false;
+            return;
+        }
+        fetch(`/consegna/${quoteId}/crea-bolla`, { method: 'POST', body: formData })
+            .then(res => res.json()).then(data => {
+                if (data.success) {
+                    newTab.location.href = data.next_url;
+                } else {
+                    newTab.close();
+                    showModal({ title: 'Errore', text: data.error, isAlert: true });
+                    needsRefresh = false;
+                }
+            }).catch(err => {
+                 newTab.close();
+                 showModal({ title: 'Errore', text: 'Errore di connessione con il server.', isAlert: true });
+                 needsRefresh = false;
+            });
+    }
+
+    // --- COLLEGAMENTO EVENTI ---
+
+    checkboxes.forEach(cb => cb.addEventListener('change', updateButtonState));
+    
+    // Eventi per la nuova modale di annullamento
+    btnAnnullaStato.addEventListener('click', () => {
+        const checkedItems = getSelectedItemsData();
+        if (checkedItems.length === 0) return;
+        const canRevertToPronto = checkedItems.every(cb => cb.dataset.hasArrivalDate === 'true');
+        const hasBolla = checkedItems.some(cb => cb.dataset.hasBolla === 'true');
+        btnRevertPronto.classList.toggle('hidden', !canRevertToPronto);
+        revertBollaOption.classList.toggle('hidden', !hasBolla);
+        revertModal.style.display = 'flex';
+    });
+    revertModalCancel.addEventListener('click', () => revertModal.style.display = 'none');
+    btnRevertPronto.addEventListener('click', () => handleRevertAction('Pronto per Consegna'));
+    btnRevertDaConsegnare.addEventListener('click', () => handleRevertAction('Da Consegnare'));
+
+    // Eventi per le azioni esistenti
+    btnMarcaPronto.addEventListener('click', () => {
+        const formData = new FormData();
+        getSelectedItemsData().forEach(cb => formData.append('selected_items[]', cb.value));
+        fetch(`/consegna/${quoteId}/marca-pronto`, { method: 'POST', body: formData })
+            .then(res => res.json()).then(data => {
+                if (data.success) window.location.reload();
+                else showModal({ title: 'Errore', text: data.error, isAlert: true });
+            });
+    });
+
+    btnMarcaConsegnato.addEventListener('click', async () => {
+        const confirmed = await showModal({ title: 'Conferma Azione', text: "Sei sicuro di voler marcare gli articoli come 'Consegnato'? L'azione è definitiva." });
+        if (!confirmed) return;
+        const formData = new FormData();
+        getSelectedItemsData().forEach(cb => formData.append('selected_items[]', cb.value));
+        fetch(`/consegna/${quoteId}/marca-consegnato`, { method: 'POST', body: formData })
+            .then(res => res.json()).then(data => {
+                if (data.success) window.location.reload();
+                else showModal({ title: 'Errore', text: data.error, isAlert: true });
+            });
+    });
+
+    btnCreaBolla.addEventListener('click', () => { addressConfirmModal.style.display = 'flex'; });
+    document.getElementById('btn-address-yes').addEventListener('click', () => {
+        addressConfirmModal.style.display = 'none';
+        proceedWithBollaCreation(null);
+    });
+    document.getElementById('btn-address-no').addEventListener('click', () => {
+        addressConfirmModal.style.display = 'none';
+        fetch(`/cliente/{{ p.id_cliente }}/indirizzi-cantiere`).then(res => res.json()).then(data => {
+            const listContainer = document.getElementById('cantiere-list');
+            listContainer.innerHTML = '';
+            if (data.indirizzi && data.indirizzi.length > 0) {
+                data.indirizzi.forEach(addr => {
+                    const item = document.createElement('div');
+                    item.className = 'cantiere-item';
+                    item.dataset.addressId = addr.id;
+                    item.innerHTML = `<div><strong>${addr.descrizione}</strong><br><small>${addr.indirizzo || ''}, ${addr.cap || ''} ${addr.comune || ''} (${addr.provincia || ''})</small></div><button type="button" class="btn icon-btn edit-cantiere-btn" title="Modifica Indirizzo"><i class="fas fa-pencil-alt"></i></button>`;
+                    listContainer.appendChild(item);
+                });
+            } else { listContainer.innerHTML = '<p class="muted">Nessun indirizzo cantiere salvato.</p>'; }
+            cantiereAddressModal.style.display = 'flex';
+        });
+    });
+    document.getElementById('cantiere-list').addEventListener('click', e => {
+        const item = e.target.closest('.cantiere-item');
+        if (!item) return;
+        if (e.target.closest('.edit-cantiere-btn')) {
+             fetch(`/cliente/{{ p.id_cliente }}/indirizzi-cantiere`).then(res => res.json()).then(data => {
+                const addr = data.indirizzi.find(a => a.id === item.dataset.addressId);
+                if (addr) {
+                    cantiereForm.querySelector('[name="id"]').value = addr.id;
+                    cantiereForm.querySelector('[name="descrizione"]').value = addr.descrizione;
+                    cantiereForm.querySelector('[name="indirizzo"]').value = addr.indirizzo;
+                    cantiereForm.querySelector('[name="cap"]').value = addr.cap;
+                }
+            });
+            return;
+        }
+        document.querySelectorAll('.cantiere-item').forEach(el => el.classList.remove('selected'));
+        item.classList.add('selected');
+        selectedAddressId = item.dataset.addressId;
+        cantiereForm.reset();
+        cantiereForm.querySelector('[name="id"]').value = '';
+    });
+    document.getElementById('cantiere-modal-save').addEventListener('click', () => {
+        const clientId = cantiereForm.dataset.clientId;
+        const isCreatingNew = !selectedAddressId && cantiereForm.querySelector('[name="descrizione"]').value.trim();
+        if (isCreatingNew) {
+            const formData = new FormData(cantiereForm);
+            fetch(`/cliente/${clientId}/salva-indirizzo-cantiere`, { method: 'POST', body: formData })
+                .then(res => res.json()).then(data => {
+                    if (data.success) {
+                        cantiereAddressModal.style.display = 'none';
+                        proceedWithBollaCreation(data.new_address_id);
+                    } else { showModal({ title: 'Errore', text: data.error, isAlert: true }); }
+                });
+        } else if (selectedAddressId) {
+            cantiereAddressModal.style.display = 'none';
+            proceedWithBollaCreation(selectedAddressId);
+        } else {
+            showModal({ title: 'Attenzione', text: 'Seleziona un indirizzo o compila i campi per crearne uno nuovo.', isAlert: true });
+        }
+    });
+    document.getElementById('cantiere-modal-cancel').addEventListener('click', () => {
+        cantiereAddressModal.style.display = 'none';
+        cantiereForm.reset();
+        selectedAddressId = null;
+    });
+    window.addEventListener('focus', () => {
+        if (needsRefresh) {
+            needsRefresh = false;
+            window.location.reload();
+        }
+    });
+    
+    // Inizializza i menu a tendina e lo stato dei pulsanti
+    setupGeoDropdowns(cantiereForm);
+    updateButtonState();
+});
+</script>
+{% endblock %}

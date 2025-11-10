@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-coins"></i> Dashboard Pagamenti</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+    {% include '_form_light_search.html' %}
+    <div class="card">
+        <div class="card-header">
+            <h3>Elenco Preventivi Confermati da Saldare</h3>
+        </div>
+        <div class="table-wrap">
+            <table class="styled-table">
+                <thead>
+                    <tr>
+                        <th>Preventivo</th>
+                        <th>Cliente</th>
+                        <th class="right">Totale</th>
+                        <th class="right">Saldato</th>
+                        <th class="right">Da Incassare</th> 
+                        <th class="right">Da Saldare</th>
+                        <th>Ult. Acconto</th>
+                        <th>Stato</th>
+                        <th class="actions-column"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in preventivi %}
+                    <tr class="payment-row {{ 'alert-' + p.allerta_giorni if p.allerta_giorni }}">
+                        <td><strong>{{ p.numero }}</strong></td>
+                        <td>{{ p.cliente }}</td>
+                        <td class="right nowrap total-main">{{ money_ui(p.totale) }}</td>
+                        <td class="right nowrap total-paid">{{ money_ui(p.totale_pagato) }}</td>
+                        <td class="right nowrap total-future">{{ money_ui(p.totale_da_incassare) }}</td>
+                        <td class="right nowrap total-due"><strong>{{ money_ui(p.totale_da_saldare) }}</strong></td>
+                        <td class="nowrap">
+                            {% if p.ultimo_pagamento_data %}
+                              {{ p.ultimo_pagamento_data }}
+                            {% else %}
+                              <span class="muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="nowrap">
+                            {% if p.stato_pagamento == 'Saldato' %}
+                                <span class="status-tag success">Saldato</span>
+                            {% else %}
+                                <span class="status-tag danger">Da Saldare</span>
+                            {% endif %}
+                        </td>
+                        <td class="row-actions">
+                            <a href="{{ url_for('gestione_pagamenti', quote_id=p.numero) }}" class="btn icon-btn primary" title="Gestisci Pagamenti">
+                                <i class="fas fa-arrow-right"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9">
+                            <div class="empty-state">
+                                <i class="fas fa-check-circle"></i>
+                                <h4>Nessun pagamento da gestire</h4>
+                                <p>Non ci sono preventivi confermati o chiusi in attesa di saldo.</p>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Stili presi da altre pagine per coerenza */
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.table-wrap { overflow-x: auto; }
+.styled-table { width: 100%; border-collapse: collapse; }
+.styled-table th, .styled-table td { 
+    padding: 14px 18px; 
+    text-align: left; 
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+.nowrap, .styled-table .nowrap {
+    white-space: nowrap;
+}
+.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table tbody tr:last-child td { border-bottom: none; }
+.actions-column { text-align: right; }
+.row-actions { text-align: right; }
+.empty-state { text-align: center; padding: 40px; color: var(--muted); }
+.empty-state i { font-size: 32px; color: #198754; margin-bottom: 12px; }
+.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; color: var(--text-primary); }
+.empty-state p { margin: 0; font-size: 14px; }
+
+/* Stili Badge di Stato */
+.status-tag { display: inline-block; padding: 4px 12px; font-size: 11px; font-weight: 600; border-radius: 20px; text-align: center; }
+.status-tag.success { background-color: #dcfce7; color: #16a34a; } /* Verde chiaro */
+.status-tag.danger { background-color: #fee2e2; color: #dc2626; } /* Rosso chiaro */
+
+/* Stili per le allerte sui giorni */
+.payment-row.alert-giallo { border-left: 4px solid #ffc107; }
+.payment-row.alert-arancio { border-left: 4px solid #fd7e14; }
+.payment-row.alert-rosso { border-left: 4px solid #dc3545; }
+.payment-row.alert-giallo td:first-child,
+.payment-row.alert-arancio td:first-child,
+.payment-row.alert-rosso td:first-child { 
+    border-left: none; /* Evita doppi bordi */
+}
+
+/* Stile per pulsante icona */
+.btn.icon-btn {
+    padding: 8px;
+    line-height: 1;
+    border-radius: 8px;
+    background-color: var(--bg-light, #f8f9fa);
+    color: var(--muted, #6c757d);
+    border: 1px solid var(--border-color, #e2e8f0);
+}
+.btn.icon-btn:hover {
+    background-color: var(--bg-hover, #f1f5f9);
+    color: var(--text-primary);
+}
+.btn.icon-btn.primary {
+    background-color: var(--primary-color-light, #e7f0fe);
+    color: var(--primary-color, #0d6efd);
+    border-color: transparent;
+}
+.btn.icon-btn.primary:hover {
+    background-color: var(--primary-color, #0d6efd);
+    color: #fff;
+}
+.total-main { color: #0d6efd; }
+.total-paid { color: #198754; }
+.total-future { color: #fd7e14; font-weight: 600; }
+.total-due { color: #dc3545; }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('live-search-input');
+    const contentContainer = document.querySelector('.editor-container');
+
+    // SELEZIONE CORRETTA: Prendi la tabella e poi le righe del body
+    const table = contentContainer.querySelector('.styled-table');
+    if (!table) return; // Esce se non c'è la tabella
+
+    const tableBody = table.querySelector('tbody');
+    if (!tableBody) return; // Esce se non c'è il body
+
+    // Salva la riga "empty state" se esiste (quella con colspan)
+    const emptyStateRow = tableBody.querySelector('tr td[colspan]')?.closest('tr');
+
+    // Seleziona TUTTE le righe del body per il filtraggio
+    const allRows = Array.from(tableBody.querySelectorAll('tr'));
+
+    searchInput.addEventListener('input', () => {
+        const searchTerm = searchInput.value.toLowerCase().trim();
+
+        if (searchTerm.length > 0 && searchTerm.length < 3) {
+            return;
+        }
+        
+        let visibleDataRows = 0;
+
+        // Itera su TUTTE le righe
+        allRows.forEach(row => {
+            // Salta la riga "empty state" in questo ciclo
+            if (row === emptyStateRow) {
+                return;
+            }
+
+            const rowText = row.textContent.toLowerCase();
+
+            if (rowText.includes(searchTerm) || searchTerm === "") {
+                row.style.display = 'table-row'; // Mostra la riga
+                visibleDataRows++;
+            } else {
+                row.style.display = 'none'; // Nascondi la riga
+            }
+        });
+
+        // Gestisci la visibilità della riga "empty state"
+        if (emptyStateRow) {
+            if (visibleDataRows === 0 && searchTerm !== "") {
+                emptyStateRow.style.display = 'table-row';
+            } else if (visibleDataRows > 0) {
+                 emptyStateRow.style.display = 'none';
+            } else if (searchTerm === "") {
+                // Se la ricerca è vuota, ma c'erano 0 righe dati (preventivi) in partenza
+                // mostra l'empty state (gestisce il caso di tabella vuota di default)
+                if (allRows.length === 1 && allRows[0] === emptyStateRow) {
+                     emptyStateRow.style.display = 'table-row';
+                } else {
+                     emptyStateRow.style.display = 'none';
+                }
+            }
+        }
+    });
+});
+</script>
+{% block footer_nav %}
+<div class="dashboard-footer-nav">
+    {{ dashboard_navbar('pagamenti') }}
+</div>
+{% endblock %}
+
+{% endblock %}
+

@@ -1,0 +1,37 @@
+<div class="card filter-card">
+    <div class="filter-body">
+        <label for="live-search-input">
+            <i class="fas fa-filter"></i>
+            Filtra in questa pagina
+        </label>
+        <input type="text" 
+               id="live-search-input" 
+               placeholder="Scrivi qui per filtrare i risultati..."
+               autocomplete="off">
+    </div>
+</div>
+
+<style>
+.filter-card {
+    margin-bottom: 24px;
+}
+.filter-body {
+    padding: 16px 24px;
+}
+.filter-body label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #475569;
+}
+.filter-body input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    font-size: 14px;
+}
+</style>

@@ -1,0 +1,32 @@
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="search-container">
+  <div class="search-card">
+    <form action="{{ url_for('cerca_cliente') }}" method="POST" class="search-form">
+      <input type="hidden" name="action" value="{{ action or 'open_archive' }}">
+      <div class="search-header">
+        <i class="fas fa-search"></i>
+        <h2>Cerca Cliente</h2>
+      </div>
+      <div class="search-body">
+        <p>Inserisci il nome o la ragione sociale del cliente.</p>
+        <div class="input-group">
+          <input type="text" id="live-search-input" name="search_term" placeholder="Es. Mario Rossi..." required>
+          <button type="submit" class="btn primary">Cerca</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+  .search-container { max-width: 700px; margin: 0 auto; padding: 24px; }
+  .search-card { width: 100%; background-color: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.07); overflow: hidden; }
+  .search-header { padding: 24px; text-align: center; background-color: #f8f9fa; border-bottom: 1px solid #e2e8f0; }
+  .search-header i { font-size: 24px; margin-bottom: 8px; }
+  .search-header h2 { margin: 0; font-size: 22px; }
+  .search-body { padding: 32px; }
+  .search-body p { text-align: center; color: var(--muted); margin: 0 0 24px 0; }
+  .input-group { display: flex; gap: 8px; }
+  .input-group input { flex-grow: 1; }
+</style>

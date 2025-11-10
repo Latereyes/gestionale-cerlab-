@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-file-invoice"></i> Dashboard Fatture</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+    {% include '_form_light_search.html' %}
+    <div class="card">
+        <div class="card-header">
+            <h3>Preventivi da Fatturare o Fatturati</h3>
+        </div>
+        <div class="card-body">
+            {% if preventivi %}
+            <p class="muted">Elenco di tutti i preventivi confermati, in lavorazione o chiusi.</p>
+            <div class="table-wrap">
+                <table class="styled-table">
+                    <thead>
+                        <tr>
+                            <th>Preventivo</th>
+                            <th>Cliente</th>
+                            <th class="center">Stato Fattura</th>
+                            <th class="right">Totale</th>
+                            <th class="actions-column"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in preventivi %}
+                        <tr>
+                            <td>
+                                <strong>{{ p.numero }}</strong><br>
+                                <small class="muted">{{ p.data }}</small>
+                            </td>
+                            <td>{{ p.cliente }}</td>
+                            <td class="center">
+                            {% if p.stato in ['Bozza', 'Inviato'] %}
+                                {# Se Bozza o Inviato, è sempre N/D (neutro) #}
+                                <div class="status-badge status-nd"><i class="fas fa-minus-circle"></i> N/D</div>
+                            {% elif p.no_iva %}
+                                <span class="status-badge status-non-disponibile">IVA ESENTE</span>
+                            {% elif p.stato_fattura == 'Fatturato' %}
+                                <span class="status-badge status-fattura-emessa">Fattura Emessa</span>
+                            {% else %}
+                                <span class="status-badge status-in-attesa-di-fattura">In Attesa</span>
+                            {% endif %}
+                            </td>
+                            <td class="right"><strong>{{ money_ui(p.totale) }}</strong></td>
+                            <td class="row-actions">
+                                <a href="{{ url_for('editor_fattura', quote_id=p.numero) }}" class="btn icon-btn primary" title="Gestisci Fattura">
+                                    <i class="fas fa-arrow-right"></i>
+                                </a>
+                            </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <i class="fas fa-check-circle"></i>
+                <h4>Nessun preventivo da fatturare</h4>
+                <p>Non ci sono preventivi pronti per la fatturazione al momento.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+    /* ... stili ... */
+    .editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+    .card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 24px; }
+    .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
+    .card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+    .card-body { padding: 24px; }
+    .table-wrap { overflow-x: auto; }
+    .styled-table { width: 100%; border-collapse: collapse; }
+    .styled-table th, .styled-table td { padding: 14px 18px; text-align: left; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    .styled-table thead th { background-color: #f8f9fa; font-size: 11px; text-transform: uppercase; color: #64748b; }
+    .actions-column, .row-actions { text-align: right; }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    
+    .status-badge { display: inline-block; padding: 4px 12px; font-size: 11px; font-weight: 600; border-radius: 20px; color: #fff; min-width: 100px; text-align: center; }
+    .status-in-attesa-di-fattura { background-color: #ffc107; color: #000; }
+    .status-fattura-emessa { background-color: #198754; }
+    .status-non-disponibile { 
+    background-color: #3f4348; 
+}
+
+    /* Stile per pulsante icona (copiato da dashboard_pagamenti) */
+    .btn.icon-btn { padding: 8px; line-height: 1; border-radius: 8px; }
+    .btn.icon-btn.primary { background-color: #e7f0fe; color: #0d6efd; border-color: transparent; }
+    .btn.icon-btn.primary:hover { background-color: #0d6efd; color: #fff; }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('live-search-input');
+    const contentContainer = document.querySelector('.editor-container');
+
+    // SELEZIONE CORRETTA: Prendi la tabella e poi le righe del body
+    const table = contentContainer.querySelector('.styled-table');
+    if (!table) return; // Esce se non c'è la tabella
+
+    const tableBody = table.querySelector('tbody');
+    if (!tableBody) return; // Esce se non c'è il body
+
+    // Salva la riga "empty state" se esiste (quella con colspan)
+    const emptyStateRow = tableBody.querySelector('tr td[colspan]')?.closest('tr');
+
+    // Seleziona TUTTE le righe del body per il filtraggio
+    const allRows = Array.from(tableBody.querySelectorAll('tr'));
+
+    searchInput.addEventListener('input', () => {
+        const searchTerm = searchInput.value.toLowerCase().trim();
+
+        if (searchTerm.length > 0 && searchTerm.length < 3) {
+            return;
+        }
+        
+        let visibleDataRows = 0;
+
+        // Itera su TUTTE le righe
+        allRows.forEach(row => {
+            // Salta la riga "empty state" in questo ciclo
+            if (row === emptyStateRow) {
+                return;
+            }
+
+            const rowText = row.textContent.toLowerCase();
+
+            if (rowText.includes(searchTerm) || searchTerm === "") {
+                row.style.display = 'table-row'; // Mostra la riga
+                visibleDataRows++;
+            } else {
+                row.style.display = 'none'; // Nascondi la riga
+            }
+        });
+
+        // Gestisci la visibilità della riga "empty state"
+        if (emptyStateRow) {
+            if (visibleDataRows === 0 && searchTerm !== "") {
+                emptyStateRow.style.display = 'table-row';
+            } else if (visibleDataRows > 0) {
+                 emptyStateRow.style.display = 'none';
+            } else if (searchTerm === "") {
+                // Se la ricerca è vuota, ma c'erano 0 righe dati (preventivi) in partenza
+                // mostra l'empty state (gestisce il caso di tabella vuota di default)
+                if (allRows.length === 1 && allRows[0] === emptyStateRow) {
+                     emptyStateRow.style.display = 'table-row';
+                } else {
+                     emptyStateRow.style.display = 'none';
+                }
+            }
+        }
+    });
+});
+</script>
+
+{% block footer_nav %}
+<div class="dashboard-footer-nav">
+    {{ dashboard_navbar('fatture') }}
+</div>
+{% endblock %}
+
+{% endblock %}

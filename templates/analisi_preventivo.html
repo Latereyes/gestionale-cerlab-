@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="dashboard-container">
+
+  <div class="dashboard-header">
+    <h1><i class="fas fa-chart-pie"></i> Analisi Preventivo</h1>
+    <a href="{{ url_for('dashboard') }}" class="btn with-icon">
+      <i class="fas fa-arrow-left"></i> Torna alla Dashboard
+    </a>
+  </div>
+
+  <div class="card" style="margin-bottom: 24px;">
+    <div class="card-header">
+      <h3>Riepilogo: {{ p.numero }}</h3>
+    </div>
+    <div class="card-body">
+        <ul class="kpi-list">
+            <li><span>Cliente:</span> <strong>{{ p.cliente }}</strong></li>
+            <li><span>Data Creazione:</span> <strong>{{ p.data }}</strong></li>
+            <li><span>Venditore:</span> <strong>{{ p.venditore }}</strong></li>
+            <li><span>Stato:</span> <strong>{{ p.stato }}</strong></li>
+        </ul>
+    </div>
+  </div>
+
+  <div class="grid-2-col">
+    <div class="card">
+      <div class="card-header"><h3><i class="fas fa-piggy-bank"></i> Analisi Profittabilità</h3></div>
+      <div class="card-body">
+        <ul class="kpi-list">
+          <li>
+            <span>Ricavo (Imponibile Cliente)</span>
+            <strong>{{ analisi.imponibile_cliente | money_ui }}</strong>
+          </li>
+          <li>
+            <span>Costo (Preventivato Negozio)</span>
+            <strong>{{ analisi.costi_preventivati | money_ui }}</strong>
+          </li>
+          <li style="border-top: 1px solid #e2e8f0; padding-top: 12px;">
+            <span>Utile Netto Stimato (Ricarico)</span>
+            <strong class="text-success">{{ analisi.utile_netto_effettivo | money_ui }}</strong>
+          </li>
+          <li>
+            <span>Fee Versata Stimata</span>
+            <strong class="text-danger">- {{ analisi.fee_versata | money_ui }}</strong>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3><i class="fas fa-chart-line"></i> Redditività (%)</h3></div>
+      <div class="card-body">
+        <ul class="kpi-list">
+          <li>
+            <span>Margine Lordo % (su Ricavo)</span>
+            <strong>{{ "%.2f" | format(analisi.margine_lordo_pct) }} %</strong>
+            <small>(Ricavo - Costo Preventivato) / Ricavo</small>
+          </li>
+          <li>
+            <span>Utile Netto % (su Ricavo)</span>
+            <strong>{{ "%.2f" | format(analisi.utile_netto_effettivo_pct) }} %</strong>
+            <small>(Utile Netto / Ricavo)</small>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-balance-scale"></i> Analisi Costi (Preventivo vs Effettivo)</h3></div>
+    <div class="card-body">
+      <ul class="kpi-list">
+        <li>
+          <span>Costi Preventivati (Imponibile Negozio)</span>
+          <strong>{{ analisi.costi_preventivati | money_ui }}</strong>
+        </li>
+        <li>
+          <span>Costi Effettivi (Ordini Netti)</span>
+          <strong>{{ analisi.costi_effettivi_netti | money_ui }}</strong>
+        </li>
+        <li style="border-top: 1px solid #e2e8f0; padding-top: 12px;">
+          <span>Scostamento</span>
+          <strong class="{{ 'text-danger' if analisi.scostamento_costi > 0 else 'text-success' }}">
+            {{ analisi.scostamento_costi | money_ui }}
+          </strong>
+          <small>{{ 'Costi effettivi MAGGIORI del preventivo' if analisi.scostamento_costi > 0 else 'Costi effettivi minori o uguali al preventivo' }}</small>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-clock"></i> Metriche Temporali</h3></div>
+    <div class="card-body">
+        <ul class="kpi-list">
+            <li>
+                <span>Tempo da Conferma a Chiusura</span>
+                <strong>{{ analisi.giorni_per_chiusura }} {{ 'giorni' if analisi.giorni_per_chiusura != 'N/D' else '' }}</strong>
+            </li>
+        </ul>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .dashboard-container { max-width: 1000px; margin: 0 auto; padding: 24px; font-family: 'Inter', sans-serif; }
+  .dashboard-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .dashboard-header h1 { font-size: 28px; font-weight: 700; color: #1a202c; display: inline-flex; align-items: center; gap: 12px; }
+  .card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; }
+  .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+  .card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+  .card-body { padding: 24px; }
+  .btn.with-icon { display: inline-flex; align-items: center; gap: 8px; }
+  .grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .text-danger { color: #dc3545; }
+  .text-success { color: #198754; }
+  .kpi-list { list-style: none; padding: 0; margin: 0; }
+  .kpi-list li { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f3f4f6; flex-wrap: wrap; }
+  .kpi-list li:last-child { border-bottom: none; }
+  .kpi-list li span { font-size: 15px; color: #374151; }
+  .kpi-list li small { font-size: 12px; color: #6b7280; display: block; margin-left: 10px; text-align: right; width: 100%; }
+  .kpi-list li strong { font-size: 18px; font-weight: 600; color: #111827; }
+  @media (max-width: 768px) {
+    .grid-2-col { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
