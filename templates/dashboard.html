@@ -11,11 +11,12 @@
 <thead>
     <tr>
       <th>Preventivo</th>
-      <th>Cliente</th>
-      <th>Stato</th>
-      <th>Ordini</th> <th>Consegna</th>
-      <th>Saldo</th>
-      <th>Fattura</th>
+      <th data-sortable>Cliente <i class="sort-arrow fas fa-sort"></i></th>
+      <th data-sortable>Stato <i class="sort-arrow fas fa-sort"></i></th>
+      <th data-sortable>Ordini<i class="sort-arrow fas fa-sort"></i></th> 
+      <th data-sortable>Consegna<i class="sort-arrow fas fa-sort"></i></th>
+      <th data-sortable>Saldo<i class="sort-arrow fas fa-sort"></i></th>
+      <th data-sortable>Fattura<i class="sort-arrow fas fa-sort"></i></th>
       <th>Azioni</th>
     </tr>
 </thead>
@@ -506,7 +507,26 @@
       background-color: #dc3545;
       color: #fff;
       border: none;
-  }  
+  }
+  /* --- Stili per tabelle ordinabili --- */
+th[data-sortable] {
+    cursor: pointer;
+    user-select: none; /* Impedisce di selezionare il testo dell'intestazione */
+}
+th[data-sortable]:hover {
+    background-color: #f1f5f9; /* Leggero sfondo al passaggio del mouse */
+}
+.sort-arrow {
+    margin-left: 5px;
+    color: #cbd5e1; /* Grigio chiaro (inattivo) */
+    width: 10px; /* Dà spazio all'icona per allinearsi */
+    display: inline-block;
+    text-align: center;
+}
+th[data-sortable].sort-asc .sort-arrow,
+th[data-sortable].sort-desc .sort-arrow {
+    color: #334155; /* Colore scuro (attivo) */
+}  
 </style>
 
 
@@ -538,6 +558,58 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 });
+// --- Logica per tabelle ordinabili ---
+  document.querySelectorAll('table').forEach(table => {
+      const headers = table.querySelectorAll('th[data-sortable]');
+      if (headers.length === 0) return; // Salta tabelle non ordinabili
+
+      headers.forEach(header => {
+          header.addEventListener('click', () => {
+              const tbody = table.querySelector('tbody');
+              if (!tbody) return;
+
+              // Trova l'indice della colonna
+              const colIndex = Array.from(header.parentNode.children).indexOf(header);
+              // Prendi tutte le righe della tabella
+              const rows = Array.from(tbody.querySelectorAll('tr'));
+              
+              // Determina la nuova direzione
+              const currentDir = header.dataset.sortDir;
+              const newDirection = (currentDir === 'asc') ? 'desc' : 'asc';
+              
+              // Ordina le righe
+              rows.sort((a, b) => {
+                  const cellA = a.querySelectorAll('td')[colIndex]?.innerText.trim().toLowerCase() || '';
+                  const cellB = b.querySelectorAll('td')[colIndex]?.innerText.trim().toLowerCase() || '';
+                  
+                  // 'localeCompare' ordina alfabeticamente, 'numeric: true' gestisce correttamente i numeri
+                  const compare = cellA.localeCompare(cellB, undefined, {numeric: true});
+                  
+                  return newDirection === 'asc' ? compare : -compare;
+              });
+
+              // Ridisegna le righe nel tbody nell'ordine corretto
+              rows.forEach(row => tbody.appendChild(row));
+              
+              // Aggiorna le frecce in tutte le intestazioni
+              headers.forEach(th => {
+                  const icon = th.querySelector('.sort-arrow');
+                  if (th === header) {
+                      // Imposta l'intestazione attiva
+                      th.dataset.sortDir = newDirection;
+                      icon.className = `sort-arrow fas ${newDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'}`;
+                      th.classList.remove('sort-asc', 'sort-desc');
+                      th.classList.add(newDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+                  } else {
+                      // Resetta le altre intestazioni
+                      th.removeAttribute('data-sort-dir');
+                      icon.className = 'sort-arrow fas fa-sort';
+                      th.classList.remove('sort-asc', 'sort-desc');
+                  }
+              });
+          });
+      });
+  });
 </script>
 {% endblock %}
 

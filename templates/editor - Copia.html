@@ -85,12 +85,7 @@
                             <div class="article-cell-wrapper">
                                 <div class="drag-handle" title="Trascina per riordinare"><i class="fas fa-grip-vertical"></i></div>
                                 <input class="cell-input main-article-input" name="r[{{i}}][articolo]" value="{{ r.articolo }}" placeholder="Nome articolo o descrizione" />
-                                
                                 <button type="button" class="edit-icon" title="Modifica descrizione lunga"><i class="fas fa-pencil-alt"></i></button>
-                                
-                                <button type="button" class="toggle-calc-grid-btn" title="Mostra/nascondi calcoli">
-                                    Dettagli <i class="fas fa-chevron-down"></i>
-                                </button>
                             </div>
                             <div class="calculation-grid">
                                 <div class="input-group"><label>QT</label><input class="cell-input right" name="r[{{i}}][qt]" value="{{ r.qt }}" /></div>
@@ -723,89 +718,12 @@ body {
 .switch-label.active {
     color: #000;
 }
-/* --- Stili per Griglia Calcoli Collassabile --- */
-            .calculation-grid {
-                display: none; /* Nascosto di default */
-            }
-
-            /* Quando la riga è aperta (.is-open), mostra la griglia */
-            .rt-row.is-open .calculation-grid {
-                display: grid;
-            }
-
-            /* Stile per il nuovo pulsante di toggle */
-            .toggle-calc-grid-btn {
-                background: #f1f5f9;
-                border: 1px solid #e2e8f0;
-                color: #475569;
-                border-radius: 6px;
-                padding: 6px 10px;
-                font-size: 12px;
-                font-weight: 600;
-                cursor: pointer;
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                margin-left: 8px; /* Spazio dall'icona della matita */
-                white-space: nowrap; /* Non mandare a capo "Dettagli" */
-            }
-            .toggle-calc-grid-btn:hover {
-                background: #e9ecef;
-            }
-            .toggle-calc-grid-btn .fas {
-                transition: transform 0.2s ease-in-out;
-            }
-
-            /* Ruota la freccia quando la riga è aperta */
-            .rt-row.is-open .toggle-calc-grid-btn .fas {
-                transform: rotate(180deg);
-            }
-            
-            /* --- Correzioni Layout Pulsanti --- */
-            .article-cell-wrapper {
-                align-items: center; /* Allinea tutti i pulsanti verticalmente */
-            }
-            .edit-icon {
-                /* Togliamo il posizionamento assoluto per metterlo in linea */
-                position: static;
-                transform: none;
-                margin-left: 8px; /* Aggiungiamo un po' di spazio */
-                flex-shrink: 0; /* Impedisce al pulsante di stringersi */
-            }
-            .main-article-input {
-                padding-right: 8px !important; /* Rimuoviamo il padding extra, non serve più */
-            }
-            /* --- Stili per Totali Collassabili (Nuova Aggiunta) --- */
-.rt-row:not(.is-open) .total-prezzo-negozio,
-.rt-row:not(.is-open) .total-unitario {
-    display: none; /* Nasconde prezzo negozio e unitario se la riga NON è aperta */
-}
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // =======================================================
-    // --- LOGICA GRIGLIA CALCOLI COLLASSABILE ---
-    // =======================================================
-    const tabellaRigheContainer = document.getElementById('tabella-righe');
-
-    if (tabellaRigheContainer) {
-        tabellaRigheContainer.addEventListener('click', function(e) {
-            // Cerca il pulsante di toggle che è stato cliccato
-            const toggleBtn = e.target.closest('.toggle-calc-grid-btn');
-            
-            if (toggleBtn) {
-                // Trova la riga genitore (.rt-row)
-                const row = toggleBtn.closest('.rt-row');
-                if (row) {
-                    // Aggiungi o rimuovi la classe 'is-open'
-                    row.classList.toggle('is-open');
-                }
-            }
-        });
-    }
     // Configurazione Margini da Jinja2
     const marginiConfig = JSON.parse('{{ margini_config|tojson|safe }}');
     let sortableInstance = null;

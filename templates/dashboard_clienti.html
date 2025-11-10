@@ -54,7 +54,9 @@
             <table class="styled-table dashboard-table">
                 <thead>
                     <tr>
-                        <th style="width: 1%;"></th> <th>Stato</th>
+                        <th style="width: 1%;"></th>
+                        <th>Numero</th>
+                        <th>Stato</th>
                         <th class="right">Totale</th>
                         <th>Ordini</th>
                         <th>Consegna</th>
@@ -68,6 +70,10 @@
                     <tr class="main-row" data-target-row="details-{{ p.numero }}">
                         <td class="center expand-cell">
                             <button type="button" class="btn icon-btn expand-btn"><i class="fas fa-chevron-down"></i></button>
+                        </td>
+
+                        <td>
+                            <strong>{{ p.numero }}</strong>
                         </td>
                         
                         <td>
@@ -162,11 +168,9 @@
                             <a href="{{ url_for('editor_fattura', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Fatture"><i class="fas fa-file-invoice"></i></a>
                         </td>
                     </tr>
-                    </tr>
-                    </tr>
                     
                     <tr class="details-row" id="details-{{ p.numero }}">
-                        <td colspan="8">
+                        <td colspan="9">
                             <div class="kpi-riepilogo-grid">
                                 <div class="kpi-group">
                                     <div class="kpi-title">Preventivo</div>

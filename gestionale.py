@@ -30,7 +30,7 @@ import queue
 from tkinter import Tk, Label, PhotoImage, Button
 
 
-APP_VERSION = "1.9.8"  
+APP_VERSION = "1.9.9"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -191,7 +191,6 @@ class AppLauncher(Tk):
             if self.winfo_exists():
                  self.after(100, self.process_queue)
 
-    # All'interno della classe AppLauncher, in gestionale.py
     
     def run_startup_process(self):
         """
@@ -1196,7 +1195,6 @@ def gestisci_margini():
     margini_config = load_margini_config()
     return render_template("margini_ricarico.html", title="Gestione Margini", config=margini_config)
 
-# In gestionale.py, SOSTITUISCI questa funzione
 
 @app.route("/archivio")
 @login_required
@@ -1342,10 +1340,7 @@ def dashboard_clienti():
         
         # --- 4. Aggiungi alla lista ---
         clienti_preventivi[cliente_nome]['preventivi'].append(p)
-        if is_attivo:
-            clienti_preventivi[cliente_nome]['totale_attivo'] += totale_preventivo
-            clienti_preventivi[cliente_nome]['preventivi'].append(p)
-            clienti_preventivi[cliente_nome]['totale_attivo'] += totale_preventivo
+        clienti_preventivi[cliente_nome]['totale_attivo'] += totale_preventivo
 
     return render_template("dashboard_clienti.html", 
         title="Preventivi per Cliente",
@@ -3724,8 +3719,6 @@ def dashboard_fatture():
         preventivi=preventivi_confermati
     )
 
-# In gestionale.py, SOSTITUISCI la funzione editor_fattura
-
 @app.route("/fattura/<quote_id>")
 @login_required
 def editor_fattura(quote_id):
@@ -4125,7 +4118,6 @@ def setup_and_run_tray_icon():
     icon = pystray.Icon("Gestionale", image, SERVER_ADDRESS_INFO, menu)
     icon.run()
 
-# Incolla questo blocco al posto di quello vecchio in fondo a gestionale.py
 
 if __name__ == "__main__":
     # --- MODALITÀ DEBUG ---

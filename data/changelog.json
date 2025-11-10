@@ -1,5 +1,15 @@
 
 [ {
+    "version": "1.9.9",
+    "date": "2025-11-05",
+    "title": "Versione 1.9.8 - 10 Novembre 2025 (design and logic fix)",
+    "changes": [
+      "CORREZIONE: Risolto bug duplicazione preventivi du dahshboard clienti.",
+      "NEW: Aggiunta icona freccia colonne tabella dashboard per indicare ordinamento attivo e ordinare in ordine alfabetico",
+      "NEW: Migliorata legibilita'preventivi in editor, le rige ora vengono collassate. Cliccare su dettagli per espandere."
+    ]
+  },
+  {
     "version": "1.9.8",
     "date": "2025-11-05",
     "title": "Versione 1.9.8 - 10 Novembre 2025 (updating system)",
