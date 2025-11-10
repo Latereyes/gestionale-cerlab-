@@ -69,11 +69,28 @@ if __name__ == "__main__":
 
             print("\n🚀 Build completata!")
             
-            # --- BLOCCO AGGIUNTO PER PUBBLICAZIONE SU GITHUB ---
             
             publish_to_github = input("Vuoi pubblicare questa versione su GitHub? (s/n): ").lower()
             if publish_to_github == 's':
                 print("\n--- 3/3: Pubblicazione su GitHub ---")
+
+                print("Lettura del token di autenticazione per GitHub CLI...")
+                token_path = os.path.join("data", "gh_token.txt")
+                
+                if not os.path.exists(token_path):
+                    print(f"!!! ERRORE: File token non trovato in '{token_path}'.")
+                    print("    Assicurati che 'data/gh_token.txt' esista e contenga il token.")
+                    raise FileNotFoundError("Token non trovato")
+                
+                with open(token_path, "r") as f:
+                    gh_token = f.read().strip()
+                
+                # Creiamo un dizionario di ambiente per il subprocess
+                # Questo dice a 'gh' quale token usare
+                env_vars = os.environ.copy()
+                env_vars["GH_TOKEN"] = gh_token
+                # --- FINE MODIFICA ---
+
                 
                 # 1. Costruisci il nome e il percorso dell'installer
                 installer_filename = f"setup_gestionale_preventivi_{new_version}.exe"
@@ -82,22 +99,24 @@ if __name__ == "__main__":
                 if not os.path.exists(installer_path):
                     print(f"!!! ERRORE: Installer '{installer_path}' non trovato. Impossibile pubblicare.")
                 else:
-                    # 2. Esegui i comandi Git per salvare le modifiche (es. version.txt)
+                    # 2. Esegui i comandi Git per salvare le modifiche
                     print("Esecuzione comandi git (add, commit, push)...")
                     subprocess.run(["git", "add", "."], check=True)
                     subprocess.run(["git", "commit", "-m", f"Release v{new_version}"], check=True)
-                    subprocess.run(["git", "push", "origin", "main"], check=True)
+                    # Anche 'git push' può usare il token se necessario
+                    subprocess.run(["git", "push", "origin", "main"], check=True, env=env_vars)
                     
                     # 3. Usa GitHub CLI ('gh') per creare la release e allegare l'installer
                     print(f"Creazione della Release 'v{new_version}' e upload di '{installer_path}'...")
                     tag_name = f"v{new_version}"
                     
+                    # Passiamo le variabili d'ambiente (env=env_vars) al comando
                     subprocess.run([
                         "gh", "release", "create", tag_name,
                         "--title", f"Versione {new_version}",
                         "--notes", f"Rilascio ufficiale della versione {new_version}",
                         installer_path  # Questo è l'allegato!
-                    ], check=True)
+                    ], check=True, env=env_vars) # <-- MODIFICA CHIAVE QUI
                     
                     print("\n✅ Pubblicazione su GitHub completata!")
 
