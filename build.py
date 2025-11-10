@@ -35,7 +35,6 @@ def update_file(filepath, pattern, replacement):
 
 
 if __name__ == "__main__":
-    # ... (tutta la parte di richiesta versione e aggiornamento file rimane uguale) ...
     clean_previous_builds()
     current_version = get_current_version()
     print(f"Versione attuale: {current_version}")
@@ -69,5 +68,38 @@ if __name__ == "__main__":
                 print("ATTENZIONE: Compilatore Inno Setup non trovato.")
 
             print("\n🚀 Build completata!")
+            
+            # --- BLOCCO AGGIUNTO PER PUBBLICAZIONE SU GITHUB ---
+            
+            publish_to_github = input("Vuoi pubblicare questa versione su GitHub? (s/n): ").lower()
+            if publish_to_github == 's':
+                print("\n--- 3/3: Pubblicazione su GitHub ---")
+                
+                # 1. Costruisci il nome e il percorso dell'installer
+                installer_filename = f"setup_gestionale_preventivi_{new_version}.exe"
+                installer_path = os.path.join("userdesktop", installer_filename)
+                
+                if not os.path.exists(installer_path):
+                    print(f"!!! ERRORE: Installer '{installer_path}' non trovato. Impossibile pubblicare.")
+                else:
+                    # 2. Esegui i comandi Git per salvare le modifiche (es. version.txt)
+                    print("Esecuzione comandi git (add, commit, push)...")
+                    subprocess.run(["git", "add", "."], check=True)
+                    subprocess.run(["git", "commit", "-m", f"Release v{new_version}"], check=True)
+                    subprocess.run(["git", "push", "origin", "main"], check=True)
+                    
+                    # 3. Usa GitHub CLI ('gh') per creare la release e allegare l'installer
+                    print(f"Creazione della Release 'v{new_version}' e upload di '{installer_path}'...")
+                    tag_name = f"v{new_version}"
+                    
+                    subprocess.run([
+                        "gh", "release", "create", tag_name,
+                        "--title", f"Versione {new_version}",
+                        "--notes", f"Rilascio ufficiale della versione {new_version}",
+                        installer_path  # Questo è l'allegato!
+                    ], check=True)
+                    
+                    print("\n✅ Pubblicazione su GitHub completata!")
+
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"\n!!! ERRORE: La compilazione è fallita: {e}")
+            print(f"\n!!! ERRORE: La compilazione o la pubblicazione è fallita: {e}")

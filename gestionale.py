@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os, json, re, datetime, uuid, copy
+import urllib.request
 from pathlib import Path
 from flask import Flask, request, redirect, url_for, flash, send_from_directory, render_template, session, jsonify
 from jinja2.runtime import Undefined
@@ -29,7 +30,13 @@ import queue
 from tkinter import Tk, Label, PhotoImage, Button
 
 
-APP_VERSION = "1.9.7"    
+APP_VERSION = "1.9.8"  
+
+GITHUB_REPO_OWNER = "Latereyes" 
+GITHUB_REPO_NAME = "gestionale-cerlab-"
+
+# Questo URL punta all'API per la release "più recente"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
 
 def get_persistent_data_dir():
     """
@@ -45,9 +52,33 @@ def get_persistent_data_dir():
     persistent_dir.mkdir(parents=True, exist_ok=True)
     return persistent_dir
 
-# Incolla questa nuova funzione in gestionale.py
+# === Logica per selezionare la cartella dati (Sviluppo vs Produzione) ===
+if "--debug" in sys.argv:
+    # MODALITÀ DEBUG: Usa una cartella 'data' locale
+    print(">>> INFO: Rilevato '--debug'. Utilizzo della cartella dati locale.")
+    DATA_DIR = Path(__file__).parent / "data"
+else:
+    # MODALITÀ NORMALE/PRODUZIONE: Usa la cartella persistente in AppData
+    DATA_DIR = get_persistent_data_dir()
 
-# Sostituisci la vecchia funzione start_server_in_background con queste due
+# Le altre directory (clienti, preventivi, etc.) verranno create 
+# automaticamente nel posto giusto in base alla modalità.
+CLIENTS_DIR = DATA_DIR / "clienti"
+QUOTES_DIR = DATA_DIR / "preventivi"
+ALLEGATI_DIR = DATA_DIR / "allegati"
+USERS_FILE = DATA_DIR / "users.json"
+PDF_LOG_FILE = DATA_DIR / "pdf_generation.log"
+
+# Creiamo le sottocartelle se non esistono
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+CLIENTS_DIR.mkdir(exist_ok=True)
+QUOTES_DIR.mkdir(exist_ok=True)
+ALLEGATI_DIR.mkdir(exist_ok=True)
+
+
+# Il nome del file del token che leggeremo
+TOKEN_FILE = DATA_DIR / "gh_token.txt"
+
 
 def start_flask_server_thread():
     """Avvia solo il server Flask in un thread non bloccante."""
@@ -160,67 +191,193 @@ class AppLauncher(Tk):
             if self.winfo_exists():
                  self.after(100, self.process_queue)
 
+    # All'interno della classe AppLauncher, in gestionale.py
+    
     def run_startup_process(self):
         """
-        Controlla gli aggiornamenti per 30 secondi, mostrando l'avanzamento,
-        e poi decide se avviare il server o l'installer.
+        Controlla gli aggiornamenti con una logica di "retry"
+        per dare tempo alla connessione di rete di attivarsi.
         """
-        self.queue.put(('update_status', "Controllo aggiornamenti in corso...", 0))
+        
+        MAX_RETRIES = 4       # Numero massimo di tentativi (1 subito + 3)
+        RETRY_DELAY_SEC = 15  # Secondi da aspettare tra i tentativi
+        
+        installer_path = None
+        check_result = ""
 
-        # --- CICLO DI ATTESA DI 60 SECONDI ---
-        for i in range(60):
+        for attempt in range(MAX_RETRIES):
+            # 1. Controlla se l'utente ha cliccato "Salta" nel frattempo
             if self.skip_requested.is_set():
                 print("INFO: Controllo aggiornamenti saltato dall'utente.")
-                break # Esci immediatamente dal ciclo
-            time.sleep(1)
-            # Ad ogni secondo, controlliamo se è apparso un file di aggiornamento
-            installer_path = self.check_for_updates()
-            if installer_path:
-                break # Se troviamo un update, usciamo subito dal ciclo
+                break
+            
+            # 2. Aggiorna la UI e disabilita il pulsante durante il check
+            progress = (attempt / MAX_RETRIES) * 100
+            self.queue.put(('update_status_button', 'disabled'))
+            if attempt == 0:
+                self.queue.put(('update_status', "Ricerca aggiornamenti...", 10))
+            else:
+                self.queue.put(('update_status', f"Controllo aggiornamenti... (Tentativo {attempt + 1})", progress))
 
-            # Aggiorniamo la barra di avanzamento e il testo
-            progress = (i + 1) * (100 / 60)  # 60 secondi totali
-            self.queue.put(('update_status', f"Ricerca aggiornamenti... ({i+1}/60s)", progress))
-        # --- FINE CICLO ---
+            # 3. Esegui il controllo
+            check_result = self.check_for_updates()
 
-        # Ora, dopo il ciclo, controlliamo l'esito
-        installer_path = self.check_for_updates() # Ricontrolliamo un'ultima volta
+            # 4. Analizza il risultato
+            if isinstance(check_result, str) and check_result.endswith(".exe"):
+                # CASO A: Trovato aggiornamento!
+                installer_path = check_result
+                break # Usciamo dal ciclo dei tentativi
+            
+            if check_result == "NO_UPDATE" or check_result == "FATAL_ERROR":
+                # CASO B: Check OK (nessun update) o Errore Grave (token, ecc.)
+                # In entrambi i casi, non ha senso riprovare.
+                break # Usciamo dal ciclo dei tentativi
+            
+            if check_result == "NETWORK_ERROR":
+                # CASO C: Errore di Rete.
+                if attempt < MAX_RETRIES - 1:
+                    # Non è l'ultimo tentativo, quindi aspettiamo
+                    msg = f"Rete assente. Riprovo tra {RETRY_DELAY_SEC}s..."
+                    self.queue.put(('update_status', msg, progress))
+                    # Ri-abilita il pulsante "Salta" durante l'attesa
+                    self.queue.put(('update_status_button', 'normal'))
+                    
+                    # Ciclo di attesa (controllando ogni secondo se l'utente "Salta")
+                    for _ in range(RETRY_DELAY_SEC):
+                        if self.skip_requested.is_set():
+                            break
+                        time.sleep(1)
+                else:
+                    # Era l'ultimo tentativo, ci arrendiamo
+                    print("INFO: Errore di rete dopo tutti i tentativi.")
+            
+            # (Il ciclo for ricomincia se era NETWORK_ERROR)
 
+        # 5. Finito il ciclo, decidiamo cosa fare
         if installer_path:
-            self.queue.put(('update_status', "Nuova versione trovata! Installazione in corso...", 100))
+            # Trovato aggiornamento
+            self.queue.put(('update_status', "Nuova versione trovata! Installazione...", 100))
             time.sleep(2)
             self.queue.put(('run_action', 'run_installer', installer_path))
         else:
-            self.queue.put(('update_status', "Nessun aggiornamento. Avvio del gestionale...", 100))
+            # Nessun aggiornamento, o l'utente ha saltato, o errore
+            msg = "Avvio del gestionale..."
+            if self.skip_requested.is_set():
+                msg = "Avvio saltato dall'utente..."
+            elif check_result == "NO_UPDATE":
+                msg = "Nessun aggiornamento. Avvio del gestionale..."
+            elif check_result == "NETWORK_ERROR":
+                msg = "Offline. Avvio del gestionale..."
+
+            self.queue.put(('update_status', msg, 100))
             time.sleep(1)
             self.queue.put(('run_action', 'start_gestionale'))
-
+    
     def check_for_updates(self):
         """
-        Controlla la presenza di un installer più recente.
-        (Questo metodo mancava, ora è stato aggiunto).
+        Controlla gli aggiornamenti da GitHub.
+        Restituisce 3 possibili valori:
+        - Il PERCORSO (str) dell'installer se trovato.
+        - "NO_UPDATE" (str) se il check è OK ma non ci sono aggiornamenti.
+        - "NETWORK_ERROR" (str) se il server non è raggiungibile.
+        - "FATAL_ERROR" (str) per tutti gli altri problemi (token, file .exe mancante, ecc.)
         """
-        updates_dir = DATA_DIR / "updates"
-        if not updates_dir.exists():
-            return None
         
-        latest_update_path = None
-        latest_version = parse_version(APP_VERSION)
+        # 1. Leggi il token
+        try:
+            with open(TOKEN_FILE, "r") as f:
+                token = f.read().strip()
+            if not token:
+                raise FileNotFoundError
+        except FileNotFoundError:
+            print(f"ERRORE: File token '{TOKEN_FILE.name}' non trovato. L'aggiornamento automatico è disabilitato.")
+            return "FATAL_ERROR" # Errore grave, non ha senso riprovare
+        except Exception as e:
+            print(f"ERRORE: Impossibile leggere il token. {e}")
+            return "FATAL_ERROR"
 
-        for filename in os.listdir(updates_dir):
-            match = re.match(r"setup_gestionale_preventivi_([\d\.]+)\.exe", filename)
-            if match:
-                try:
-                    file_version = parse_version(match.group(1))
-                    if file_version > latest_version:
-                        latest_version = file_version
-                        latest_update_path = str(updates_dir / filename)
-                except ValueError:
-                    continue
-        
-        return latest_update_path
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
 
-    # All'interno della classe AppLauncher, in gestionale.py
+        try:
+            # 2. Chiama l'API di GitHub
+            print(f"INFO: Contatto API GitHub: {GITHUB_API_URL}")
+            req_manifest = urllib.request.Request(GITHUB_API_URL, headers=headers)
+            with urllib.request.urlopen(req_manifest, timeout=10) as response:
+                release_data = json.load(response)
+
+            # 3. Confronta la versione
+            latest_version_str = release_data.get("tag_name", "0.0.0").lstrip('v')
+            if not latest_version_str:
+                print("ERRORE: Il tag della release su GitHub è vuoto.")
+                return "FATAL_ERROR" # Errore di configurazione
+
+            print(f"INFO: Versione GitHub: {latest_version_str} / Versione Locale: {APP_VERSION}")
+            if parse_version(latest_version_str) > parse_version(APP_VERSION):
+                print(f"INFO: Nuova versione {latest_version_str} trovata.")
+                
+                # 4. Cerca l'asset .exe
+                download_asset = None
+                for asset in release_data.get("assets", []):
+                    if asset.get("name", "").endswith(".exe"):
+                        download_asset = asset
+                        break
+                
+                if not download_asset:
+                    print("ERRORE: Release trovata, ma nessun file .exe allegato.")
+                    return "FATAL_ERROR" # Errore di configurazione
+                
+                download_api_url = download_asset.get("url")
+                installer_filename = download_asset.get("name")
+                
+                if not download_api_url:
+                     print("ERRORE: URL API per l'asset non trovato.")
+                     return "FATAL_ERROR"
+
+                self.queue.put(('update_status', f"Download versione {latest_version_str}...", 50))
+                
+                # 5. Scarica il file .exe
+                updates_dir = DATA_DIR / "updates"
+                updates_dir.mkdir(parents=True, exist_ok=True)
+                local_installer_path = updates_dir / installer_filename
+
+                print(f"INFO: Download di {installer_filename} in corso...")
+                download_headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/octet-stream"
+                }
+                req_download = urllib.request.Request(download_api_url, headers=download_headers)
+                
+                with urllib.request.urlopen(req_download, timeout=600) as in_stream, open(local_installer_path, 'wb') as out_file:
+                    shutil.copyfileobj(in_stream, out_file)
+                
+                print(f"INFO: Installer scaricato con successo in {local_installer_path}")
+                # --- SUCCESSO: Restituisce il percorso ---
+                return str(local_installer_path)
+            
+            else:
+                print("INFO: L'applicazione è già aggiornata.")
+                # --- SUCCESSO: Nessun aggiornamento ---
+                return "NO_UPDATE"
+
+        except urllib.error.URLError as e:
+            # --- ERRORE DI RETE ---
+            if hasattr(e, 'code') and e.code == 401:
+                 print("ERRORE: Autenticazione fallita (401). Controlla il token 'gh_token.txt'.")
+                 return "FATAL_ERROR" # Token sbagliato, inutile riprovare
+            if hasattr(e, 'code') and e.code == 404:
+                 print("INFO: Nessuna release 'latest' trovata (404).")
+                 return "NO_UPDATE" # Lo trattiamo come "nessun aggiornamento"
+                 
+            print(f"ATTENZIONE: Impossibile contattare il server GitHub. (Sei offline?). Errore: {e}")
+            return "NETWORK_ERROR"
+        except Exception as e:
+            # --- ERRORE GENERICO ---
+            print(f"ERRORE non gestito in check_for_updates: {e}")
+            return "FATAL_ERROR"
 
     def run_installer_and_exit(self, installer_path):
         """
@@ -286,30 +443,6 @@ APP_NAME = "Gestionale Preventivi"
 def inject_debug_mode():
     """Rende la variabile 'debug_mode' disponibile in tutti i template."""
     return dict(debug_mode=app.config['DEBUG'])
-
-
-# === Logica per selezionare la cartella dati (Sviluppo vs Produzione) ===
-if "--debug" in sys.argv:
-    # MODALITÀ DEBUG: Usa una cartella 'data' locale, accanto al file .py
-    print(">>> INFO: Rilevato '--debug'. Utilizzo della cartella dati locale.")
-    DATA_DIR = Path(__file__).parent / "data"
-else:
-    # MODALITÀ NORMALE/PRODUZIONE: Usa la cartella persistente in AppData
-    DATA_DIR = get_persistent_data_dir()
-
-# Le altre directory (clienti, preventivi, etc.) verranno create 
-# automaticamente nel posto giusto in base alla modalità.
-CLIENTS_DIR = DATA_DIR / "clienti"
-QUOTES_DIR = DATA_DIR / "preventivi"
-ALLEGATI_DIR = DATA_DIR / "allegati"
-USERS_FILE = DATA_DIR / "users.json"
-PDF_LOG_FILE = DATA_DIR / "pdf_generation.log"
-
-# Creiamo le sottocartelle se non esistono
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-CLIENTS_DIR.mkdir(exist_ok=True)
-QUOTES_DIR.mkdir(exist_ok=True)
-ALLEGATI_DIR.mkdir(exist_ok=True)
 
 # --- INIZIO BLOCCO GESTIONE MARGINI (AGGIORNATO CON REGOLE COLORE) ---
 

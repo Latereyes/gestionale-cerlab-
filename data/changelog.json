@@ -1,5 +1,12 @@
 
 [ {
+    "version": "1.9.8",
+    "date": "2025-11-05",
+    "title": "Versione 1.9.8 - 10 Novembre 2025 (updating system)",
+    "changes": [
+      "CORREZIONE: Ora gli updates vengono scaricati direttamente da GIT HUB, senza passare per Google Drive."
+    ]
+  },{
     "version": "1.9.7",
     "date": "2025-11-05",
     "title": "Versione 1.9.7 - 09 Novembre 2025 (Refactoring UI e Logica)",
