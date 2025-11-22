@@ -165,6 +165,11 @@
                 <button type="button" id="clona-btn" class="btn action">
                     <i class="fas fa-copy"></i> Clona Preventivo
                 </button>
+                {% if session.user_role in ['amministratore', 'ceo'] %}
+                    <a class="btn" href="{{ url_for('analisi_preventivo', quote_id=p.numero) }}">
+                        <i class="fas fa-chart-pie"></i> Analisi Preventivo
+                    </a>
+                    {% endif %}
 
                  {% if p.stato not in ['Bozza', 'Annullato'] %}
                     
@@ -1102,7 +1107,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ricaricoBadge.classList.remove('is-optimal', 'is-warning', 'is-danger');
         if (ricaricoMedio >= 62 && ricaricoMedio <= 72) { // Ricarico per Margine ~38-42%
             ricaricoBadge.classList.add('is-optimal'); // VERDE
-        } else if ((ricaricoMedio >= 55 && ricaricoMedio <= 61) || (ricaricoMedio >= 73 && ricaricoMedio <= 80)) { // Ricarico per Margine ~35-38% o ~42-44%
+        } else if ((ricaricoMedio >= 55 && ricaricoMedio < 62) || (ricaricoMedio >= 73 && ricaricoMedio <= 80)) { // Ricarico per Margine ~35-38% o ~42-44%
             ricaricoBadge.classList.add('is-warning'); // ARANCIONE/GIALLO
         } else { // Ricarico < 55% o > 80% (Margine <35% o >44%)
             ricaricoBadge.classList.add('is-danger');   // ROSSO

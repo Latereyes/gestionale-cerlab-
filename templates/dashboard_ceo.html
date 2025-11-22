@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block page_title %}
-<h1><i class="fas fa-chart-line"></i> Dashboard CEO</h1>
+<h1><i class="fas fa-chart-line"></i> Dashboard Direzionale</h1>
 {% endblock %}
 
 {% block body %}
@@ -11,461 +11,675 @@
 <div class="dashboard-container">
 
   <form method="GET" action="{{ url_for('dashboard_ceo') }}" class="card filter-card">
-    <div class="date-filter-controls">
-        <label for="start_date">Da:</label>
-        <input type="date" id="start_date" name="start_date" value="{{ start_date }}">
-        <label for="end_date">A:</label>
-        <input type="date" id="end_date" name="end_date" value="{{ end_date }}">
-        <button type="submit" class="btn"><i class="fas fa-filter"></i> Applica</button>
-    </div>
-    <div id="period-filters" class="segmented-control">
-        <button type="button" class="btn period-btn" data-days="30">Ultimi 30gg</button>
-        <button type="button" class="btn period-btn" data-days="90">Ultimi 90gg</button>
-        <button type="button" class="btn period-btn" data-month="this">Questo Mese</button>
-        <button type="button" class="btn period-btn" data-month="last">Mese Scorso</button>
-        <button type="button" class="btn period-btn" data-year="this">Anno Corrente</button>
+    <div class="filter-row">
+        <div class="date-inputs">
+            <div class="input-group">
+                <span class="input-icon"><i class="far fa-calendar-alt"></i></span>
+                <input type="date" id="start_date" name="start_date" value="{{ start_date }}">
+            </div>
+            <span class="separator">➔</span>
+            <div class="input-group">
+                <span class="input-icon"><i class="far fa-calendar-alt"></i></span>
+                <input type="date" id="end_date" name="end_date" value="{{ end_date }}">
+            </div>
+            <button type="submit" class="btn primary"><i class="fas fa-filter"></i> Analizza Periodo</button>
+        </div>
+        <div class="presets">
+            <button type="button" class="btn period-btn" data-month="this">Mese Corrente</button>
+            <button type="button" class="btn period-btn" data-month="last">Mese Scorso</button>
+            <button type="button" class="btn period-btn" data-year="this">Anno in Corso</button>
+            <button type="button" class="btn period-btn" data-days="365">Ultimi 12 Mesi</button>
+        </div>
     </div>
   </form>
 
   <div class="tabs-navigation">
-    <button class="tab-link active" data-tab="tab-overview"><i class="fas fa-tachometer-alt"></i> Overview</button>
-    <button class="tab-link" data-tab="tab-cashflow"><i class="fas fa-dollar-sign"></i> Cash Flow</button>
+    <button class="tab-link active" data-tab="tab-overview"><i class="fas fa-tachometer-alt"></i> Overview & Profitti</button>
+    <button class="tab-link" data-tab="tab-cashflow"><i class="fas fa-wallet"></i> Cash Flow</button>
     <button class="tab-link" data-tab="tab-commerciale"><i class="fas fa-bullseye"></i> Commerciale</button>
   </div>
 
-  <div class="tabs-content">
+<div class="tabs-content">
 
     <div id="tab-overview" class="tab-content active">
       
-      <div class="ceo-grid-large">
-        <div class="stat-card">
-          <div class="stat-icon" style="--bg: #e7f5e9; --color: #198754;"><i class="fas fa-euro-sign"></i></div>
-          <div class="stat-content">
-            <h4>Fatturato Lordo</h4>
-            <div class="stat-value">{{ ceo_data.overview.fatturato | money_ui }}</div>
+      <div class="overview-layout">
+          
+          <div class="math-summary-container">
+              <div class="card math-card">
+                  <div class="card-header">
+                      <h3><i class="fas fa-calculator"></i> Analisi Periodo</h3>
+                  </div>
+                  <div class="card-body math-body">
+                      
+                      <div class="math-row main-row">
+                          <div class="lbl">IMPONIBILE PERIODO</div>
+                          <div class="val">{{ kpi.imponibile_totale | money_ui }}</div>
+                      </div>
+
+                      <div class="math-row">
+                          <div class="lbl muted">COSTI PRESUNTI VS FORNITORI</div>
+                          <div class="val text-danger">- {{ kpi.costi_preventivati_totali | money_ui }}</div>
+                      </div>
+
+                      <div class="math-row border-bottom">
+                          <div class="lbl muted">SCOSTAMENTO COSTI EFFETTIVI</div>
+                          <div class="val {{ 'text-success' if kpi.scostamento_totale >= 0 else 'text-danger' }}">
+                              {{ '+' if kpi.scostamento_totale > 0 else '' }}{{ kpi.scostamento_totale | money_ui }}
+                          </div>
+                      </div>
+
+                      <div class="math-row">
+                          <div class="lbl muted">FEE VERSATA</div>
+                          <div class="val text-purple">- {{ kpi.fee_versata | money_ui }}</div>
+                      </div>
+
+                      <div class="math-row result-row">
+                          <div class="lbl">UTILE NETTO</div>
+                          <div class="val">{{ kpi.utile_netto_finale | money_ui }}</div>
+                      </div>
+
+                      <div class="math-footer">
+                          <div class="footer-stat">
+                              <span>RICARICO MEDIO</span>
+                              <strong>{{ "%.1f"|format(kpi.margine_medio_pct) }}%</strong>
+                          </div>
+                          <div class="footer-stat">
+                              <span>MARGINALITÀ TOT.</span>
+                              <strong>{{ "%.1f"|format(kpi.marginalita_totale_pct) }}%</strong>
+                          </div>
+                      </div>
+
+                  </div>
+              </div>
           </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="--bg: #e6f7ff; --color: #0d6efd;"><i class="fas fa-piggy-bank"></i></div>
-          <div class="stat-content">
-            <h4>Utile Netto Stimato</h4>
-            <div class="stat-value">{{ ceo_data.overview.utile_stimato | money_ui }}</div>
+
+          <div class="details-container">
+              
+              <div class="card chart-card">
+                  <div class="card-header"><h3>Andamento Utile e Fee</h3></div>
+                  <div class="card-body">
+                      <canvas id="profitChart"></canvas>
+                  </div>
+              </div>
+
+              <div class="card venditori-card">
+                  <div class="card-header"><h3><i class="fas fa-briefcase"></i> Performance Venditori</h3></div>
+                  <div class="table-wrap table-fixed-height">
+                      <table class="styled-table compact-table">
+                          <thead>
+                              <tr>
+                                  <th>Venditore</th>
+                                  <th class="center">N. Prev.</th>
+                                  <th class="right">Imponibile</th>
+                                  <th class="right">Utile Gen.</th>
+                              </tr>
+                          </thead>
+                          <tbody>
+                              {% for v in venditori %}
+                              <tr>
+                                  <td><strong>{{ v.nome }}</strong></td>
+                                  <td class="center"><span class="badge badge-gray">{{ v.count }}</span></td>
+                                  <td class="right"><strong>{{ v.imponibile | money_ui }}</strong></td>
+                                  <td class="right text-success">{{ v.utile | money_ui }}</td>
+                              </tr>
+                              {% else %}
+                              <tr><td colspan="4" class="center muted">Nessuna vendita nel periodo.</td></tr>
+                              {% endfor %}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+
+              <div class="card referenti-card">
+                  <div class="card-header"><h3><i class="fas fa-users"></i> Performance Referenti</h3></div>
+                  <div class="table-wrap table-fixed-height">
+                      <table class="styled-table compact-table">
+                          <thead>
+                              <tr>
+                                  <th>Referente</th>
+                                  <th>Prev.</th>
+                                  <th class="right">Imponibile</th> 
+                                  <th class="right">Fee</th>
+                              </tr>
+                          </thead>
+                          <tbody>
+                              {% for ref in referenti %}
+                              <tr>
+                                  <td>{{ ref.nome }}</td>
+                                  <td><span class="badge badge-gray">{{ ref.preventivo }}</span></td>
+                                  <td class="right muted">{{ ref.imponibile | money_ui }}</td> 
+                                  <td class="right text-purple"><strong>{{ ref.fee | money_ui }}</strong></td>
+                              </tr>
+                              {% else %}
+                              <tr><td colspan="4" class="center muted">Nessun dato.</td></tr>
+                              {% endfor %}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+
+          </div> </div> </div> <div id="tab-cashflow" class="tab-content">
+      
+      <div class="cashflow-summary-grid">
+          
+          <div class="cf-card gray">
+              <div class="cf-header"><i class="fas fa-check-circle"></i> Già Incassato (Netto)</div>
+              <div class="cf-body">
+                  <div class="cf-amount">{{ cashflow.incassato_netto | money_ui }}</div>
+                  <p>Liquidità netta già entrata.</p>
+              </div>
           </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="--bg: #fff8e1; --color: #ffc107;"><i class="fas fa-truck-loading"></i></div>
-          <div class="stat-content">
-            <h4>Costi Ordini (Netto)</h4>
-            <div class="stat-value">{{ ceo_data.overview.costi_ordini_netto | money_ui }}</div>
+
+          <div class="cf-card blue">
+              <div class="cf-header"><i class="fas fa-clock"></i> In Attesa di Saldo</div>
+              <div class="cf-body">
+                  <div class="cf-amount">{{ cashflow.in_attesa_netto | money_ui }}</div>
+                  <p>Pagamenti futuri già programmati.</p>
+              </div>
           </div>
-        </div>
-         <div class="stat-card">
-          <div class="stat-icon" style="--bg: #fbeae7; --color: #dc3545;"><i class="fas fa-hand-holding-usd"></i></div>
-          <div class="stat-content">
-            <h4>Fee Versata Stimata</h4>
-            <div class="stat-value">{{ ceo_data.overview.fee | money_ui }}</div>
+
+          <div class="cf-card yellow">
+              <div class="cf-header"><i class="fas fa-exclamation-circle"></i> Da Saldare</div>
+              <div class="cf-body">
+                  <div class="cf-amount">{{ cashflow.da_saldare_netto | money_ui }}</div>
+                  <p>Residuo non ancora pianificato.</p>
+              </div>
           </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="--bg: #f0eaff; --color: #6f42c1;"><i class="fas fa-file-invoice-dollar"></i></div>
-          <div class="stat-content">
-            <h4>IVA a Debito</h4>
-            <div class="stat-value">{{ ceo_data.overview.iva_debito | money_ui }}</div>
+
+          <div class="cf-card red">
+              <div class="cf-header"><i class="fas fa-arrow-up"></i> Costi Prev. in Corso</div>
+              <div class="cf-body">
+                  <div class="cf-amount">{{ cashflow.costi_preventivi_in_corso | money_ui }}</div>
+                  <p>Impegno costi su commesse aperte.</p>
+              </div>
           </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="--bg: #e5e7eb; --color: #4b5563;"><i class="fas fa-clock"></i></div>
-          <div class="stat-content">
-            <h4>Tempo Medio Chiusura</h4>
-            <div class="stat-value">{{ "%.1f" | format(ceo_data.overview.tempo_medio_chiusura) if ceo_data.overview.tempo_medio_chiusura != 'N/D' else 'N/D' }} gg</div>
-          </div>
-        </div>
+
       </div>
 
-      <div class="grid-2-col">
-        <div class="card">
-          <div class="card-header"><h3><i class="fas fa-chart-pie"></i> Redditività</h3></div>
-          <div class="card-body">
-            <ul class="kpi-list">
-              <li>
-                <span>Utile Medio %</span>
-                <strong>{{ "%.2f" | format(ceo_data.redditivita.utile_medio_effettivo_pct) }} %</strong>
-              </li>
-              <li>
-                <span>Fee Media Versata %</span>
-                <strong>{{ "%.2f" | format(ceo_data.redditivita.fee_media_pct) }} %</strong>
-              </li>
-              <li>
-                <span>Scostamento Costi</span>
-                <strong class="{{ 'text-danger' if ceo_data.redditivita.scostamento_costi > 0 else 'text-success' }}">
-                  {{ ceo_data.redditivita.scostamento_costi | money_ui }}
-                </strong>
-                <small>(Costi Ordini vs Costi Preventivo)</small>
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header"><h3><i class="fas fa-trophy"></i> Top 5 Clienti</h3></div>
-          <div class="card-body">
-            <ul class="kpi-list">
-              {% for cliente, fatturato in ceo_data.top_5_clienti %}
-              <li>
-                <span>{{ loop.index }}. {{ cliente }}</span>
-                <strong>{{ fatturato | money_ui }}</strong>
-              </li>
-              {% else %}
-              <li><span>Nessun dato</span><strong>-</strong></li>
-              {% endfor %}
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header"><h3><i class="fas fa-users"></i> Performance Venditori</h3></div>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Venditore</th>
-                <th>Fatturato Lordo</th>
-                <th>Utile Netto Stimato</th>
-                <th>Preventivi Confermati</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for venditore in ceo_data.performance_venditori %}
-              <tr>
-                <td>{{ venditore.nome }}</td>
-                <td>{{ venditore.fatturato | money_ui }}</td>
-                <td>{{ venditore.utile | money_ui }}</td><td>{{ venditore.utile_effettivo | money_ui }}</td>
-                <td>{{ venditore.confermati }}</td>
-              </tr>
-              {% else %}
-              <tr><td colspan="4">Nessun dato per questo intervallo.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </div>
-
-    <div id="tab-cashflow" class="tab-content">
-      <div class="ceo-grid">
-        <div class="stat-card">
-          <div class="stat-icon" style="--bg: #e7f5e9; --color: #198754;"><i class="fas fa-wallet"></i></div>
-          <div class="stat-content">
-            <h4>Incassato (Reale)</h4>
-            <div class="stat-value">{{ ceo_data.cash_flow.incassato | money_ui }}</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="--bg: #fff8e1; --color: #ffc107;"><i class="fas fa-calendar-alt"></i></div>
-          <div class="stat-content">
-            <h4>Da Incassare (Pianificato)</h4>
-            <div class="stat-value">{{ ceo_data.cash_flow.da_incassare | money_ui }}</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="--bg: #fbeae7; --color: #dc3545;"><i class="fas fa-receipt"></i></div>
-          <div class="stat-content">
-            <h4>Costi Sostenuti (Netto)</h4>
-            <div class="stat-value">{{ ceo_data.overview.costi_ordini_netto | money_ui }}</div>
-          </div>
-        </div>
-        <div class="stat-card">
-      <div class="stat-icon" style="--bg: #fff8e1; --color: #ffc107;"><i class="fas fa-file-invoice-dollar"></i></div>
-      <div class="stat-content">
-        <h4>Da Saldare (Residuo)</h4>
-        <div class="stat-value">{{ ceo_data.cash_flow.da_saldare | money_ui }}</div>
-        <small class="muted">(Totale Fatturato - Incassato)</small> </div>
-    </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header"><h3>Andamento Mensile (Incassi vs Costi)</h3></div>
-        <div class="card-body">
-            <div class="chart-container">
-                <canvas id="ceoChart"></canvas>
-            </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="tab-commerciale" class="tab-content">
-      <div class="grid-2-col">
-        <div class="card">
+      <div class="card mt-4">
           <div class="card-header">
-            <h3>Funnel Preventivi (per Numero)</h3>
-            <span>Tasso Firma: <strong>{{ "%.1f" | format(ceo_data.funnel_count.tasso_firma_num) }} %</strong></span>
+              <h3><i class="fas fa-calendar-check"></i> Prossimi Pagamenti Programmati (Netto)</h3>
           </div>
-          <div class="card-body">
-            <div class="funnel-chart">
-              <div class="funnel-step">
-                <div class="funnel-label">
-                  <span>Creati</span>
-                  <strong>{{ ceo_data.funnel_count.creati }}</strong>
-                </div>
-                <div class="funnel-bar" style="width: 100%; --color: #6f42c1;"></div>
-              </div>
-              <div class="funnel-step">
-                <div class="funnel-label">
-                  <span>Inviati</span>
-                  <strong>{{ ceo_data.funnel_count.inviati }}</strong>
-                </div>
-                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_count.inviati / ceo_data.funnel_count.creati * 100) if ceo_data.funnel_count.creati else 0 }}%; --color: #0d6efd;"></div>
-              </div>
-              <div class="funnel-step">
-                <div class="funnel-label">
-                  <span>Confermati</span>
-                  <strong>{{ ceo_data.funnel_count.confermati }}</strong>
-                </div>
-                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_count.confermati / ceo_data.funnel_count.creati * 100) if ceo_data.funnel_count.creati else 0 }}%; --color: #198754;"></div>
-              </div>
-              <div class="funnel-step">
-                <div class="funnel-label">
-                  <span>Annullati</span>
-                  <strong>{{ ceo_data.funnel_count.annullati }}</strong>
-                </div>
-                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_count.annullati / ceo_data.funnel_count.creati * 100) if ceo_data.funnel_count.creati else 0 }}%; --color: #dc3545;"></div>
-              </div>
-            </div>
+          <div class="table-wrap table-fixed-height">
+              <table class="styled-table">
+                  <thead>
+                      <tr>
+                          <th>Data Prevista</th>
+                          <th>Cliente</th>
+                          <th>Rif. Preventivo</th>
+                          <th class="right">Importo (Netto)</th>
+                          <th>Note</th>
+                          <th class="center" style="width: 50px;"></th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      {% for pag in future_payments %}
+                      <tr>
+                          <td><strong>{{ pag.data.strftime('%d/%m/%Y') }}</strong></td>
+                          <td>{{ pag.cliente }}</td>
+                          <td><span class="badge badge-gray">{{ pag.preventivo }}</span></td>
+                          <td class="right text-primary"><strong>{{ pag.importo_netto | money_ui }}</strong></td>
+                          <td class="muted" style="font-size: 12px;">{{ pag.note }}</td>
+                          <td class="center">
+                              <a href="{{ url_for('gestione_pagamenti', quote_id=pag.preventivo) }}" class="btn icon-btn btn-sm" target="_blank" title="Vai a Gestione Pagamenti">
+                                  <i class="fas fa-external-link-alt"></i>
+                              </a>
+                          </td>
+                      </tr>
+                      {% else %}
+                      <tr><td colspan="6" class="center muted">Nessun pagamento futuro programmato.</td></tr>
+                      {% endfor %}
+                  </tbody>
+              </table>
           </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <h3>Funnel Preventivi (per Valore)</h3>
-            <span>Tasso Firma: <strong>{{ "%.1f" | format(ceo_data.funnel_value.tasso_firma_val) }} %</strong></span>
-          </div>
-          <div class="card-body">
-            <div class="funnel-chart">
-              <div class="funnel-step">
-                <div class="funnel-label">
-                  <span>Valore Inviato</span>
-                  <strong>{{ ceo_data.funnel_value.inviato | money_ui }}</strong>
-                </div>
-                <div class="funnel-bar" style="width: 100%; --color: #0d6efd;"></div>
-              </div>
-              <div class="funnel-step">
-                <div class="funnel-label">
-                  <span>Valore Confermato</span>
-                  <strong>{{ ceo_data.funnel_value.confermato | money_ui }}</strong>
-                </div>
-                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_value.confermato / ceo_data.funnel_value.inviato * 100) if ceo_data.funnel_value.inviato else 0 }}%; --color: #198754;"></div>
-              </div>
-              <div class="funnel-step">
-                <div class="funnel-label">
-                  <span>Valore Annullato</span>
-                  <strong>{{ ceo_data.funnel_value.annullato | money_ui }}</strong>
-                </div>
-                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_value.annullato / ceo_data.funnel_value.inviato * 100) if ceo_data.funnel_value.inviato else 0 }}%; --color: #dc3545;"></div>
-              </div>
-              <div class="funnel-step">
-                <div class="funnel-label">
-                  <span>Valore in Trattativa</span>
-                  <strong>{{ ceo_data.funnel_value.in_trattativa | money_ui }}</strong>
-                </div>
-                <div class="funnel-bar" style="width: {{ (ceo_data.funnel_value.in_trattativa / ceo_data.funnel_value.inviato * 100) if ceo_data.funnel_value.inviato else 0 }}%; --color: #ffc107;"></div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
-    </div>
 
-  </div>
-</div>
+      <div class="card mt-4">
+          <div class="card-header"><h3>Dettaglio Incassi Periodo (Netto IVA Stimata)</h3></div>
+          <div class="card-body d-flex align-items-center gap-4">
+              <div class="stat-box">
+                  <span class="lbl">Incassato nel periodo</span>
+                  <span class="val">{{ cashflow.incassato_netto | money_ui }}</span>
+              </div>
+              <div class="alert-box">
+                  <i class="fas fa-info-circle"></i>
+                  <small>Nota: Gli incassi sono visualizzati al netto dell'IVA (riproporzionati in base all'imponibile del preventivo).</small>
+              </div>
+          </div>
+      </div>
+
+    </div> <div id="tab-commerciale" class="tab-content">
+        <div class="grid-2-col">
+            
+            <div class="card">
+                <div class="card-header">
+                    <h3>Funnel di Vendita</h3>
+                    <span class="badge badge-blue">Tasso Firma: {{ "%.1f"|format(funnel.tasso_firma) }}%</span>
+                </div>
+                <div class="card-body">
+                    <div class="funnel-container">
+                        <div class="funnel-row">
+                            <div class="f-label">Creati</div>
+                            <div class="f-bar-bg"><div class="f-bar" style="width: 100%; background: #e2e8f0;"></div></div>
+                            <div class="f-val">{{ funnel.creati }}</div>
+                        </div>
+                        <div class="funnel-row">
+                            <div class="f-label">Inviati</div>
+                            <div class="f-bar-bg"><div class="f-bar" style="width: {{ (funnel.inviati / funnel.creati * 100) if funnel.creati else 0 }}%; background: #3b82f6;"></div></div>
+                            <div class="f-val">{{ funnel.inviati }}</div>
+                        </div>
+                        <div class="funnel-row">
+                            <div class="f-label">Confermati</div>
+                            <div class="f-bar-bg"><div class="f-bar" style="width: {{ (funnel.confermati / funnel.creati * 100) if funnel.creati else 0 }}%; background: #10b981;"></div></div>
+                            <div class="f-val">{{ funnel.confermati }}</div>
+                        </div>
+                        <div class="funnel-row">
+                            <div class="f-label">Annullati</div>
+                            <div class="f-bar-bg"><div class="f-bar" style="width: {{ (funnel.annullati / funnel.creati * 100) if funnel.creati else 0 }}%; background: #ef4444;"></div></div>
+                            <div class="f-val">{{ funnel.annullati }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3>Potenziale in Trattativa</h3></div>
+                <div class="card-body center-content">
+                    <div class="big-stat">
+                        <span class="lbl">Valore Bozze + Inviati</span>
+                        <span class="num">{{ funnel.valore_in_trattativa | money_ui }}</span>
+                        <p class="desc">Totale imponibile di tutte le opportunità aperte.</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div> </div> 
 
 <style>
-  /* === CONTENITORI GENERALI === */
-  .dashboard-container { max-width: 1300px; margin: 0 auto; padding: 24px; font-family: 'Inter', sans-serif; }
-  .card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; }
-  .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
-  .card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
-  .card-body { padding: 24px; }
-  .btn.with-icon { display: inline-flex; align-items: center; gap: 8px; }
-  .grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-  .text-danger { color: #dc3545; }
-  .text-success { color: #198754; }
-
-  /* === FILTRI DATA === */
-  .filter-card { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
-  .date-filter-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .date-filter-controls label { font-weight: 500; }
-  .date-filter-controls input[type="date"] { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
-  .date-filter-controls .btn { padding-top: 9px; padding-bottom: 9px; }
-  .segmented-control { display: flex; justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
-  #period-filters .btn { background-color: #f3f4f6; border: 1px solid #d1d5db; color: #374151; font-weight: 500; padding: 6px 12px; font-size: 13px; }
-  #period-filters .btn:hover { background-color: #e5e7eb; }
-
-  /* === SCHEDE (TABS) === */
-  .tabs-navigation { display: flex; gap: 4px; margin-bottom: -1px; }
-  .tab-link {
-    font-size: 16px; font-weight: 600; color: #4b5563;
-    background: #f3f4f6; border: 1px solid #e2e8f0; border-bottom: none;
-    padding: 12px 20px; border-radius: 8px 8px 0 0;
-    cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
-    margin-bottom: -1px; z-index: 1;
-  }
-  .tab-link.active {
-    background: #fff; color: var(--primary-color, #0d6efd);
-    border-bottom: 1px solid #fff;
-  }
-  .tab-content { display: none; background: #fff; border: 1px solid #e2e8f0; border-radius: 0 12px 12px 12px; padding: 24px; }
-  .tab-content.active { display: block; }
-
-  /* === KPI CARDS === */
-  .ceo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 24px; }
-  .ceo-grid-large { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 24px; }
-  .stat-card { display: flex; align-items: center; gap: 20px; background-color: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; }
-  .stat-icon { font-size: 24px; min-width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; background-color: var(--bg); color: var(--color); }
-  .stat-content h4 { margin: 0 0 8px 0; font-size: 15px; color: #4a5568; font-weight: 500; }
-  .stat-content .stat-value { font-size: 26px; font-weight: 700; color: #1a202c; }
-
-  /* === TABELLE E LISTE KPI === */
-  .table-container { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; }
-  th { background-color: #f8f9fa; font-weight: 600; color: #374151; }
-  tbody tr:hover { background-color: #f9f9f9; }
-  .kpi-list { list-style: none; padding: 0; margin: 0; }
-  .kpi-list li { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f3f4f6; }
-  .kpi-list li:last-child { border-bottom: none; }
-  .kpi-list li span { font-size: 15px; color: #374151; }
-  .kpi-list li small { font-size: 12px; color: #6b7280; display: block; margin-left: 10px; }
-  .kpi-list li strong { font-size: 18px; font-weight: 600; color: #111827; }
-
-  /* === GRAFICO E FUNNEL === */
-  .chart-container { position: relative; height: 45vh; min-height: 350px; }
-  .funnel-chart { display: flex; flex-direction: column; gap: 16px; }
-  .funnel-step { }
-  .funnel-label { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-  .funnel-label span { font-size: 15px; color: #374151; }
-  .funnel-label strong { font-size: 16px; font-weight: 600; color: #111827; }
-  .funnel-bar {
-    height: 24px; background-color: var(--color, #ccc);
-    border-radius: 4px; transition: width 0.5s ease-out;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  }
-  .stat-content small.muted {
-    font-size: 12px;
-    color: #64748b;
-    margin-top: 4px;
-    display: block; /* Per farla andare a capo */
+  
+/* LAYOUT OVERVIEW MODIFICATO */
+.overview-layout {
+    display: grid;
+    grid-template-columns: 450px 1fr; /* Allargato da 350px a 450px */
+    gap: 24px;
 }
+
+/* CARD MATEMATICA (Scontrinata) */
+.math-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    overflow: hidden;
+    height: 100%; /* Occupa tutta l'altezza */
+}
+.math-body {
+    padding: 0; /* Reset padding */
+    display: flex;
+    flex-direction: column;
+}
+
+.math-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    font-family: 'Courier New', Courier, monospace; /* Font monospaziato per effetto scontrino */
+}
+
+.math-row.main-row {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 16px 20px;
+}
+.math-row.main-row .val {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.math-row .lbl {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.math-row .lbl.muted { color: #6b7280; font-weight: 500; }
+
+.math-row .val {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.math-row.border-bottom {
+    border-bottom: 2px dashed #e2e8f0; /* Linea tratteggiata */
+    margin-bottom: 10px;
+    padding-bottom: 16px;
+}
+
+.math-row.result-row {
+    background-color: #ecfdf5; /* Verde chiarissimo */
+    border-top: 2px solid #10b981;
+    padding: 20px;
+    margin-top: auto; /* Spinge in basso se c'è spazio */
+}
+.math-row.result-row .lbl { color: #047857; font-size: 16px; }
+.math-row.result-row .val { color: #047857; font-size: 24px; font-weight: 800; }
+
+/* FOOTER PERCENTUALI */
+.math-footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-top: 1px solid #d1fae5;
+}
+.footer-stat {
+    text-align: center;
+    padding: 12px;
+    background: #f0fdf4;
+}
+.footer-stat:first-child { border-right: 1px solid #d1fae5; }
+.footer-stat span { display: block; font-size: 10px; color: #6b7280; text-transform: uppercase; }
+.footer-stat strong { display: block; font-size: 16px; color: #059669; }
+
+/* COLONNA DESTRA */
+.details-container {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+.table-fixed-height { max-height: 250px; overflow-y: auto; }
+.compact-table th, .compact-table td { padding: 8px 12px; }
+
+/* RESPONSIVE */
+@media (max-width: 992px) {
+    .overview-layout { grid-template-columns: 1fr; }
+}
+.badge-gray {
+    background-color: #f3f4f6;
+    color: #4b5563;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.btn-sm {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+  /* CASHFLOW GRID A 4 */
+  .cashflow-summary-grid { 
+      display: grid; 
+      grid-template-columns: repeat(4, 1fr); 
+      gap: 20px; 
+  }
+  
+  /* STILI CARD CASHFLOW */
+  .cf-card { 
+      padding: 20px; 
+      border-radius: 12px; 
+      border: 1px solid; 
+      text-align: center; 
+      background: #fff;
+  }
+  
+  .cf-card.gray { border-color: #e5e7eb; background: #f9fafb; }
+  .cf-card.gray .cf-header { color: #4b5563; }
+  
+  .cf-card.blue { border-color: #bfdbfe; background: #eff6ff; }
+  .cf-card.blue .cf-header { color: #2563eb; }
+  
+  .cf-card.yellow { border-color: #fde68a; background: #fffbeb; }
+  .cf-card.yellow .cf-header { color: #d97706; }
+  
+  .cf-card.red { border-color: #fecaca; background: #fef2f2; }
+  .cf-card.red .cf-header { color: #dc2626; }
+
+  .cf-header { 
+      font-size: 13px; 
+      font-weight: 700; 
+      text-transform: uppercase; 
+      margin-bottom: 10px; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      gap: 8px; 
+  }
+  
+  .cf-amount { 
+      font-size: 26px; 
+      font-weight: 800; 
+      margin-bottom: 6px; 
+      color: #1f2937; 
+  }
+  
+  .cf-body p { 
+      margin: 0; 
+      font-size: 11px; 
+      color: #6b7280; 
+  }
+
+  @media (max-width: 1100px) {
+      .cashflow-summary-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 600px) {
+      .cashflow-summary-grid { grid-template-columns: 1fr; }
+  }
+  /* LAYOUT BASE */
+  .dashboard-container { max-width: 1400px; margin: 0 auto; padding: 24px; font-family: 'Inter', sans-serif; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); margin-bottom: 24px; overflow: hidden; }
+  .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; background: #f8f9fa; display: flex; justify-content: space-between; align-items: center; }
+  .card-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: #374151; }
+  .card-body { padding: 24px; }
+  
+  .mt-4 { margin-top: 1.5rem; }
+  .text-success { color: #10b981; }
+  .text-danger { color: #ef4444; }
+  .text-purple { color: #8b5cf6; }
+  .muted { color: #6b7280; font-size: 13px; }
+  .right { text-align: right; }
+  .center { text-align: center; }
+
+  /* FILTRI */
+  .filter-card { padding: 16px; }
+  .filter-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+  .date-inputs { display: flex; gap: 12px; align-items: center; }
+  .input-group { position: relative; }
+  .input-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; }
+  .input-group input { padding: 8px 12px 8px 34px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+  .separator { color: #9ca3af; font-weight: bold; }
+  .presets { display: flex; gap: 8px; }
+  .period-btn { background: #f3f4f6; border: 1px solid #e5e7eb; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; color: #4b5563; transition: all 0.2s; }
+  .period-btn:hover { background: #e5e7eb; color: #111827; }
+
+  /* TABS */
+  .tabs-navigation { display: flex; gap: 4px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px; }
+  .tab-link { padding: 12px 24px; background: transparent; border: none; border-bottom: 2px solid transparent; font-weight: 600; color: #6b7280; cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .tab-link:hover { color: #374151; }
+  .tab-link.active { color: #0d6efd; border-bottom-color: #0d6efd; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; animation: fadeIn 0.3s; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* OVERVIEW KPIS */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+  .kpi-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; display: flex; gap: 16px; align-items: flex-start; }
+  .kpi-card .icon { width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+  .kpi-card .data { display: flex; flex-direction: column; }
+  .kpi-card label { font-size: 12px; text-transform: uppercase; color: #6b7280; font-weight: 600; margin-bottom: 4px; }
+  .kpi-card .value { font-size: 22px; font-weight: 700; color: #111827; line-height: 1.2; }
+  .kpi-card .sub-value { font-size: 12px; color: #6b7280; margin-top: 4px; }
+  
+  /* Colori KPI */
+  .kpi-card.primary .icon { background: #eff6ff; color: #3b82f6; }
+  .kpi-card.success .icon { background: #ecfdf5; color: #10b981; }
+  .kpi-card.warning .icon { background: #fffbeb; color: #f59e0b; }
+  .kpi-card.info .icon { background: #f3f4f6; color: #6b7280; }
+  .kpi-card.purple .icon { background: #f5f3ff; color: #8b5cf6; }
+
+  /* GRIDS */
+  .grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 900px) { .grid-2-col { grid-template-columns: 1fr; } }
+
+  /* TABELLA */
+  .table-fixed-height { max-height: 300px; overflow-y: auto; }
+  .styled-table { width: 100%; border-collapse: collapse; }
+  .styled-table th { text-align: left; padding: 10px 16px; font-size: 12px; background: #f9fafb; color: #6b7280; position: sticky; top: 0; }
+  .styled-table td { padding: 12px 16px; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
+
+  /* CASHFLOW */
+  .cashflow-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .cf-card { padding: 24px; border-radius: 12px; border: 1px solid; text-align: center; }
+  .cf-card.positive { background: #ecfdf5; border-color: #d1fae5; }
+  .cf-card.negative { background: #fff1f2; border-color: #ffe4e6; }
+  .cf-card.result { background: #fff; border-color: #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+  
+  .cf-header { font-size: 14px; font-weight: 600; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .cf-card.positive .cf-header { color: #059669; }
+  .cf-card.negative .cf-header { color: #e11d48; }
+  .cf-card.result .cf-header { color: #374151; }
+
+  .cf-amount { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #111827; }
+  .cf-card p { margin: 0; font-size: 12px; color: #6b7280; }
+
+  /* STAT BOX GENERICO */
+  .stat-box { display: flex; flex-direction: column; }
+  .stat-box .lbl { font-size: 12px; color: #6b7280; text-transform: uppercase; }
+  .stat-box .val { font-size: 24px; font-weight: 700; color: #111827; }
+  .alert-box { background: #fff7ed; border: 1px solid #ffedd5; color: #c2410c; padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 10px; flex: 1; }
+
+  /* FUNNEL */
+  .funnel-container { display: flex; flex-direction: column; gap: 16px; }
+  .funnel-row { display: flex; align-items: center; gap: 16px; }
+  .f-label { width: 100px; font-size: 14px; color: #4b5563; }
+  .f-bar-bg { flex: 1; height: 20px; background: #f3f4f6; border-radius: 4px; overflow: hidden; }
+  .f-bar { height: 100%; border-radius: 4px; transition: width 0.5s; }
+  .f-val { width: 50px; text-align: right; font-weight: 600; }
+  
+  .big-stat { text-align: center; padding: 20px; }
+  .big-stat .lbl { display: block; font-size: 14px; color: #6b7280; margin-bottom: 8px; }
+  .big-stat .num { display: block; font-size: 36px; font-weight: 700; color: #0d6efd; margin-bottom: 8px; }
+  .big-stat .desc { color: #9ca3af; font-size: 13px; margin: 0; }
+
+
+/* STILE SPECIFICO PER IL GRAFICO */
+.chart-card .card-body {
+    height: 400px !important; /* Forza l'altezza a 400px */
+    position: relative;       /* Necessario per Chart.js */
+    width: 100%;
+}
+
+
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // Riceve la nuova struttura dati da Python
-    const ceoData = {{ ceo_data | tojson | safe }};
-    const moneyFormatter = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' });
-
-    // === GESTIONE SCHEDE (TABS) ===
-    const tabLinks = document.querySelectorAll('.tab-link');
-    const tabContents = document.querySelectorAll('.tab-content');
-
-    tabLinks.forEach(link => {
-        link.addEventListener('click', () => {
-            const tabId = link.dataset.tab;
-
-            tabLinks.forEach(l => l.classList.remove('active'));
-            tabContents.forEach(c => c.classList.remove('active'));
-
-            link.classList.add('active');
-            document.getElementById(tabId).classList.add('active');
-        });
-    });
-
-    // === GESTIONE FILTRI DATA PREDEFINITI ===
+    const graficoData = {{ grafico | tojson | safe }};
+    
+    // Filtri Data Rapidi
     const startDateInput = document.getElementById('start_date');
     const endDateInput = document.getElementById('end_date');
     const form = startDateInput.closest('form');
 
-    function setDatesAndSubmit(start, end) {
-        startDateInput.value = start.toISOString().split('T')[0];
-        endDateInput.value = end.toISOString().split('T')[0];
-        form.submit();
-    }
-
-    document.querySelectorAll('.period-btn').forEach(button => {
-        button.addEventListener('click', () => {
+    document.querySelectorAll('.period-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const days = btn.dataset.days;
+            const month = btn.dataset.month;
+            const year = btn.dataset.year;
             const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            let start = new Date(today);
-
-            if (button.dataset.days) {
-                start.setDate(today.getDate() - (parseInt(button.dataset.days) - 1));
-                setDatesAndSubmit(start, today);
-            } else if (button.dataset.month) {
-                if (button.dataset.month === 'this') {
-                    start = new Date(today.getFullYear(), today.getMonth(), 1);
-                    setDatesAndSubmit(start, today);
-                } else if (button.dataset.month === 'last') {
-                    start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-                    const end = new Date(today.getFullYear(), today.getMonth(), 0);
-                    setDatesAndSubmit(start, end);
-                }
-            } else if (button.dataset.year) {
-                if (button.dataset.year === 'this') {
-                    start = new Date(today.getFullYear(), 0, 1);
-                    setDatesAndSubmit(start, today);
-                }
+            let start = new Date();
+            
+            if(days) {
+                start.setDate(today.getDate() - parseInt(days));
+            } else if (month === 'this') {
+                start = new Date(today.getFullYear(), today.getMonth(), 1);
+            } else if (month === 'last') {
+                start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                today.setDate(0); // Fine mese scorso
+            } else if (year === 'this') {
+                start = new Date(today.getFullYear(), 0, 1);
             }
+            
+            startDateInput.value = start.toISOString().split('T')[0];
+            endDateInput.value = today.toISOString().split('T')[0];
+            form.submit();
         });
     });
 
-    // === GRAFICO CASH FLOW ===
-    const chartCanvas = document.getElementById('ceoChart');
-    if (chartCanvas) {
-        new Chart(chartCanvas.getContext('2d'), {
+    // Gestione Tabs
+    document.querySelectorAll('.tab-link').forEach(link => {
+        link.addEventListener('click', () => {
+            document.querySelectorAll('.tab-link').forEach(l => l.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            link.classList.add('active');
+            document.getElementById(link.dataset.tab).classList.add('active');
+        });
+    });
+
+  // Grafico Chart.js
+    const ctx = document.getElementById('profitChart');
+    if (ctx) {
+        new Chart(ctx, {
             type: 'line',
             data: {
-                labels: ceoData.grafico_data.labels || [],
+                labels: graficoData.labels,
                 datasets: [
+                    // --- NUOVO DATASET IMPONIBILE ---
                     {
-                        label: 'Incassato',
-                        data: ceoData.grafico_data.incassato || [],
-                        borderColor: '#198754',
-                        backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                        label: 'Imponibile Totale',
+                        data: graficoData.imponibile,
+                        borderColor: '#3b82f6', // Blu
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
                         fill: true,
-                        tension: 0.4,
-                        borderWidth: 2
+                        tension: 0.3,
+                        order: 0, // Lo mettiamo sullo sfondo (o primo nell'ordine di rendering)
+                        yAxisID: 'y'
                     },
                     {
-                        label: 'Costi Sostenuti (Netto)',
-                        data: ceoData.grafico_data.costi_sostenuti || [],
-                        borderColor: '#dc3545',
-                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        label: 'Utile Netto',
+                        data: graficoData.utile,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
                         fill: true,
-                        tension: 0.4,
-                        borderWidth: 2
+                        tension: 0.3,
+                        order: 1,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Fee Generata',
+                        data: graficoData.fee,
+                        borderColor: '#8b5cf6',
+                        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        fill: false,
+                        tension: 0.3,
+                        hidden: true, // Nascosto di default
+                        order: 2,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Costi Effettivi',
+                        data: graficoData.costi_effettivi,
+                        borderColor: '#f59e0b',
+                        borderDash: [5, 5],
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        tension: 0.3,
+                        hidden: true, 
+                        order: 3,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Costi Presunti',
+                        data: graficoData.costi_presunti,
+                        borderColor: '#6b7280',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        tension: 0.3,
+                        hidden: true, 
+                        order: 4,
+                        yAxisID: 'y'
                     }
                 ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: { 
-                    y: { 
-                        beginAtZero: true, 
-                        ticks: { callback: value => moneyFormatter.format(value) } 
-                    } 
-                },
-                plugins: { 
-                    legend: { position: 'top' }, 
-                    tooltip: { 
-                        callbacks: { label: context => `${context.dataset.label}: ${moneyFormatter.format(context.raw)}` } 
-                    } 
-                },
-                interaction: { intersect: false, mode: 'index' }
             }
         });
-    }
-});
+    }});
 </script>
 {% endblock %}

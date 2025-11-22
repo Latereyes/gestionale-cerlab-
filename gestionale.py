@@ -30,7 +30,7 @@ import queue
 from tkinter import Tk, Label, PhotoImage, Button
 
 
-APP_VERSION = "1.9.9"  
+APP_VERSION = "1.9.10"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -538,7 +538,6 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
-# ... (tutte le funzioni di caricamento/salvataggio/ricerca rimangono le stesse) ...
 try:
     with open(resource_path("data/comuni.json"), "r", encoding="utf-8") as f: GEO_DATA = json.load(f)
 except FileNotFoundError: GEO_DATA = []; print("ATTENZIONE: File 'data/comuni.json' non trovato.")
@@ -823,6 +822,14 @@ def today_date_filter(value):
 # Registra il nuovo filtro nell'ambiente Jinja
 app.jinja_env.filters['today_date'] = today_date_filter
 app.jinja_env.globals['enumerate'] = enumerate
+
+def _str_to_date(date_str):
+    """Converte una stringa 'YYYY-MM-DD' in oggetto date. Ritorna None se fallisce."""
+    try:
+        if not date_str: return None
+        return datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
 
 ### LOGIN, LOGOUT E SICUREZZA ###
 @app.route("/login", methods=["GET", "POST"])
@@ -2539,12 +2546,10 @@ def _get_ordine_costo_effettivo_netto(ordine):
 @login_required
 @role_required('amministratore', 'ceo')
 def dashboard_ceo():
-    """Pagina con le metriche di business, basata su intervallo personalizzato."""
-    
     today = datetime.date.today()
     
-    # 1. Gestione Intervallo Date
-    default_start = today - relativedelta(days=30)
+    # 1. Filtri Date
+    default_start = today - relativedelta(days=90)
     start_date_str = request.args.get('start_date', default_start.strftime('%Y-%m-%d'))
     end_date_str = request.args.get('end_date', today.strftime('%Y-%m-%d'))
     
@@ -2554,237 +2559,162 @@ def dashboard_ceo():
     except ValueError:
         start_date = default_start
         end_date = today
-        start_date_str = start_date.strftime('%Y-%m-%d')
-        end_date_str = end_date.strftime('%Y-%m-%d')
 
-    # 2. Inizializzazione Strutture Dati
-    overview_kpis = {
-    'fatturato': 0.0, 
-    'utile_stimato': 0.0, # Rinominiamo il vecchio
-    'utile_effettivo': 0.0, # Aggiungiamo il nuovo
-    'costi_ordini_netto': 0.0, 
-    'fee': 0.0, 
-    'iva_debito': 0.0, 
-    'imponibile_cliente': 0.0, 
-    'imponibile_negozio': 0.0 # Costo Preventivato
-}
-    cash_flow = {'incassato': 0.0, 'da_incassare': 0.0, 'da_saldare': 0.0} # <-- Aggiungi 'da_saldare'
-    total_value_confirmed_quotes = 0.0
-    funnel_count = {'creati': 0, 'inviati': 0, 'confermati': 0, 'annullati': 0}
-    funnel_value = {'inviato': 0.0, 'confermato': 0.0, 'annullato': 0.0, 'in_trattativa': 0.0}
-    performance_venditori = {}
-    performance_clienti = {}
-    tempi_chiusura_list = []
+    # 2. Strutture Dati
+    kpi = {
+        'imponibile_totale': 0.0,
+        'costi_preventivati_totali': 0.0,
+        'utile_netto_finale': 0.0,
+        'scostamento_totale': 0.0,
+        'fee_versata': 0.0,
+        'margine_medio_pct': 0.0,
+        'marginalita_totale_pct': 0.0
+    }
     
-    # Strutture per il grafico
-    mesi_intervallo = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month) + 1
-    labels_grafico = [(start_date + relativedelta(months=i)).strftime('%b %y') for i in range(mesi_intervallo)]
-    grafico_data = {
-        'labels': labels_grafico,
-        'incassato': [0.0] * mesi_intervallo,
-        'costi_sostenuti': [0.0] * mesi_intervallo
+    cashflow = { 'incassato_netto': 0.0, 'in_attesa_netto': 0.0, 'da_saldare_netto': 0.0, 'costi_preventivi_in_corso': 0.0, 'saldo_finanziario': 0.0 }
+    
+    referenti_data = []
+    performance_venditori = {} # Dizionario per aggregare i dati venditore
+    future_payments = []
+    funnel = {'creati': 0, 'inviati': 0, 'confermati': 0, 'annullati': 0, 'valore_in_trattativa': 0.0}
+    
+    months_diff = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month) + 1
+    if months_diff > 24: months_diff = 12
+    labels_grafico = [(start_date + relativedelta(months=i)).strftime('%b %y') for i in range(months_diff)]
+    
+    grafico_data = { 
+        'labels': labels_grafico, 
+        'utile': [0.0]*months_diff, 
+        'fee': [0.0]*months_diff,
+        'costi_presunti': [0.0]*months_diff, 
+        'costi_effettivi': [0.0]*months_diff 
     }
 
-    # 3. Iterazione e Calcolo Dati
-    for summary in get_all_quotes():
+    quotes = get_all_quotes()
+    
+    for summary in quotes:
         p = load_quote(summary["numero"])
         if not p: continue
         
-        try:
-            quote_date = datetime.datetime.strptime(p.get("data"), '%Y-%m-%d').date()
-        except (ValueError, TypeError): continue
-        
         stato = p.get("stato")
-        totale_val = _to_num(p.get("totale"))
+        data_creazione = _str_to_date(p.get("data"))
+        data_conferma = _str_to_date(p.get("data_conferma")) or data_creazione
 
-        # --- A. Calcolo Funnel (basato sulla DATA DI CREAZIONE) ---
-        if start_date <= quote_date <= end_date:
-            funnel_count['creati'] += 1
-            if stato != "Bozza":
-                funnel_count['inviati'] += 1
-                funnel_value['inviato'] += totale_val
-            if stato in ["Confermato", "In Lavorazione", "Chiuso"]:
-                total_value_confirmed_quotes += _to_num(p.get("totale"))
-                funnel_count['confermati'] += 1
-                funnel_value['confermato'] += totale_val
-            if stato == "Annullato":
-                funnel_count['annullati'] += 1
-                funnel_value['annullato'] += totale_val
-
-        # --- B. Calcolo Finanziari (basato sulla DATA DI CONFERMA o DATA CREAZIONE come fallback) ---
-        stato = p.get("stato") # Assicurati che lo stato sia letto prima
-        if stato in ["Confermato", "In Lavorazione", "Chiuso"]:
-            data_riferimento_str = p.get("data_conferma")
-            # --- FALLBACK ---
-            if not data_riferimento_str:
-                data_riferimento_str = p.get("data") # Usa la data di creazione se manca quella di conferma
-            # --- FINE FALLBACK ---
+        # Funnel
+        if start_date <= data_creazione <= end_date:
+            funnel['creati'] += 1
+            if stato != "Bozza": funnel['inviati'] += 1
+            if stato in ["Confermato", "In Lavorazione", "Chiuso"]: funnel['confermati'] += 1
+            if stato == "Annullato": funnel['annullati'] += 1
             
-            if data_riferimento_str: # Prosegui solo se abbiamo una data
-                try:
-                    data_riferimento = datetime.datetime.strptime(data_riferimento_str, '%Y-%m-%d').date()
-                except (ValueError, TypeError): continue # Salta se la data non è valida
+        if stato in ["Bozza", "Inviato"]:
+            funnel['valore_in_trattativa'] += _to_num(p.get("tot_imponibile_cliente"))
 
-                # Controlla se la data di riferimento cade nell'intervallo
-                if start_date <= data_riferimento <= end_date:
-                    iva_val = _to_num(p.get("tot_iva"))
-                    profitti = _calculate_profits_from_quote(p)
-                    costi_ordini_val_netto = sum(
-                        _get_ordine_costo_effettivo_netto(o)
-                        for o in p.get("ordini_fornitore", [])
-                    )
-                    
-                    imponibile_cliente_val = _to_num(p.get("tot_imponibile_cliente"))
-                    imponibile_negozio_val = _to_num(p.get("tot_imponibile_negozio"))
-                    utile_effettivo_val = imponibile_cliente_val - costi_ordini_val_netto
-                    venditore = p.get("venditore", "N/D")
-                    cliente = p.get("cliente", "N/D")
+        # Economico
+        if stato in ["Confermato", "In Lavorazione", "Chiuso"]:
+            
+            imp_cliente = _to_num(p.get("tot_imponibile_cliente"))
+            costo_prev = _to_num(p.get("tot_imponibile_negozio"))
+            costo_eff = sum(_get_ordine_costo_effettivo_netto(o) for o in p.get("ordini_fornitore", []))
+            
+            if start_date <= data_conferma <= end_date:
+                fee_pct = _to_num(p.get("fee_pct"))
+                fee_val = imp_cliente * (fee_pct / 100)
 
-                    # Aggrega KPI Overview (codice invariato da qui...)
-                    overview_kpis['fatturato'] += totale_val
-                    overview_kpis['utile_stimato'] += profitti["profitto"] # Utile basato su ricarico preventivo
-                    overview_kpis['utile_effettivo'] += utile_effettivo_val # NUOVO: Utile basato su costi reali
-                    overview_kpis['fee'] += profitti["fee"] # Fee rimane stimata
-                    overview_kpis['costi_ordini_netto'] += costi_ordini_val_netto
-                    overview_kpis['iva_debito'] += iva_val
-                    overview_kpis['imponibile_cliente'] += imponibile_cliente_val
-                    overview_kpis['imponibile_negozio'] += imponibile_negozio_val
+                has_orders = len(p.get("ordini_fornitore", [])) > 0
+                costo_reale_calc = costo_eff if has_orders else costo_prev
+                utile_netto = imp_cliente - costo_reale_calc - fee_val
+                scostamento = (costo_prev - costo_eff) if has_orders else 0.0
 
-                    # Aggrega Performance Venditore (codice invariato...)
-                    if venditore not in performance_venditori:
-                        performance_venditori[venditore] = {'fatturato': 0.0, 'utile_effettivo': 0.0, 'confermati': 0} # Rinomina qui
-                    performance_venditori[venditore]['fatturato'] += totale_val
-                    performance_venditori[venditore]['utile_effettivo'] += utile_effettivo_val # Usa utile effettivo
-                    performance_venditori[venditore]['confermati'] += 1
+                kpi['imponibile_totale'] += imp_cliente
+                kpi['costi_preventivati_totali'] += costo_prev
+                kpi['scostamento_totale'] += scostamento
+                kpi['fee_versata'] += fee_val
+                kpi['utile_netto_finale'] += utile_netto
 
-                    # Aggrega Performance Cliente (codice invariato...)
-                    if cliente not in performance_clienti:
-                        performance_clienti[cliente] = 0.0
-                    performance_clienti[cliente] += totale_val
+                # --- AGGREGAZIONE VENDITORI ---
+                venditore = p.get("venditore", "N/D")
+                if venditore not in performance_venditori:
+                    performance_venditori[venditore] = {'nome': venditore, 'count': 0, 'imponibile': 0.0, 'utile': 0.0}
+                performance_venditori[venditore]['count'] += 1
+                performance_venditori[venditore]['imponibile'] += imp_cliente
+                performance_venditori[venditore]['utile'] += utile_netto
 
-                    # --- MODIFICA CALCOLO TEMPO CHIUSURA ---
-                    # Aggrega Tempo Chiusura (SOLO se entrambe le date esistono)
-                    data_conferma_effettiva_str = p.get("data_conferma") # Leggiamo specificamente questa
-                    data_chiusura_str = p.get("data_chiusura")
-                    if stato == "Chiuso" and data_conferma_effettiva_str and data_chiusura_str: # Controllo aggiunto
-                        try:
-                            data_conferma_dt = datetime.datetime.strptime(data_conferma_effettiva_str, '%Y-%m-%d').date()
-                            data_chiusura_dt = datetime.datetime.strptime(data_chiusura_str, '%Y-%m-%d').date()
-                            giorni = (data_chiusura_dt - data_conferma_dt).days
-                            if giorni >= 0:
-                                tempi_chiusura_list.append(giorni)
-                        except (ValueError, TypeError): pass
-                    # --- FINE MODIFICA CALCOLO TEMPO CHIUSURA ---
-
-       # --- C. Calcolo Cash Flow (basato sulla DATA DEL PAGAMENTO) ---
-        for pag in p.get("pagamenti", []):
-            if pag.get("rectifies_id"): continue # Salta pagamenti di rettifica
-
-            importo_pag = _to_num(pag.get("importo"))
-            if importo_pag <= 0: continue
-
-            try:
-                data_pag = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
-            except (ValueError, TypeError): continue
-
-            # --- MODIFICA CHIAVE ---
-            # 1. Calcolo "Da Incassare" TOTALE (indipendente dall'intervallo)
-            if data_pag > today:
-                cash_flow['da_incassare'] += importo_pag
-
-            # 2. Calcolo "Incassato" e dati GRAFICO (legati all'intervallo)
-            if start_date <= data_pag <= end_date:
-                # Calcolo per KPI totali (solo se incassato oggi o prima)
-                if data_pag <= today:
-                    cash_flow['incassato'] += importo_pag
-
-                # Calcolo per grafico mensile (solo se incassato oggi o prima)
-                months_diff = (data_pag.year - start_date.year) * 12 + (data_pag.month - start_date.month)
-                if 0 <= months_diff < mesi_intervallo:
-                    if data_pag <= today:
-                        grafico_data['incassato'][months_diff] += importo_pag
-            # --- FINE MODIFICA ---
-        
-        # --- D. Calcolo Costi per Grafico (basato sulla DATA ARRIVO ORDINE) ---
-        for ordine in p.get("ordini_fornitore", []):
-            try:
-                data_arrivo = datetime.datetime.strptime(ordine.get("data_arrivo"), '%Y-%m-%d').date()
-            except (ValueError, TypeError): continue
+                # --- REFERENTI (Con Imponibile) ---
+                referente = p.get("referente", "").strip()
+                if referente:
+                    referenti_data.append({
+                        'nome': referente, 
+                        'preventivo': p.get("numero"), 
+                        'imponibile': imp_cliente, # <-- NUOVO CAMPO
+                        'fee': fee_val, 
+                        'data': data_conferma.strftime('%d/%m/%Y')
+                    })
                 
-            if start_date <= data_arrivo <= end_date:
-                costo_netto_ordine = _to_num(ordine.get("importo")) - _to_num(ordine.get("iva_ordine", 0))
-                months_diff = (data_arrivo.year - start_date.year) * 12 + (data_arrivo.month - start_date.month)
-                if 0 <= months_diff < mesi_intervallo:
-                    grafico_data['costi_sostenuti'][months_diff] += costo_netto_ordine
+                idx = (data_conferma.year - start_date.year) * 12 + (data_conferma.month - start_date.month)
+                if 0 <= idx < len(grafico_data['utile']):
+                    grafico_data['utile'][idx] += utile_netto
+                    grafico_data['fee'][idx] += fee_val
+                    grafico_data['costi_presunti'][idx] += costo_prev
+                    grafico_data['costi_effettivi'][idx] += costo_reale_calc
 
+            # Cash Flow (Invariato)
+            totale_lordo_preventivo = _to_num(p.get("totale"))
+            rapporto_netto = (imp_cliente / totale_lordo_preventivo) if totale_lordo_preventivo > 0 else 1.0
+            
+            pagato_past = 0.0
+            pagato_future = 0.0
+            for pag in p.get("pagamenti", []):
+                if pag.get("rectifies_id"): continue
+                imp_lordo = _to_num(pag.get("importo"))
+                if imp_lordo <= 0: continue
+                imp_netto = imp_lordo * rapporto_netto
+                d_pag = _str_to_date(pag.get("data"))
+                if d_pag and d_pag > today:
+                    pagato_future += imp_netto
+                    future_payments.append({'data': d_pag, 'cliente': p.get("cliente"), 'preventivo': p.get("numero"), 'importo_netto': imp_netto, 'note': pag.get("note", "")})
+                else:
+                    pagato_past += imp_netto
+            
+            residuo = imp_cliente - (pagato_past + pagato_future)
+            if residuo < 0.05: residuo = 0.0
+            
+            cashflow['incassato_netto'] += pagato_past
+            cashflow['in_attesa_netto'] += pagato_future
+            cashflow['da_saldare_netto'] += residuo
+            
+            if stato != "Chiuso":
+                has_orders = len(p.get("ordini_fornitore", [])) > 0
+                impegno = costo_eff if has_orders else costo_prev
+                cashflow['costi_preventivi_in_corso'] += impegno
 
-    # 4. Finalizzazione Calcoli
-    top_5_clienti = sorted(performance_clienti.items(), key=lambda item: item[1], reverse=True)[:5]
-    performance_venditori_list = [{'nome': k, **v} for k, v in performance_venditori.items()]
-    performance_venditori_list.sort(key=lambda x: x['fatturato'], reverse=True)
+    # Calcoli Finali
+    if kpi['imponibile_totale'] > 0:
+        costi_reali_totali = kpi['costi_preventivati_totali'] - kpi['scostamento_totale']
+        if costi_reali_totali > 0:
+            kpi['margine_medio_pct'] = (kpi['utile_netto_finale'] / costi_reali_totali) * 100
+        kpi['marginalita_totale_pct'] = (kpi['utile_netto_finale'] / kpi['imponibile_totale']) * 100
 
-    redditivita = {}
-    if overview_kpis['imponibile_cliente'] > 0:
-        # --- MODIFICA: Usa Utile Effettivo ---
-        redditivita['utile_medio_effettivo_pct'] = (overview_kpis['utile_effettivo'] / overview_kpis['imponibile_cliente']) * 100
-        # --- FINE MODIFICA ---
-        redditivita['fee_media_pct'] = (overview_kpis['fee'] / overview_kpis['imponibile_cliente']) * 100 # Fee rimane stimata
-    else:
-        redditivita['utile_medio_effettivo_pct'] = 0.0
-        redditivita['fee_media_pct'] = 0.0
+    totale_crediti = cashflow['in_attesa_netto'] + cashflow['da_saldare_netto']
+    cashflow['saldo_finanziario'] = totale_crediti - cashflow['costi_preventivi_in_corso']
 
-    # --- MODIFICA: Inverti Scostamento ---
-    # Scostamento = Costi Preventivati - Costi Effettivi Netti
-    redditivita['scostamento_costi'] = overview_kpis['imponibile_negozio'] - overview_kpis['costi_ordini_netto']
-    # --- FINE MODIFICA ---
-
-    if tempi_chiusura_list:
-        overview_kpis['tempo_medio_chiusura'] = round(sum(tempi_chiusura_list) / len(tempi_chiusura_list), 1)
-    else:
-        overview_kpis['tempo_medio_chiusura'] = "N/D"
-
-    funnel_value['in_trattativa'] = funnel_value['inviato'] - funnel_value['confermato'] - funnel_value['annullato']
+    if funnel['inviati'] > 0: funnel['tasso_firma'] = (funnel['confermati'] / funnel['inviati']) * 100
     
-    if funnel_count['inviati'] > 0:
-        funnel_count['tasso_firma_num'] = (funnel_count['confermati'] / funnel_count['inviati']) * 100
-    else:
-        funnel_count['tasso_firma_num'] = 0.0
-        
-    if funnel_value['inviato'] > 0:
-        funnel_value['tasso_firma_val'] = (funnel_value['confermato'] / funnel_value['inviato']) * 100
-    else:
-        funnel_value['tasso_firma_val'] = 0.0
+    referenti_data.sort(key=lambda x: x['fee'], reverse=True)
+    future_payments.sort(key=lambda x: x['data'])
+    
+    # Ordina venditori per imponibile decrescente
+    venditori_list = sorted(list(performance_venditori.values()), key=lambda x: x['imponibile'], reverse=True)
 
-    # --- NUOVO BLOCCO CALCOLO DA SALDARE ---
-    # Da Saldare = Totale Valore Preventivi Confermati/Chiusi - Totale Incassato fino ad oggi
-    cash_flow['da_saldare'] = round(total_value_confirmed_quotes - cash_flow['incassato'], 2)
-    # Assicurati che non sia negativo per arrotondamenti
-    if cash_flow['da_saldare'] < 0:
-        cash_flow['da_saldare'] = 0.0
-    # --- FINE NUOVO BLOCCO ---    
-
-    # 5. Assemblaggio Dati per il Template
-    ceo_data = {
-        'overview': overview_kpis,
-        'cash_flow': cash_flow,
-        'funnel_count': funnel_count,
-        'funnel_value': funnel_value,
-        'redditivita': redditivita,
-        'performance_venditori': performance_venditori_list,
-        'top_5_clienti': top_5_clienti,
-        'grafico_data': grafico_data
-    }
-
-    return render_template("dashboard_ceo.html", 
-        title="Dashboard CEO", 
-        ceo_data=ceo_data,
-        start_date=start_date_str,
-        end_date=end_date_str
+    return render_template("dashboard_ceo.html",
+        title="Dashboard CEO", start_date=start_date_str, end_date=end_date_str,
+        kpi=kpi, cashflow=cashflow, referenti=referenti_data, venditori=venditori_list, # <-- PASSATO venditori
+        future_payments=future_payments, funnel=funnel, grafico=grafico_data
     )
 
 @app.route("/preventivo/analisi/<quote_id>")
 @login_required
-@role_required('amministratore', 'ceo') # Solo admin e CEO possono vederla
+@role_required('amministratore', 'ceo') 
 def analisi_preventivo(quote_id):
     p = load_quote(quote_id)
     if not p:
@@ -2798,18 +2728,23 @@ def analisi_preventivo(quote_id):
 
     # 2. Calcola Costi
     costi_preventivati = _to_num(p.get("tot_imponibile_negozio"))
-    # Usiamo la stessa logica (corretta) della dashboard CEO per i costi netti
+    
     costi_effettivi_netti = sum(
         _get_ordine_costo_effettivo_netto(o)
         for o in p.get("ordini_fornitore", [])
     )
-    # --- RIGA DA RE-INSERIRE ---
+    
+    # Recuperiamo i profitti stimati dal calcolo riga per riga
     profitti = _calculate_profits_from_quote(p)
-    # --- FINE RIGA DA RE-INSERIRE ---
 
-    # --- NUOVO CALCOLO UTILE EFFETTIVO ---
+    # --- NUOVO CALCOLO FEE SEMPLIFICATO ---
+    # La fee è calcolata semplicemente come % sull'imponibile cliente totale
+    fee_pct = _to_num(p.get("fee_pct"))
+    fee_semplice_valore = imponibile_cliente * (fee_pct / 100)
+    # --------------------------------------
+
+    # Calcolo Utile Effettivo
     utile_netto_effettivo = imponibile_cliente - costi_effettivi_netti
-    # --- FINE NUOVO CALCOLO ---
 
     # 4. Assembla i dati di analisi
     analisi = {
@@ -2818,36 +2753,37 @@ def analisi_preventivo(quote_id):
         'totale_cliente': totale_cliente,
         'costi_preventivati': costi_preventivati,
         'costi_effettivi_netti': costi_effettivi_netti if costi_effettivi_netti > 0 else 0.0,
-        'utile_netto_stimato': profitti.get('profitto', 0.0), # Rinomina
-        'utile_netto_effettivo': utile_netto_effettivo, # Aggiungi
-        'fee_versata': profitti.get('fee', 0.0), # Fee stimata
+        
+        'utile_netto_stimato': profitti.get('profitto', 0.0), 
+        'utile_netto_effettivo': utile_netto_effettivo,
+        
+        # Usiamo il valore calcolato semplicemente
+        'fee_versata': fee_semplice_valore, 
+        
         'scostamento_costi': 0.0,
-        'margine_lordo_pct': 0.0, # Margine su costo preventivato
-        'utile_netto_effettivo_pct': 0.0, # Rinomina
+        'margine_lordo_pct': 0.0, 
+        'utile_netto_effettivo_pct': 0.0, 
         'giorni_per_chiusura': 'N/D'
     }
 
     # 5. Calcola Redditività e Scostamento
-    # --- MODIFICA: Inverti Scostamento ---
     # Scostamento = Costi Preventivati - Costi Effettivi Netti
-    if analisi['costi_effettivi_netti'] > 0: # Calcola solo se ci sono costi effettivi
+    if analisi['costi_effettivi_netti'] > 0: 
         analisi['scostamento_costi'] = analisi['costi_preventivati'] - analisi['costi_effettivi_netti']
-    # --- FINE MODIFICA ---
 
     if imponibile_cliente > 0:
-        # Margine Lordo % (basato su costo preventivato) - INVARIATO
+        # Margine Lordo % (basato su costo preventivato)
         margine_lordo = imponibile_cliente - costi_preventivati
         analisi['margine_lordo_pct'] = (margine_lordo / imponibile_cliente) * 100
 
-    # --- MODIFICA: Utile Effettivo % ---
-    analisi['utile_netto_effettivo_pct'] = (analisi['utile_netto_effettivo'] / imponibile_cliente) * 100
-    # --- FINE MODIFICA ---
+    # Utile Effettivo %
+    if imponibile_cliente > 0:
+        analisi['utile_netto_effettivo_pct'] = (analisi['utile_netto_effettivo'] / imponibile_cliente) * 100
 
-# 6. Calcola Tempo Chiusura (se applicabile e se entrambe le date esistono)
-    # --- MODIFICA CALCOLO TEMPO CHIUSURA ---
+    # 6. Calcola Tempo Chiusura
     data_conferma_str = p.get("data_conferma")
     data_chiusura_str = p.get("data_chiusura")
-    if p.get("stato") == "Chiuso" and data_conferma_str and data_chiusura_str: # Controllo aggiunto
+    if p.get("stato") == "Chiuso" and data_conferma_str and data_chiusura_str:
         try:
             data_conferma_dt = datetime.datetime.strptime(data_conferma_str, '%Y-%m-%d').date()
             data_chiusura_dt = datetime.datetime.strptime(data_chiusura_str, '%Y-%m-%d').date()
@@ -2855,7 +2791,7 @@ def analisi_preventivo(quote_id):
             if giorni >= 0:
                  analisi['giorni_per_chiusura'] = giorni
         except (ValueError, TypeError): pass
-    # --- FINE MODIFICA CALCOLO TEMPO CHIUSURA ---
+
     return render_template("analisi_preventivo.html",
         title=f"Analisi Preventivo {p.get('numero')}",
         p=p,
@@ -2872,133 +2808,119 @@ def analisi_cliente(client_id):
 
     today = datetime.date.today()
 
-    # 1. Inizializzazione Strutture Dati
+    # 1. Inizializzazione Totali
     analisi = {
-    'fatturato': 0.0, 
-    'utile_stimato': 0.0, # Rinomina
-    'utile_effettivo': 0.0, # Aggiungi
-    'costi_ordini_netto': 0.0, 
-    'fee': 0.0, 
-    'iva_debito': 0.0, 
-    'imponibile_cliente': 0.0, 
-    'imponibile_negozio': 0.0, # Costo Preventivato
-    'costi_preventivati': 0.0, # Alias di imponibile_negozio
-    'incassato': 0.0, 
-    'da_incassare': 0.0
+        'imponibile_cliente': 0.0,      # Totale Ricavi
+        'costi_preventivati': 0.0,      # Totale Costi Presunti (Negozio)
+        'costi_effettivi_netti': 0.0,   # Totale Costi Reali (Ordini)
+        'utile_netto_stimato': 0.0,     # Utile basato sul preventivo
+        'utile_netto_effettivo': 0.0,   # Utile basato sul reale
+        'fee_versata': 0.0,             # Totale Fee (Calcolo Semplificato)
+        'scostamento_costi': 0.0,       # Risparmio o Spesa extra
+        
+        'incassato': 0.0,
+        'da_incassare': 0.0,
+        
+        # Percentuali medie
+        'margine_lordo_pct': 0.0,
+        'utile_netto_effettivo_pct': 0.0
     }
+    
     funnel = {'creati': 0, 'inviati': 0, 'confermati': 0, 'annullati': 0}
     tempi_chiusura_list = []
-    preventivi_analizzati = [] # Per la tabella di dettaglio
+    preventivi_analizzati = [] 
 
-    # 2. Iterazione e Calcolo Dati (scansiona tutti i preventivi per trovare quelli del cliente)
+    # 2. Iterazione e Aggregazione
     for summary in get_all_quotes():
         p = load_quote(summary["numero"])
         if not p or p.get("id_cliente") != client_id:
             continue
 
         stato = p.get("stato")
-        totale_val = _to_num(p.get("totale"))
-
-        # --- A. Calcolo Funnel ---
+        
+        # Funnel Counters
         funnel['creati'] += 1
-        if stato != "Bozza":
-            funnel['inviati'] += 1
+        if stato != "Bozza": funnel['inviati'] += 1
+        if stato in ["Confermato", "In Lavorazione", "Chiuso"]: funnel['confermati'] += 1
+        if stato == "Annullato": funnel['annullati'] += 1
+
+        # --- CALCOLI FINANZIARI (Solo su preventivi attivi/chiusi) ---
         if stato in ["Confermato", "In Lavorazione", "Chiuso"]:
-            funnel['confermati'] += 1
-        if stato == "Annullato":
-            funnel['annullati'] += 1
+            
+            # A. Valori Base
+            imp_cliente = _to_num(p.get("tot_imponibile_cliente"))
+            costo_prev = _to_num(p.get("tot_imponibile_negozio"))
+            
+            # B. Costi Effettivi (Somma ordini netti)
+            costo_eff = sum(_get_ordine_costo_effettivo_netto(o) for o in p.get("ordini_fornitore", []))
+            
+            # C. Fee Semplificata (Imponibile * Fee%)
+            fee_pct = _to_num(p.get("fee_pct"))
+            fee_val = imp_cliente * (fee_pct / 100)
+            
+            # D. Utili
+            # Utile Stimato = Imponibile - Costo Previsto (fee esclusa dal calcolo utile puro qui, la mostriamo a parte)
+            # Nota: per coerenza con l'analisi singola, usiamo la logica dei profitti stimati
+            profitti_dettaglio = _calculate_profits_from_quote(p) 
+            utile_stimato = profitti_dettaglio.get('profitto', 0.0)
 
-        # --- B. Calcolo Finanziari (solo su confermati/chiusi/in lav) ---
-        if stato in ["Confermato", "In Lavorazione", "Chiuso"]:
-            iva_val = _to_num(p.get("tot_iva"))
-            profitti = _calculate_profits_from_quote(p)
-            costi_ordini_val_netto = sum(
-                _get_ordine_costo_effettivo_netto(o)
-                for o in p.get("ordini_fornitore", [])
-            )
-            costi_prev = _to_num(p.get("tot_imponibile_negozio"))
+            utile_effettivo = imp_cliente - costo_eff
 
-            # --- NUOVO CALCOLO UTILE EFFETTIVO ---
-            imponibile_cliente_val = _to_num(p.get("tot_imponibile_cliente"))
-            utile_effettivo_val = imponibile_cliente_val - costi_ordini_val_netto
-            # --- FINE NUOVO CALCOLO ---
+            # E. Scostamento
+            scostamento = costo_prev - costo_eff if costo_eff > 0 else 0.0
 
-            # Aggrega KPI
-            analisi['fatturato'] += totale_val
-            analisi['utile_stimato'] += profitti["profitto"] # Utile stimato
-            analisi['utile_effettivo'] += utile_effettivo_val # NUOVO: Utile effettivo
-            analisi['fee'] += profitti["fee"] # Fee stimata
-            analisi['costi_ordini_netto'] += costi_ordini_val_netto
-            analisi['iva_debito'] += iva_val
-            analisi['imponibile_cliente'] += imponibile_cliente_val
-            analisi['costi_preventivati'] += costi_prev # Somma Costi Preventivati
+            # AGGREGAZIONE TOTALI
+            analisi['imponibile_cliente'] += imp_cliente
+            analisi['costi_preventivati'] += costo_prev
+            analisi['costi_effettivi_netti'] += costo_eff
+            analisi['utile_netto_stimato'] += utile_stimato
+            analisi['utile_netto_effettivo'] += utile_effettivo
+            analisi['fee_versata'] += fee_val
+            if costo_eff > 0:
+                analisi['scostamento_costi'] += scostamento
 
-            # Aggiungi alla lista per la tabella
-            costi_effettivi_per_tabella = costi_ordini_val_netto if costi_ordini_val_netto > 0 else 0.0
-            # --- MODIFICA SCOSTAMENTO TABELLA ---
-            scostamento_per_tabella = costi_prev - costi_effettivi_per_tabella if costi_effettivi_per_tabella > 0 else costi_prev
-            # --- FINE MODIFICA ---
+            # Dati per Tabella Dettaglio
             preventivi_analizzati.append({
                 'numero': p.get('numero'),
                 'data': p.get('data'),
-                'totale': totale_val,
-                'utile_effettivo': utile_effettivo_val, # Usa Utile Effettivo
-                'costi_prev': costi_prev,
-                'costi_eff': costi_effettivi_per_tabella,
-                'scostamento': scostamento_per_tabella # Scostamento invertito
+                'stato': stato,
+                'imponibile': imp_cliente,
+                'costo_eff': costo_eff,
+                'utile_eff': utile_effettivo,
+                'scostamento': scostamento
             })
 
-            # --- MODIFICA CALCOLO TEMPO CHIUSURA ---
-            # Aggrega Tempo Chiusura (SOLO se entrambe le date esistono)
-            data_conferma_effettiva_str = p.get("data_conferma")
-            data_chiusura_str = p.get("data_chiusura")
-            if stato == "Chiuso" and data_conferma_effettiva_str and data_chiusura_str:
+            # Tempo Chiusura
+            data_conf = p.get("data_conferma")
+            data_chius = p.get("data_chiusura")
+            if stato == "Chiuso" and data_conf and data_chius:
                 try:
-                    data_conferma_dt = datetime.datetime.strptime(data_conferma_effettiva_str, '%Y-%m-%d').date()
-                    data_chiusura_dt = datetime.datetime.strptime(data_chiusura_str, '%Y-%m-%d').date()
-                    giorni = (data_chiusura_dt - data_conferma_dt).days
-                    if giorni >= 0:
-                        tempi_chiusura_list.append(giorni)
-                except (ValueError, TypeError): pass
-            # --- FINE MODIFICA CALCOLO TEMPO CHIUSURA ---
+                    d1 = datetime.datetime.strptime(data_conf, '%Y-%m-%d').date()
+                    d2 = datetime.datetime.strptime(data_chius, '%Y-%m-%d').date()
+                    giorni = (d2 - d1).days
+                    if giorni >= 0: tempi_chiusura_list.append(giorni)
+                except: pass
 
-        # --- C. Calcolo Cash Flow (da tutti i preventivi) ---
+        # Cash Flow (incassi)
         for pag in p.get("pagamenti", []):
             if pag.get("rectifies_id"): continue
-            importo_pag = _to_num(pag.get("importo"))
-            if importo_pag <= 0: continue
+            imp_pag = _to_num(pag.get("importo"))
+            if imp_pag <= 0: continue
             try:
-                data_pag = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
-            except (ValueError, TypeError): continue
+                d_pag = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
+                if d_pag <= today: analisi['incassato'] += imp_pag
+                else: analisi['da_incassare'] += imp_pag
+            except: pass
 
-            if data_pag <= today:
-                analisi['incassato'] += importo_pag
-            else:
-                analisi['da_incassare'] += importo_pag
-
-    # 3. Finalizzazione Calcoli
-    # Redditività
+    # 3. Calcolo Percentuali Medie Finali
     if analisi['imponibile_cliente'] > 0:
-        # --- MODIFICA: Usa Utile Effettivo ---
-        analisi['utile_medio_effettivo_pct'] = (analisi['utile_effettivo'] / analisi['imponibile_cliente']) * 100
-        # --- FINE MODIFICA ---
-        analisi['fee_media_pct'] = (analisi['fee'] / analisi['imponibile_cliente']) * 100 # Fee rimane stimata
-    else:
-        analisi['utile_medio_effettivo_pct'] = 0.0
-        analisi['fee_media_pct'] = 0.0
+        margine_lordo = analisi['imponibile_cliente'] - analisi['costi_preventivati']
+        analisi['margine_lordo_pct'] = (margine_lordo / analisi['imponibile_cliente']) * 100
+        analisi['utile_netto_effettivo_pct'] = (analisi['utile_netto_effettivo'] / analisi['imponibile_cliente']) * 100
 
-    # --- MODIFICA: Inverti Scostamento ---
-    # Scostamento = Costi Preventivati - Costi Effettivi Netti
-    analisi['scostamento_costi_totale'] = analisi['costi_preventivati'] - analisi['costi_ordini_netto']
-    # --- FINE MODIFICA ---
-
-    # Tempo Chiusura
-    if tempi_chiusura_list:
-        analisi['tempo_medio_chiusura'] = round(sum(tempi_chiusura_list) / len(tempi_chiusura_list), 1)
-    else:
-        analisi['tempo_medio_chiusura'] = "N/D"
-
-    # Funnel
+    # Tempo medio
+    analisi['tempo_medio_chiusura'] = round(sum(tempi_chiusura_list) / len(tempi_chiusura_list), 1) if tempi_chiusura_list else "N/D"
+    
     if funnel['inviati'] > 0:
         funnel['tasso_firma_num'] = (funnel['confermati'] / funnel['inviati']) * 100
     else:

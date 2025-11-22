@@ -1,5 +1,17 @@
 
-[ {
+[ 
+  {
+    "version": "1.9.10",
+    "date": "2025-11-22",
+    "title": "Versione 1.10.0 - 22 Novembre 2025 (Fix Flussi e Ottimizzazioni)",
+    "changes": [
+      "CORREZIONE IMPORTANTE: Ripristinato il funzionamento dei pulsanti 'Merce Arrivata' e 'Marca Consegnato' per i profili Venditore e Segreteria. Il flusso di avanzamento stato ora funziona correttamente senza blocchi.",
+      "CORREZIONE UI: Ora la merce in arrivo da fornitore viene denominata 'IN ARRIVO' e non 'DA CONSEGNARE'",
+      "CORREZIONE UI: Risolto un problema visivo che mostrava card vuote nella pagina di Gestione Consegna.",
+      "MIGLIORAMENTO DASHBOARD CEO: Ottimizzazione generale delle logiche di calcolo, del layout grafico e delle metriche finanziarie nella Dashboard Direzionale."
+    ]
+  },
+  {
     "version": "1.9.9",
     "date": "2025-11-05",
     "title": "Versione 1.9.8 - 10 Novembre 2025 (design and logic fix)",
