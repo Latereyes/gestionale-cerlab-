@@ -32,27 +32,37 @@
                 </thead>
                 <tbody>
                     {% for user in users %}
+                    
+                    {# --- NUOVA CONDIZIONE --- #}
+                    {# Mostra la riga SE l'utente non è contabilità OPPURE se chi sta guardando è Amministratore #}
+                    {% if user.role != 'contabilità' or session.user_role == 'amministratore' %}
+                    
                     <tr>
                         <td><strong>{{ user.username }}</strong></td>
                         <td>{{ user.full_name }}</td>
                         <td>{{ user.role }}</td>
                         <td>{{ user.sigla }}</td>
                         <td class="row-actions">
-                        {% if user.username != session.user_id %}
-                            {% if user.role != 'amministratore' %}
-                                <a href="{{ url_for('reset_password', username=user.username) }}" class="btn" onclick="return confirm('Sei sicuro di voler resettare la password per questo utente?');">Resetta Password</a>
+                            {% if user.username != session.user_id %}
+                                {% if user.role != 'amministratore' %}
+                                    <a href="{{ url_for('reset_password', username=user.username) }}" class="btn" onclick="return confirm('Sei sicuro di voler resettare la password per questo utente?');">Resetta Password</a>
+                                {% else %}
+                                    <button class="btn" disabled title="Non è possibile resettare la password di un amministratore.">Resetta Password</button>
+                                {% endif %}
+                                
+                                {% if session.user_role == 'amministratore' and user.role != 'amministratore' %}
+                                    <a href="{{ url_for('elimina_utente', username=user.username) }}" class="btn icon-btn danger" title="Elimina Utente" onclick="return confirm('Sei sicuro di voler eliminare questo utente? L\'azione è irreversibile.');"><i class="fas fa-trash-alt"></i></a>
+                                    <a href="{{ url_for('modifica_utente', username=user.username) }}" class="btn icon-btn" title="Modifica Utente"><i class="fas fa-pencil-alt"></i></a>                
+                                {% endif %}
                             {% else %}
-                                <button class="btn" disabled title="Non è possibile resettare la password di un amministratore.">Resetta Password</button>
+                                <span class="muted">(Utente corrente)</span>
                             {% endif %}
-                        {% if session.user_role == 'amministratore' and user.role != 'amministratore' %}
-                        <a href="{{ url_for('elimina_utente', username=user.username) }}" class="btn icon-btn danger" title="Elimina Utente" onclick="return confirm('Sei sicuro di voler eliminare questo utente? L\'azione è irreversibile.');"><i class="fas fa-trash-alt"></i></a>
-                        <a href="{{ url_for('modifica_utente', username=user.username) }}" class="btn icon-btn" title="Modifica Utente"><i class="fas fa-pencil-alt"></i></a>                
-                        {% endif %}
-    {% else %}
-        <span class="muted">(Utente corrente)</span>
-    {% endif %}
-</td>
+                        </td>
                     </tr>
+                    
+                    {% endif %}
+                    {# --- FINE NUOVA CONDIZIONE --- #}
+                    
                     {% endfor %}
                 </tbody>
             </table>

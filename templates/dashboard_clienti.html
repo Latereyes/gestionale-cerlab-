@@ -149,8 +149,6 @@
                         <td>
                             {% if p.stato in ['Bozza', 'Inviato'] %}
                                 <span class="status-badge status-nd">N/D</span>
-                            {% elif p.no_iva %}
-                                <span class="status-badge status-non-disponibile">IVA ESENTE</span>
                             {% elif p.stato_fattura == 'Fatturato' %}
                                 <span class="status-badge status-fattura-emessa">Emessa</span>
                             {% elif p.stato_fattura == 'Fatturato Parziale' %}

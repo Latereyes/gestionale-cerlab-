@@ -1,5 +1,13 @@
 
 [ 
+   {
+    "version": "1.9.11",
+    "date": "2025-11-22",
+    "title": "Versione 1.11.0 - 2 Dicembre 2025 (Fix preventivi iva esenti)",
+    "changes": [
+      "CORREZIONE IMPORTANTE: Ora i preventivi con IVA esente (no_iva) vengono gestiti correttamente in tutte le sezioni (Dashboard, Dettaglio Cliente, Editor, Gestione Ordini, Consegne, Saldo, Fatture).",
+    ]
+  },
   {
     "version": "1.9.10",
     "date": "2025-11-22",

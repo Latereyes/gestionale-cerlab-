@@ -30,7 +30,7 @@ import queue
 from tkinter import Tk, Label, PhotoImage, Button
 
 
-APP_VERSION = "1.9.10"  
+APP_VERSION = "1.9.11"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -752,8 +752,10 @@ def aggiorna_stato_avanzamento(preventivo_data):
     # MODIFICA 2: "Completato" è la chiave per chiudere
     is_consegnato_completamente = preventivo_data.get("stato_consegna_globale") == "Completato"
     is_fatturato = preventivo_data.get("stato_fattura") == "Fatturato"
-    is_no_iva = preventivo_data.get("no_iva") == True
-    condizione_fattura_ok = is_fatturato or is_no_iva
+    
+    # --- MODIFICA RICHIESTA: Rimosso il controllo su 'no_iva'. 
+    # Ora deve comportarsi esattamente come gli altri (richiedere fattura).
+    condizione_fattura_ok = is_fatturato
 
     # --- MODIFICA 3: Logica di Chiusura / Riapertura ---
     
@@ -1107,7 +1109,7 @@ def dashboard():
             else:
                 grouped_active_quotes.setdefault(venditore, []).append(p)
         
-        elif user_role == 'segreteria':
+        elif user_role in ['segreteria', 'contabilità']:
             grouped_active_quotes.setdefault(venditore, []).append(p)
         
         elif user_role == 'venditore':
@@ -3086,7 +3088,7 @@ def marca_pronto(quote_id):
 @app.route("/consegna/<quote_id>/marca-consegnato", methods=["POST"])
 @login_required
 def marca_consegnato(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
     if session.get("user_role") not in allowed_roles:
         return jsonify({"success": False, "error": "Non disponi delle autorizzazioni per eseguire questa azione."})
     p = load_quote(quote_id)
@@ -3398,7 +3400,7 @@ def gestione_pagamenti(quote_id):
 @app.route("/pagamenti/<quote_id>/aggiungi", methods=["POST"])
 @login_required
 def aggiungi_pagamento(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
     if session.get("user_role") not in allowed_roles:
         flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
         return redirect(request.referrer or url_for('dashboard'))
@@ -3447,7 +3449,7 @@ def aggiungi_pagamento(quote_id):
 @app.route("/pagamenti/<quote_id>/rettifica", methods=["POST"])
 @login_required
 def rettifica_pagamento(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
     if session.get("user_role") not in allowed_roles:
         flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
         return redirect(request.referrer)
@@ -3497,7 +3499,7 @@ def rettifica_pagamento(quote_id):
 @app.route("/pagamenti/<quote_id>/conferma_incasso", methods=["POST"])
 @login_required
 def conferma_incasso(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
     if session.get("user_role") not in allowed_roles:
         flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
         return redirect(request.referrer)
@@ -3640,7 +3642,30 @@ def dashboard_fatture():
         title="Dashboard Fatture",
         preventivi=preventivi_confermati
     )
+@app.route("/fatture/esenti")
+@login_required
+def dashboard_esenti():
+    """Mostra solo i preventivi confermati con flag IVA Esente (0%)."""
+    tutti_i_preventivi = get_all_quotes()
+    preventivi_esenti = []
+    
+    # Consideriamo validi per la fatturazione questi stati
+    stati_validi = ["Confermato", "In Lavorazione", "Chiuso"]
 
+    for prev_summary in tutti_i_preventivi:
+        p = load_quote(prev_summary["numero"])
+        
+        if not p: 
+            continue
+            
+        # FILTRO: Deve essere in uno stato valido E avere il flag no_iva attivo
+        if p.get("stato") in stati_validi and p.get("no_iva") is True:
+            preventivi_esenti.append(p)
+
+    return render_template("dashboard_esenti.html", 
+        title="Dashboard Fatture Esenti",
+        preventivi=preventivi_esenti
+    )
 @app.route("/fattura/<quote_id>")
 @login_required
 def editor_fattura(quote_id):
@@ -3708,7 +3733,7 @@ def editor_fattura(quote_id):
 @app.route("/fattura/<quote_id>/allega", methods=["POST"])
 @login_required
 def allega_fattura(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
     if session.get("user_role") not in allowed_roles:
         flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
         return redirect(request.referrer or url_for('dashboard'))

@@ -21,6 +21,7 @@
                 <option value="venditore" {% if user.role == 'venditore' %}selected{% endif %}>Venditore</option>
                 <option value="segreteria" {% if user.role == 'segreteria' %}selected{% endif %}>Segreteria</option>
                 <option value="ceo" {% if user.role == 'ceo' %}selected{% endif %}>CEO</option>
+                <option value="contabilità" {% if user and user.role == 'contabilità' %}selected{% endif %}>Contabile</option>
                 <option value="amministratore" {% if user.role == 'amministratore' %}selected{% endif %}>Amministratore</option>
             </select>
         </div>
