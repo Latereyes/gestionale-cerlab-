@@ -4,8 +4,6 @@
 <h1>Dettaglio Fattura <span class="quote-number">#{{ p.numero }}</span>
     {% if p.stato in ['Bozza', 'Inviato'] %}
         <div class="status-badge status-nd"><i class="fas fa-minus-circle"></i> N/D</div>
-    {% elif p.no_iva %}
-        <div class="status-badge status-non-disponibile"><i class="fas fa-times-circle"></i> IVA ESENTE </div>
     {% elif p.stato_fattura == 'Fatturato' %}
         <div class="status-badge status-fattura-emessa"><i class="fas fa-check-circle"></i> FATTURATO</div>
     {% elif p.stato_fattura == 'Fatturato Parziale' %}
@@ -72,8 +70,8 @@
 
         <div class="card-footer actions-grid">
             <div class="status-display">
-                {% if data.fatture_allegate %}
-                    <div class="status-badge status-fattura-emessa"><i class="fas fa-check-circle"></i> FATTURA EMESSA</div>
+                {% if data.is_fatturato %}
+                    <div class="status-badge status-fattura-emessa"><i class="fas fa-check-circle"></i> FATTURATO</div>
                 {% elif iva_key == '0' %}
                      <div class="status-badge status-non-disponibile"><i class="fas fa-times-circle"></i> IVA ESENTE</div>
                 {% else %}
@@ -81,17 +79,33 @@
                 {% endif %}
             </div>
 
-            {% if session.user_role in ['amministratore', 'segreteria', 'ceo'] %}
-                <button type="button" 
-                        class="btn primary btn-allega-fattura-iva" 
-                        data-iva-key="{{ iva_key }}"
-                        data-descrizione="N. Fattura IVA {{ iva_key }}%">
-                    <i class="fas fa-paperclip"></i> 
-                    {% if data.fatture_allegate %}Allega Altra Fattura{% else %}Allega Fattura{% endif %}
-                </button>
-            {% endif %}
+            <div class="buttons-group" style="display: flex; gap: 10px;">
+                {% if session.user_role in ['amministratore', 'segreteria', 'ceo'] %}
+                    
+                    <form action="{{ url_for('toggle_stato_fattura_iva', quote_id=p.numero) }}" method="POST" style="margin: 0;">
+                        <input type="hidden" name="iva_key" value="{{ iva_key }}">
+                        
+                   
+                            <button type="submit" name="set_stato" value="0" class="btn btn-outline danger" title="Annulla lo stato di fatturazione">
+                                <i class="fas fa-times-circle"></i> Annulla Stato
+                            </button>
+             
+                            <button type="submit" name="set_stato" value="1" class="btn success" title="Segna come fatturato manualmente">
+                                <i class="fas fa-check-double"></i> Segna Fatturato
+                            </button>
+ 
+                    </form>
+
+                    <button type="button" 
+                            class="btn primary btn-allega-fattura-iva" 
+                            data-iva-key="{{ iva_key }}"
+                            data-descrizione="N. Fattura IVA {{ iva_key }}%">
+                        <i class="fas fa-paperclip"></i> 
+                        {% if data.fatture_allegate %}Allega Altra Doc.{% else %}Allega Fattura{% endif %}
+                    </button>
+                {% endif %}
+            </div>
         </div>
-        
         {% if data.fatture_allegate %}
             <div class="attachments-section">
                 <h5>Fatture Allegatæ per IVA {{ iva_key }}%:</h5>
@@ -114,10 +128,6 @@
             </div>
         {% endif %}
     </div>
-    {% else %}
-        <div class="card">
-            <div class="card-body">Nessun dato da fatturare trovato.</div>
-        </div>
     {% endfor %}
     <div class="totals-recap">
         <div class="total-item"><span>Imponibile Cliente</span><strong>{{ money_ui(p.tot_imponibile_cliente) }}</strong></div>

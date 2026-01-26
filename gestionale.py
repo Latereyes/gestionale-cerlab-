@@ -28,9 +28,16 @@ from tkinter import Tk, Label, PhotoImage
 from tkinter.ttk import Progressbar, Style
 import queue
 from tkinter import Tk, Label, PhotoImage, Button
+from flask import send_file
+import pandas as pd
+import io
+from flask import send_file
+from openpyxl import load_workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "1.9.11"  
+APP_VERSION = "1.10.0"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -689,33 +696,22 @@ def aggiorna_stato_pagamento_globale(preventivo_data):
     if stato_preventivo in ["Bozza", "Inviato", "Annullato"]:
         preventivo_data["stato_pagamento_globale"] = "N/D"
         return
-    # 2. Se è confermato (o successivo) e non ci sono pagamenti, è SEMPRE "Da Saldare".
-    pagamenti = preventivo_data.get("pagamenti", [])
-    if not pagamenti:
-        preventivo_data["stato_pagamento_globale"] = "Da Saldare"
-        return
 
-    # --- INIZIO BLOCCO CORRETTIVO ARROTONDATO ---
-    try:
-        # Arrotondiamo subito il totale
-        totale_preventivo = round(float(preventivo_data.get("totale", "0").replace(",", ".")), 2)
-    except (ValueError, TypeError):
-        totale_preventivo = 0.0
+    # Helper locale
+    def _loc_to_num(val):
+        try: return float(str(val).replace("€", "").replace(".", "").replace(",", ".").strip())
+        except: return 0.0
 
-    # Helpers per il calcolo
-    today = datetime.date.today()
-    def _str_to_float(s):
-        try: 
-            # Arrotondiamo ogni singolo importo
-            val = float(str(s).replace(",", "."))
-            return round(val, 2)
-        except (ValueError, TypeError): 
-            return 0.0
-
+    # Arrotondiamo subito il totale
+    totale_preventivo = round(_loc_to_num(preventivo_data.get("totale", "0")), 2)
     totale_pagato_effettivo = 0.0
     
+    today = datetime.date.today()
+    pagamenti = preventivo_data.get("pagamenti", [])
+
+    # 1. Somma pagamenti fisici
     for pag in pagamenti:
-        importo_float = _str_to_float(pag.get("importo")) # Questo ora è arrotondato
+        importo_float = _loc_to_num(pag.get("importo"))
         try:
             payment_date = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
         except (ValueError, TypeError, KeyError):
@@ -724,13 +720,18 @@ def aggiorna_stato_pagamento_globale(preventivo_data):
         if payment_date <= today:
             totale_pagato_effettivo += importo_float
     
+    # 2. GESTIONE ESENZIONE IVA (NO IVA)
+    # Se il flag è attivo, consideriamo l'IVA come "Già Saldata" (storno automatico)
+    if preventivo_data.get("no_iva"):
+        valore_iva = round(_loc_to_num(preventivo_data.get("tot_iva", "0")), 2)
+        totale_pagato_effettivo += valore_iva
+
     # Arrotondiamo la somma finale e la sottrazione
     totale_pagato_effettivo = round(totale_pagato_effettivo, 2)
     totale_da_saldare = round(totale_preventivo - totale_pagato_effettivo, 2)
-    # --- FINE BLOCCO CORRETTIVO ---
 
-    # MODIFICA FINALE: Controlliamo se è <= 0, non <= 0.01
-    if totale_da_saldare <= 0:
+    # Controlliamo se è <= 0.01 per tolleranza float
+    if totale_da_saldare <= 0.01:
         preventivo_data["stato_pagamento_globale"] = "Saldato"
     else:
         preventivo_data["stato_pagamento_globale"] = "Da Saldare"
@@ -752,10 +753,8 @@ def aggiorna_stato_avanzamento(preventivo_data):
     # MODIFICA 2: "Completato" è la chiave per chiudere
     is_consegnato_completamente = preventivo_data.get("stato_consegna_globale") == "Completato"
     is_fatturato = preventivo_data.get("stato_fattura") == "Fatturato"
-    
-    # --- MODIFICA RICHIESTA: Rimosso il controllo su 'no_iva'. 
-    # Ora deve comportarsi esattamente come gli altri (richiedere fattura).
-    condizione_fattura_ok = is_fatturato
+    is_no_iva = preventivo_data.get("no_iva") == True
+    condizione_fattura_ok = is_fatturato or is_no_iva
 
     # --- MODIFICA 3: Logica di Chiusura / Riapertura ---
     
@@ -1109,7 +1108,7 @@ def dashboard():
             else:
                 grouped_active_quotes.setdefault(venditore, []).append(p)
         
-        elif user_role in ['segreteria', 'contabilità']:
+        elif user_role == 'segreteria':
             grouped_active_quotes.setdefault(venditore, []).append(p)
         
         elif user_role == 'venditore':
@@ -1566,9 +1565,6 @@ def nuovo_preventivo(client_id):
 @app.route("/preventivo/edit/<quote_id>")
 @login_required
 def editor_preventivo(quote_id):
-    if session.get("user_role") == 'segreteria':
-        flash("Non disponi delle autorizzazioni per eseguire questa azione.", "error")
-        return redirect(url_for("dashboard"))
     p = load_quote(quote_id)
     if p is None: flash(f"Preventivo '{quote_id}' non trovato."); return redirect(url_for("dashboard"))
     margini_config = load_margini_config()
@@ -1759,20 +1755,13 @@ def salva_righe(quote_id):
     # Rimuoviamo la vecchia chiave per pulizia
     p.pop("tot_imponibile", None)
     
-    # --- INIZIO BLOCCO: Imposta flag no_iva ---
-    # p["righe"] a questo punto contiene già solo le righe valide (con un articolo)
-    righe_valide_per_iva = p.get("righe", [])
-
-    if not righe_valide_per_iva:
-        # Se non ci sono righe, non c'è IVA
-        p["no_iva"] = False
-    else:
-        # Controlla se OGNI riga valida ha l'IVA a "0 %"
-        p["no_iva"] = all(
-            r.get("iva_pct", "22 %").strip() == "0 %" 
-            for r in righe_valide_per_iva
-        )
-    # --- FINE BLOCCO: Imposta flag no_iva ---
+    # --- MODIFICA: Imposta flag no_iva manuale ---
+    # Se il preventivo è bloccato (is_locked='true'), i checkbox disabilitati non vengono inviati dal browser.
+    # In questo caso NON dobbiamo toccare il valore esistente (altrimenti si resetterebbe a False).
+    # Aggiorniamo il valore SOLO se l'editor è sbloccato.
+    if form.get("is_locked") != 'true':
+        p["no_iva"] = True if form.get("no_iva") else False
+    # --- FINE MODIFICA ---
 
     aggiorna_stato_consegna_globale(p)
     aggiorna_stato_pagamento_globale(p)
@@ -2544,176 +2533,640 @@ def _get_ordine_costo_effettivo_netto(ordine):
     
     return round(costo_netto, 2)
 
-@app.route("/dashboard-ceo")
+
+
+def _to_float(val):
+    """Helper globale per conversione numeri"""
+    if val is None or str(val).strip() == "": return 0.0
+    if isinstance(val, (int, float)): return float(val)
+    s = str(val).replace("€", "").replace("%", "").strip()
+    if "," in s: s = s.replace(".", "").replace(",", ".")
+    try: return float(s)
+    except ValueError: return 0.0
+
+def _get_netto_ordine(ordine):
+    """
+    Calcola il costo NETTO di un ordine.
+    Se c'è l'IVA esplicita salvata, la sottrae.
+    Altrimenti scorpora il 22% dal totale.
+    """
+    imp_lordo = _to_float(ordine.get("importo", 0))
+    # Se abbiamo salvato l'IVA specifica dell'ordine, usiamo quella per avere il netto esatto
+    if "iva_ordine" in ordine:
+        return imp_lordo - _to_float(ordine["iva_ordine"])
+    # Fallback: scorporo 22% forfettario
+    return imp_lordo / 1.22
+
+@app.route("/dashboard/ceo")
 @login_required
-@role_required('amministratore', 'ceo')
 def dashboard_ceo():
+    if session.get("user_role") not in ["amministratore", "ceo"]:
+        flash("Accesso negato.", "error")
+        return redirect(url_for("dashboard"))
+
+    # --- 1. GESTIONE DATE ---
     today = datetime.date.today()
-    
-    # 1. Filtri Date
-    default_start = today - relativedelta(days=90)
-    start_date_str = request.args.get('start_date', default_start.strftime('%Y-%m-%d'))
-    end_date_str = request.args.get('end_date', today.strftime('%Y-%m-%d'))
-    
-    try:
-        start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d').date()
-        end_date = datetime.datetime.strptime(end_date_str, '%Y-%m-%d').date()
-    except ValueError:
-        start_date = default_start
-        end_date = today
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+    MIN_DATE = datetime.date(2025, 9, 1)
 
-    # 2. Strutture Dati
+    if start_date_str:
+        start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
+    else:
+        start_date = today.replace(day=1)
+    if start_date < MIN_DATE: start_date = MIN_DATE
+
+    if end_date_str:
+        end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+    else:
+        next_month = today.replace(day=28) + datetime.timedelta(days=4)
+        end_date = next_month - datetime.timedelta(days=next_month.day)
+
+    # --- INIZIALIZZAZIONE ---
     kpi = {
-        'imponibile_totale': 0.0,
-        'costi_preventivati_totali': 0.0,
-        'utile_netto_finale': 0.0,
-        'scostamento_totale': 0.0,
-        'fee_versata': 0.0,
-        'margine_medio_pct': 0.0,
-        'marginalita_totale_pct': 0.0
-    }
-    
-    cashflow = { 'incassato_netto': 0.0, 'in_attesa_netto': 0.0, 'da_saldare_netto': 0.0, 'costi_preventivi_in_corso': 0.0, 'saldo_finanziario': 0.0 }
-    
-    referenti_data = []
-    performance_venditori = {} # Dizionario per aggregare i dati venditore
-    future_payments = []
-    funnel = {'creati': 0, 'inviati': 0, 'confermati': 0, 'annullati': 0, 'valore_in_trattativa': 0.0}
-    
-    months_diff = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month) + 1
-    if months_diff > 24: months_diff = 12
-    labels_grafico = [(start_date + relativedelta(months=i)).strftime('%b %y') for i in range(months_diff)]
-    
-    grafico_data = { 
-        'labels': labels_grafico, 
-        'utile': [0.0]*months_diff, 
-        'fee': [0.0]*months_diff,
-        'costi_presunti': [0.0]*months_diff, 
-        'costi_effettivi': [0.0]*months_diff 
+        "imponibile_totale": 0.0, "costi_preventivati_totali": 0.0, "costi_reali_totali": 0.0,
+        "scostamento_totale": 0.0, "fee_versata": 0.0, "utile_netto_finale": 0.0,
+        "margine_medio_pct": 0.0, "marginalita_totale_pct": 0.0
     }
 
-    quotes = get_all_quotes()
+    cashflow = {
+        "incassato_netto": 0.0, "in_attesa_netto": 0.0, "da_saldare_netto": 0.0,
+        "costi_preventivi_in_corso": 0.0, 
+        "iva_preventivi": 0.0, "iva_ordini": 0.0, "iva_esente": 0.0,
+        "fee_versata": 0.0,
+        "bilancio": 0.0, "bilancio_iva": 0.0
+    }
+
+    funnel = { "creati": 0, "inviati": 0, "confermati": 0, "annullati": 0, "valore_in_trattativa": 0.0, "tasso_firma": 0.0 }
     
-    for summary in quotes:
+    venditori_dict = {}
+    referenti_dict = {}
+    future_payments = []
+    daily_stats = {} 
+
+    all_quotes = get_all_quotes()
+
+    for summary in all_quotes:
         p = load_quote(summary["numero"])
         if not p: continue
         
-        stato = p.get("stato")
-        data_creazione = _str_to_date(p.get("data"))
-        data_conferma = _str_to_date(p.get("data_conferma")) or data_creazione
+        try: p_date = datetime.datetime.strptime(p.get("data"), "%Y-%m-%d").date()
+        except: continue
 
-        # Funnel
-        if start_date <= data_creazione <= end_date:
-            funnel['creati'] += 1
-            if stato != "Bozza": funnel['inviati'] += 1
-            if stato in ["Confermato", "In Lavorazione", "Chiuso"]: funnel['confermati'] += 1
-            if stato == "Annullato": funnel['annullati'] += 1
-            
-        if stato in ["Bozza", "Inviato"]:
-            funnel['valore_in_trattativa'] += _to_num(p.get("tot_imponibile_cliente"))
+        imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
+        tot_lordo = _to_float(p.get("totale", 0))
+        fee_pct = _to_float(p.get("fee_pct", 0))
 
-        # Economico
-        if stato in ["Confermato", "In Lavorazione", "Chiuso"]:
-            
-            imp_cliente = _to_num(p.get("tot_imponibile_cliente"))
-            costo_prev = _to_num(p.get("tot_imponibile_negozio"))
-            costo_eff = sum(_get_ordine_costo_effettivo_netto(o) for o in p.get("ordini_fornitore", []))
-            
-            if start_date <= data_conferma <= end_date:
-                fee_pct = _to_num(p.get("fee_pct"))
-                fee_val = imp_cliente * (fee_pct / 100)
+        raw_no_iva = p.get("no_iva")
+        is_no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
+        
+        ratio_netto = 1.0
+        if tot_lordo > 0: ratio_netto = imponibile / tot_lordo
 
-                has_orders = len(p.get("ordini_fornitore", [])) > 0
-                costo_reale_calc = costo_eff if has_orders else costo_prev
-                utile_netto = imp_cliente - costo_reale_calc - fee_val
-                scostamento = (costo_prev - costo_eff) if has_orders else 0.0
+        # === 1. LOGICA COMPETENZA (FILTRO DATA PREVENTIVO) ===
+        if start_date <= p_date <= end_date:
+            st = p.get("stato")
+            funnel["creati"] += 1
+            if st == "Bozza": funnel["valore_in_trattativa"] += imponibile
+            elif st == "Inviato": 
+                funnel["inviati"] += 1
+                funnel["valore_in_trattativa"] += imponibile
+            elif st in ["Confermato", "In Lavorazione", "Chiuso"]:
+                funnel["inviati"] += 1
+                funnel["confermati"] += 1
+            elif st == "Annullato": funnel["annullati"] += 1
 
-                kpi['imponibile_totale'] += imp_cliente
-                kpi['costi_preventivati_totali'] += costo_prev
-                kpi['scostamento_totale'] += scostamento
-                kpi['fee_versata'] += fee_val
-                kpi['utile_netto_finale'] += utile_netto
+            if st in ["Confermato", "In Lavorazione", "Chiuso"]:
+                # Costi Presunti (Negozio)
+                c_presunto = _to_float(p.get("tot_imponibile_negozio", 0))
 
-                # --- AGGREGAZIONE VENDITORI ---
-                venditore = p.get("venditore", "N/D")
-                if venditore not in performance_venditori:
-                    performance_venditori[venditore] = {'nome': venditore, 'count': 0, 'imponibile': 0.0, 'utile': 0.0}
-                performance_venditori[venditore]['count'] += 1
-                performance_venditori[venditore]['imponibile'] += imp_cliente
-                performance_venditori[venditore]['utile'] += utile_netto
-
-                # --- REFERENTI (Con Imponibile) ---
-                referente = p.get("referente", "").strip()
-                if referente:
-                    referenti_data.append({
-                        'nome': referente, 
-                        'preventivo': p.get("numero"), 
-                        'imponibile': imp_cliente, # <-- NUOVO CAMPO
-                        'fee': fee_val, 
-                        'data': data_conferma.strftime('%d/%m/%Y')
-                    })
+                # Costi Reali (Ordini - NETTO)
+                c_reale = 0.0
+                for ordine in p.get("ordini_fornitore", []):
+                    # Usiamo il helper per il netto
+                    c_reale += _get_netto_ordine(ordine)
+                    # Accumulo IVA ordini per KPI cashflow (anche se qui è competenza, serve per totale)
+                    cashflow["iva_ordini"] += _to_float(ordine.get("iva_ordine", 0))
                 
-                idx = (data_conferma.year - start_date.year) * 12 + (data_conferma.month - start_date.month)
-                if 0 <= idx < len(grafico_data['utile']):
-                    grafico_data['utile'][idx] += utile_netto
-                    grafico_data['fee'][idx] += fee_val
-                    grafico_data['costi_presunti'][idx] += costo_prev
-                    grafico_data['costi_effettivi'][idx] += costo_reale_calc
+                fee_val = 0.0 if fee_pct <= 0 else imponibile * (fee_pct / 100.0)
+                c_rif = c_reale if c_reale > 0 else c_presunto
+                margine = imponibile - c_rif
 
-            # Cash Flow (Invariato)
-            totale_lordo_preventivo = _to_num(p.get("totale"))
-            rapporto_netto = (imp_cliente / totale_lordo_preventivo) if totale_lordo_preventivo > 0 else 1.0
+                kpi["imponibile_totale"] += imponibile
+                kpi["costi_preventivati_totali"] += c_presunto
+                kpi["costi_reali_totali"] += c_reale
+                kpi["fee_versata"] += fee_val
+                kpi["utile_netto_finale"] += margine
+
+                vnd = p.get("venditore", "N/D")
+                if vnd not in venditori_dict: venditori_dict[vnd] = {"nome": vnd, "count": 0, "imponibile": 0.0, "utile": 0.0}
+                venditori_dict[vnd]["count"] += 1
+                venditori_dict[vnd]["imponibile"] += imponibile
+                venditori_dict[vnd]["utile"] += margine
+
+                ref = p.get("referente", "") 
+                if ref:
+                    if ref not in referenti_dict: referenti_dict[ref] = {"nome": ref, "preventivo": 0, "imponibile": 0.0, "fee": 0.0}
+                    referenti_dict[ref]["preventivo"] += 1
+                    referenti_dict[ref]["imponibile"] += imponibile
+                    referenti_dict[ref]["fee"] += fee_val
+
+                d_str = p.get("data")
+                if d_str not in daily_stats: daily_stats[d_str] = {"imp": 0, "marg": 0, "fee": 0, "c_reale": 0, "c_pres": 0}
+                daily_stats[d_str]["imp"] += imponibile
+                daily_stats[d_str]["marg"] += margine
+                daily_stats[d_str]["fee"] += fee_val
+                daily_stats[d_str]["c_reale"] += c_rif
+                daily_stats[d_str]["c_pres"] += c_presunto
+
+                # Residuo da Saldare (Stock)
+                inc_tot_quote = sum(_to_float(x.get("importo", 0)) for x in p.get("pagamenti", []))
+                residuo = tot_lordo - inc_tot_quote
+                cashflow["da_saldare_netto"] += residuo * ratio_netto
+        
+        # === 2. LOGICA CASSA (DATA PAGAMENTO) ===
+        if p.get("stato") in ["Confermato", "In Lavorazione", "Chiuso"]:
             
-            pagato_past = 0.0
-            pagato_future = 0.0
+            # --- INCASSI ---
             for pag in p.get("pagamenti", []):
-                if pag.get("rectifies_id"): continue
-                imp_lordo = _to_num(pag.get("importo"))
-                if imp_lordo <= 0: continue
-                imp_netto = imp_lordo * rapporto_netto
-                d_pag = _str_to_date(pag.get("data"))
-                if d_pag and d_pag > today:
-                    pagato_future += imp_netto
-                    future_payments.append({'data': d_pag, 'cliente': p.get("cliente"), 'preventivo': p.get("numero"), 'importo_netto': imp_netto, 'note': pag.get("note", "")})
-                else:
-                    pagato_past += imp_netto
-            
-            residuo = imp_cliente - (pagato_past + pagato_future)
-            if residuo < 0.05: residuo = 0.0
-            
-            cashflow['incassato_netto'] += pagato_past
-            cashflow['in_attesa_netto'] += pagato_future
-            cashflow['da_saldare_netto'] += residuo
-            
-            if stato != "Chiuso":
-                has_orders = len(p.get("ordini_fornitore", [])) > 0
-                impegno = costo_eff if has_orders else costo_prev
-                cashflow['costi_preventivi_in_corso'] += impegno
+                val_lordo = _to_float(pag.get("importo", 0))
+                try: d_pag = datetime.datetime.strptime(pag.get("data"), "%Y-%m-%d").date()
+                except: d_pag = today 
+                
+                val_netto = val_lordo * ratio_netto
+                quota_iva = val_lordo - val_netto
+                fee_su_incasso = val_netto * (fee_pct / 100.0) if fee_pct > 0 else 0.0
 
-    # Calcoli Finali
-    if kpi['imponibile_totale'] > 0:
-        costi_reali_totali = kpi['costi_preventivati_totali'] - kpi['scostamento_totale']
-        if costi_reali_totali > 0:
-            kpi['margine_medio_pct'] = (kpi['utile_netto_finale'] / costi_reali_totali) * 100
-        kpi['marginalita_totale_pct'] = (kpi['utile_netto_finale'] / kpi['imponibile_totale']) * 100
+                # A. PAGAMENTI GIÀ INCASSATI
+                if start_date <= d_pag <= end_date and d_pag <= today:
+                    cashflow["incassato_netto"] += val_netto
+                    cashflow["fee_versata"] += fee_su_incasso
+                    if not is_no_iva: cashflow["iva_preventivi"] += quota_iva
 
-    totale_crediti = cashflow['in_attesa_netto'] + cashflow['da_saldare_netto']
-    cashflow['saldo_finanziario'] = totale_crediti - cashflow['costi_preventivi_in_corso']
+                # B. PAGAMENTI FUTURI
+                if d_pag > today:
+                    cashflow["in_attesa_netto"] += val_netto
+                    future_payments.append({
+                        "data": d_pag, "cliente": p.get("cliente"), "preventivo": p.get("numero"),
+                        "importo_netto": val_netto, "note": pag.get("note", "")
+                    })
+            
+            # --- USCITE (ORDINI) ---
+            # Nota: Qui usiamo il filtro data transazione per il Cashflow
+            for ordine in p.get("ordini_fornitore", []):
+                d_trans = None
+                if ordine.get("allegati"): 
+                    try: d_trans = datetime.datetime.strptime(ordine["allegati"][0]["data_upload"], "%Y-%m-%d").date()
+                    except: pass
+                if not d_trans and ordine.get("data_arrivo"):
+                    try: d_trans = datetime.datetime.strptime(ordine.get("data_arrivo"), "%Y-%m-%d").date()
+                    except: pass
+                if not d_trans:
+                    # Fallback alla data preventivo se non c'è altra data
+                    try: d_trans = datetime.datetime.strptime(p.get("data"), "%Y-%m-%d").date()
+                    except: continue
 
-    if funnel['inviati'] > 0: funnel['tasso_firma'] = (funnel['confermati'] / funnel['inviati']) * 100
+                if start_date <= d_trans <= end_date:
+                    # ORA USIAMO IL NETTO ANCHE QUI!
+                    imp_ord_netto = _get_netto_ordine(ordine)
+                    cashflow["costi_preventivi_in_corso"] += imp_ord_netto
+                    # L'IVA ordini è già stata sommata sopra per il KPI totale, ma qui serve per il bilancio IVA di periodo
+                    # Attenzione: sopra era nel ciclo competenza. Qui dobbiamo sommarla se cade nel periodo cassa.
+                    # Ma nel ciclo competenza l'abbiamo sommata solo se il PREVENTIVO è nel periodo.
+                    # Qui la sommiamo se l'ORDINE è nel periodo.
+                    # Per il bilancio IVA usiamo questo valore qui.
+                    # Resetto iva_ordini calcolata nel ciclo competenza perché mescolava le logiche?
+                    # No, cashflow["iva_ordini"] è usata solo nel box IVA. Usiamo la somma di periodo cassa.
+                    pass 
+
+            if start_date <= p_date <= end_date and is_no_iva:
+                cashflow["iva_esente"] += _to_float(p.get("tot_iva", 0))
+
+    # --- CALCOLO BILANCI ---
+    # Ricalcolo IVA ordini basato strettamente sul periodo cassa per correttezza
+    iva_ordini_cassa = 0.0
+    for summary in all_quotes:
+        p = load_quote(summary["numero"])
+        if not p or p.get("stato") not in ["Confermato", "In Lavorazione", "Chiuso"]: continue
+        for o in p.get("ordini_fornitore", []):
+             d_trans = None
+             if o.get("allegati"): 
+                try: d_trans = datetime.datetime.strptime(o["allegati"][0]["data_upload"], "%Y-%m-%d").date()
+                except: pass
+             if not d_trans and o.get("data_arrivo"):
+                try: d_trans = datetime.datetime.strptime(o.get("data_arrivo"), "%Y-%m-%d").date()
+                except: pass
+             if not d_trans: d_trans = _str_to_date(p.get("data")) # Fallback
+             
+             if d_trans and start_date <= d_trans <= end_date:
+                 iva_ordini_cassa += _to_float(o.get("iva_ordine", 0))
     
-    referenti_data.sort(key=lambda x: x['fee'], reverse=True)
-    future_payments.sort(key=lambda x: x['data'])
+    cashflow["iva_ordini"] = iva_ordini_cassa
+
+    # Bilancio = Incassi Netti - Costi Netti - Fee
+    cashflow["bilancio"] = cashflow["incassato_netto"] - cashflow["costi_preventivi_in_corso"] - cashflow["fee_versata"]
+    cashflow["bilancio_iva"] = cashflow["iva_preventivi"] - cashflow["iva_ordini"]
+
+    # Finalizzazione KPI
+    kpi["scostamento_totale"] = kpi["costi_preventivati_totali"] - kpi["costi_reali_totali"]
+    if kpi["imponibile_totale"] > 0:
+        kpi["marginalita_totale_pct"] = (kpi["utile_netto_finale"] / kpi["imponibile_totale"]) * 100
+        if (kpi["imponibile_totale"] - kpi["utile_netto_finale"]) > 0:
+             kpi["margine_medio_pct"] = (kpi["utile_netto_finale"] / (kpi["imponibile_totale"] - kpi["utile_netto_finale"])) * 100
+    if funnel["creati"] > 0: funnel["tasso_firma"] = (funnel["confermati"] / funnel["creati"]) * 100
+
+    venditori_list = sorted(venditori_dict.values(), key=lambda x: x["imponibile"], reverse=True)
+    referenti_list = sorted(referenti_dict.values(), key=lambda x: x["fee"], reverse=True)
+    future_payments.sort(key=lambda x: x["data"])
+    sorted_dates = sorted(daily_stats.keys())
     
-    # Ordina venditori per imponibile decrescente
-    venditori_list = sorted(list(performance_venditori.values()), key=lambda x: x['imponibile'], reverse=True)
+    grafico_out = {
+        "labels": sorted_dates,
+        "imponibile": [daily_stats[d]["imp"] for d in sorted_dates],
+        "utile": [daily_stats[d]["marg"] for d in sorted_dates],
+        "fee": [daily_stats[d]["fee"] for d in sorted_dates],
+        "costi_effettivi": [daily_stats[d]["c_reale"] for d in sorted_dates],
+        "costi_presunti": [daily_stats[d]["c_pres"] for d in sorted_dates]
+    }
 
     return render_template("dashboard_ceo.html",
-        title="Dashboard CEO", start_date=start_date_str, end_date=end_date_str,
-        kpi=kpi, cashflow=cashflow, referenti=referenti_data, venditori=venditori_list, # <-- PASSATO venditori
-        future_payments=future_payments, funnel=funnel, grafico=grafico_data
+        title="Dashboard Direzionale",
+        start_date=start_date.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d"),
+        kpi=kpi, cashflow=cashflow, funnel=funnel,
+        venditori=venditori_list, referenti=referenti_list, 
+        future_payments=future_payments,
+        grafico=grafico_out
     )
 
+@app.route("/dashboard/ceo/export_cashflow")
+@login_required
+def export_cashflow_excel():
+    if session.get("user_role") not in ["amministratore", "ceo"]:
+        flash("Accesso negato.", "error")
+        return redirect(url_for("dashboard"))
+
+    try:
+        import pandas as pd
+        import io
+        from flask import send_file
+        from openpyxl import load_workbook
+        from openpyxl.utils.dataframe import dataframe_to_rows
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        flash("Libreria 'pandas' o 'openpyxl' non installata.", "error")
+        return redirect(url_for("dashboard_ceo"))
+
+    # Recupero Date
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+    today = datetime.date.today()
+    
+    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date() if start_date_str else today.replace(day=1)
+    
+    if end_date_str:
+        end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+    else:
+        next_month = today.replace(day=28) + datetime.timedelta(days=4)
+        end_date = next_month - datetime.timedelta(days=next_month.day)
+
+    # Caricamento Template
+    template_filename = "modello cashflow.xlsx"
+    if not os.path.exists(template_filename):
+        flash(f"File modello '{template_filename}' non trovato nel server!", "error")
+        return redirect(url_for("dashboard_ceo"))
+
+    all_quotes = get_all_quotes() 
+    cashflow_rows = []
+
+    for summary in all_quotes:
+        p = load_quote(summary["numero"])
+        if not p: continue
+        
+        if p.get("stato") in ["Annullato", "Bozza", "Inviato"]: 
+            continue
+
+        imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
+        totale_lordo = _to_float(p.get("totale", 0))
+        tot_iva = _to_float(p.get("tot_iva", 0))
+        fee_pct = _to_float(p.get("fee_pct", 0)) 
+        
+        raw_no_iva = p.get("no_iva")
+        is_no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
+
+        ratio_netto = 1.0
+        ratio_iva_virtuale = 0.0
+
+        if is_no_iva:
+            ratio_netto = 1.0 
+            if imponibile > 0: ratio_iva_virtuale = tot_iva / imponibile
+        else:
+            if totale_lordo > 0: ratio_netto = imponibile / totale_lordo
+
+        # --- A. ENTRATE ---
+        for pag in p.get("pagamenti", []):
+            try: d_pag = datetime.datetime.strptime(pag.get("data"), "%Y-%m-%d").date()
+            except: continue 
+            
+            if start_date <= d_pag <= end_date:
+                lordo = _to_float(pag.get("importo", 0))
+                val_netto = 0.0
+                val_iva_prev = 0.0
+                val_iva_esente = 0.0
+                
+                if is_no_iva:
+                    val_netto = lordo
+                    val_iva_esente = val_netto * ratio_iva_virtuale
+                else:
+                    val_netto = lordo * ratio_netto
+                    val_iva_prev = lordo - val_netto
+                
+                fee_val = val_netto * (fee_pct / 100.0) if fee_pct > 0 else 0.0
+
+                cashflow_rows.append({
+                    "N. PREVENTIVO": p.get("numero"), "CLIENTE": p.get("cliente"), "STATO": p.get("stato"),
+                    "VENDITORE": p.get("venditore"), "ID (Rif.)": f"Pagamento ({pag.get('note', '')[:20]})",
+                    "DATA TRANSAZIONE": d_pag,
+                    "ENTRATE NETTE (€)": val_netto, "USCITE NETTE (€)": 0.0,
+                    "FEE VERSATA ": fee_val, 
+                    "IVA ORDINE (€)": 0.0, "IVA PREVENTIVO (€)": val_iva_prev, "IVA ESENTE (€)": val_iva_esente,   
+                    "TIPO": "INCASSO"
+                })
+
+        # --- B. USCITE (ORDINI) ---
+        for ordine in p.get("ordini_fornitore", []):
+            d_transazione = None
+            if ordine.get("allegati"): 
+                try: d_transazione = datetime.datetime.strptime(ordine["allegati"][0]["data_upload"], "%Y-%m-%d").date()
+                except: pass
+            if not d_transazione and ordine.get("data_arrivo"):
+                try: d_transazione = datetime.datetime.strptime(ordine.get("data_arrivo"), "%Y-%m-%d").date()
+                except: pass
+            if not d_transazione:
+                try: d_transazione = datetime.datetime.strptime(p.get("data"), "%Y-%m-%d").date()
+                except: continue
+
+            if start_date <= d_transazione <= end_date:
+                # ORA USIAMO IL NETTO ANCHE QUI!
+                importo_netto = _get_netto_ordine(ordine)
+                iva_ordine = _to_float(ordine.get("iva_ordine", 0))
+                
+                cashflow_rows.append({
+                    "N. PREVENTIVO": p.get("numero"), "CLIENTE": p.get("cliente"), "STATO": p.get("stato"),
+                    "VENDITORE": p.get("venditore"), "ID (Rif.)": f"Ord. {ordine.get('azienda')}",
+                    "DATA TRANSAZIONE": d_transazione,
+                    "ENTRATE NETTE (€)": 0.0, "USCITE NETTE (€)": importo_netto,
+                    "FEE VERSATA ": 0.0,
+                    "IVA ORDINE (€)": iva_ordine, "IVA PREVENTIVO (€)": 0.0, "IVA ESENTE (€)": 0.0,
+                    "TIPO": "USCITA"
+                })
+
+    if not cashflow_rows:
+        flash("Nessuna transazione trovata nel periodo selezionato.", "warning")
+        return redirect(url_for("dashboard_ceo", start_date=start_date_str, end_date=end_date_str))
+
+    df = pd.DataFrame(cashflow_rows)
+    df = df.sort_values(by="DATA TRANSAZIONE")
+
+    cols = ["N. PREVENTIVO", "CLIENTE", "STATO", "VENDITORE", "ID (Rif.)", "DATA TRANSAZIONE", 
+            "ENTRATE NETTE (€)", "USCITE NETTE (€)", "FEE VERSATA ", 
+            "IVA ORDINE (€)", "IVA PREVENTIVO (€)", "IVA ESENTE (€)", "TIPO"]
+    
+    for c in cols:
+        if c not in df.columns: df[c] = ""
+    df = df[cols]
+
+    wb = load_workbook(template_filename)
+    ws = wb["Cashflow"]
+
+    max_row = ws.max_row
+    if max_row > 1:
+        ws.delete_rows(2, amount=max_row-1)
+
+    rows = dataframe_to_rows(df, index=False, header=False)
+    for r_idx, row in enumerate(rows, 1):
+        for c_idx, value in enumerate(row, 1):
+            ws.cell(row=r_idx+1, column=c_idx, value=value)
+
+    if ws.tables:
+        total_rows = len(df) + 1
+        last_col_letter = get_column_letter(len(cols))
+        new_ref = f"A1:{last_col_letter}{total_rows}"
+        for table in ws.tables.values():
+            table.ref = new_ref
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    filename = f"Cashflow_Dettagliato_{start_date.strftime('%d-%m')}_{end_date.strftime('%d-%m-%Y')}.xlsx"
+    
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename
+    )
+
+@app.route("/dashboard/ceo/export_excel")
+@login_required
+def export_excel_ceo():
+    # 1. Controllo Permessi
+    if session.get("user_role") not in ["amministratore", "ceo"]:
+        flash("Accesso negato.", "error")
+        return redirect(url_for("dashboard"))
+
+    try:
+        # Verifica dipendenze
+        import pandas as pd
+    except ImportError:
+        flash("Libreria 'pandas' non installata.", "error")
+        return redirect(url_for("dashboard_ceo"))
+
+    # 2. Recupero Date
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+    today = datetime.date.today()
+    
+    if not start_date_str:
+        start_date = today.replace(day=1)
+    else:
+        start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
+
+    if not end_date_str:
+        next_month = today.replace(day=28) + datetime.timedelta(days=4)
+        end_date = next_month - datetime.timedelta(days=next_month.day)
+    else:
+        end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+
+    # --- CARICAMENTO TEMPLATE ---
+    template_filename = "template_analisi.xlsx"
+    if not os.path.exists(template_filename):
+        flash(f"File modello '{template_filename}' non trovato nel server!", "error")
+        return redirect(url_for("dashboard_ceo"))
+
+    # Helper pulizia numeri
+    def _to_float(val):
+        if val is None or str(val).strip() == "": return 0.0
+        if isinstance(val, (int, float)): return float(val)
+        s = str(val).replace("€", "").replace("%", "").strip()
+        if "," in s: s = s.replace(".", "").replace(",", ".")
+        try: return float(s)
+        except ValueError: return 0.0
+
+    all_quotes = get_all_quotes() 
+    export_data = []
+
+    for summary in all_quotes:
+        p = load_quote(summary["numero"])
+        if not p: continue
+
+        # --- FILTRO STATI ---
+        # Escludiamo Annullato, Bozza e Inviato
+        stato_attuale = p.get("stato")
+        if stato_attuale in ["Annullato", "Bozza", "Inviato"]:
+            continue
+
+        try:
+            p_date = datetime.datetime.strptime(p.get("data"), "%Y-%m-%d").date()
+        except:
+            continue
+            
+        if start_date <= p_date <= end_date:
+            
+            # --- CALCOLI ---
+            somma_importi_ordini = 0.0
+            somma_iva_ordini = 0.0
+            for ordine in p.get("ordini_fornitore", []):
+                imp = _to_float(ordine.get("importo", 0))
+                iva = _to_float(ordine.get("iva_ordine", 0)) 
+                somma_importi_ordini += imp
+                somma_iva_ordini += iva
+
+            costo_negozio_totale = 0.0
+            for r in p.get("righe", []):
+                qt = _to_float(r.get("qt", 0))
+                cat = _to_float(r.get("prezzo_catalogo", 0))
+                s1 = _to_float(r.get("s1", 0))
+                s2 = _to_float(r.get("s2", 0))
+                s3 = _to_float(r.get("s3", 0))
+                price_netto = cat * (1 - s1/100) * (1 - s2/100) * (1 - s3/100)
+                trasp = _to_float(r.get("costo_trasporto", 0))
+                extra = _to_float(r.get("extra", 0))
+                unt = str(r.get("unt", "")).strip().upper()
+                
+                row_cost = 0.0
+                if unt == "MQ": row_cost = (price_netto * qt) + (trasp * qt) + extra
+                elif unt in ["PZ", "ML", "PZ."]: row_cost = (price_netto * qt) + trasp + extra
+                elif unt == "S": row_cost = (price_netto * qt)
+                else: row_cost = (price_netto * qt) + extra
+                costo_negozio_totale += row_cost
+
+            imponibile_cliente = _to_float(p.get("tot_imponibile_cliente", 0))
+            
+            fee_pct_val = _to_float(p.get("fee_pct", 0))
+            fee_euro = 0.0
+            if fee_pct_val > 0:
+                fee_euro = imponibile_cliente * (fee_pct_val / 100.0)
+
+            incassato = 0.0
+            programmato = 0.0
+            for pag in p.get("pagamenti", []):
+                val = _to_float(pag.get("importo", 0))
+                try: d_pag = datetime.datetime.strptime(pag.get("data"), "%Y-%m-%d").date()
+                except: d_pag = today
+                if d_pag > today: programmato += val
+                else: incassato += val
+            
+            if p.get("no_iva"):
+                incassato += _to_float(p.get("tot_iva", 0))
+
+            totale_preventivo = _to_float(p.get("totale", 0))
+            da_incassare = totale_preventivo - incassato
+            
+            costi_riferimento = somma_importi_ordini if somma_importi_ordini > 0 else costo_negozio_totale
+            margine_euro = imponibile_cliente - costi_riferimento
+
+            # --- RIGA DATI ---
+            row = {
+                "N. Preventivo": p.get("numero"),
+                "Data": p.get("data"),
+                "Cliente": p.get("cliente"),
+                "Stato": p.get("stato"),
+                "Totale Preventivo (€)": totale_preventivo,
+                "Imponibile Cliente (€)": imponibile_cliente,
+                "IVA (€)": _to_float(p.get("tot_iva", 0)),
+                "Costi da Ordini (€)": somma_importi_ordini,
+                "IVA su Ordini (€)": somma_iva_ordini,
+                "Costo Negozio Stimato (€)": costo_negozio_totale,
+                "Margine (€)": margine_euro,
+                "FEE %": p.get("fee_pct", ""),
+                "FEE (€)": fee_euro,
+                "Incassato (€)": incassato,
+                "Da Incassare (€)": da_incassare,
+                "Programmato Futuro (€)": programmato,
+                "Esente IVA": "SÌ" if p.get("no_iva") else "NO",
+                "Stato Fattura": p.get("stato_fattura", "N/D"),
+                "Stato Pagamento": p.get("stato_pagamento_globale", "N/D"),
+                "Venditore": p.get("venditore"),
+                "Stato Consegna": p.get("stato_consegna_globale", "N/D")
+            }
+            export_data.append(row)
+
+    if not export_data:
+        flash("Nessun dato valido trovato (esclusi Bozze/Inviati/Annullati).", "warning")
+        return redirect(url_for("dashboard_ceo", start_date=start_date_str, end_date=end_date_str))
+
+    # --- SCRITTURA NEL TEMPLATE ---
+    df = pd.DataFrame(export_data)
+    cols = [
+        "N. Preventivo", "Data", "Cliente", "Stato", 
+        "Totale Preventivo (€)", "Imponibile Cliente (€)", "IVA (€)", 
+        "Costi da Ordini (€)", "IVA su Ordini (€)", "Costo Negozio Stimato (€)", 
+        "Margine (€)", "FEE %", "FEE (€)", 
+        "Incassato (€)", "Da Incassare (€)", "Programmato Futuro (€)", 
+        "Esente IVA", "Stato Fattura", "Stato Pagamento", "Venditore", "Stato Consegna"
+    ]
+    df = df[[c for c in cols if c in df.columns]]
+
+    wb = load_workbook(template_filename)
+    if "Analisi" not in wb.sheetnames:
+        flash("Il file modello non contiene un foglio chiamato 'Analisi'.", "error")
+        return redirect(url_for("dashboard_ceo"))
+        
+    ws = wb["Analisi"]
+
+    # 1. Pulisce i dati vecchi
+    max_row = ws.max_row
+    if max_row > 1:
+        ws.delete_rows(2, amount=max_row-1)
+
+    # 2. Scrive i nuovi dati
+    rows = dataframe_to_rows(df, index=False, header=False)
+    for r_idx, row in enumerate(rows, 1):
+        for c_idx, value in enumerate(row, 1):
+            ws.cell(row=r_idx+1, column=c_idx, value=value)
+
+    # 3. Aggiorna dimensioni Tabella Excel
+    if ws.tables:
+        total_rows = len(df) + 1
+        last_col_letter = get_column_letter(len(cols))
+        new_ref = f"A1:{last_col_letter}{total_rows}"
+        for table in ws.tables.values():
+            table.ref = new_ref
+
+    # 4. Salva e Invia
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    filename = f"Analisi_Globale_{start_date.strftime('%d-%m')}_{end_date.strftime('%d-%m-%Y')}.xlsx"
+    
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename
+    )
 @app.route("/preventivo/analisi/<quote_id>")
 @login_required
 @role_required('amministratore', 'ceo') 
@@ -3088,7 +3541,7 @@ def marca_pronto(quote_id):
 @app.route("/consegna/<quote_id>/marca-consegnato", methods=["POST"])
 @login_required
 def marca_consegnato(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
     if session.get("user_role") not in allowed_roles:
         return jsonify({"success": False, "error": "Non disponi delle autorizzazioni per eseguire questa azione."})
     p = load_quote(quote_id)
@@ -3226,80 +3679,69 @@ def crea_bolla(quote_id):
 def dashboard_pagamenti():
     """Pagina che elenca i preventivi confermati con il loro stato di pagamento."""
     preventivi_da_saldare = []
-
     tutti_i_preventivi = get_all_quotes()
+    today = datetime.date.today()
+
+    def _str_to_float(s):
+        try: return round(float(str(s).replace("€", "").replace(".", "").replace(",", ".").strip()), 2)
+        except: return 0.0
 
     for prev_summary in tutti_i_preventivi:
         p = load_quote(prev_summary["numero"])
         
-        # --- MODIFICA CHIAVE QUI ---
-        # Aggiungiamo 'In Lavorazione' alla lista degli stati validi
         if not p or p.get("stato") not in ["Confermato", "In Lavorazione", "Chiuso"]:
             continue
-        # --- FINE MODIFICA ---
 
-        # Il resto della funzione rimane invariato...
-        # Blocco Modificato
         pagamenti = p.get("pagamenti", [])
-        # Arrotondiamo subito il totale
-        totale_preventivo = round(float(p.get("totale", "0").replace(",", ".")), 2)
+        totale_preventivo = round(_str_to_float(p.get("totale", "0")), 2)
         
-        # --- INIZIO MODIFICA ---
         totale_pagato_effettivo = 0.0
         totale_da_incassare = 0.0
-        today = datetime.date.today()
-
-        def _str_to_float(s):
-            try: 
-                # Arrotondiamo ogni singolo importo
-                val = float(str(s).replace(",", "."))
-                return round(val, 2)
-            except (ValueError, TypeError): return 0.0
-
+        
+        # 1. Calcolo Pagamenti Fisici
         for pag in pagamenti:
-            importo_float = _str_to_float(pag.get("importo")) # Arrotondato
+            importo_float = _str_to_float(pag.get("importo"))
             try:
                 payment_date = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
-            except (ValueError, TypeError, KeyError):
-                payment_date = today 
+            except: payment_date = today 
 
             if payment_date > today and importo_float > 0:
                 totale_da_incassare += importo_float
             else:
                 totale_pagato_effettivo += importo_float
         
-        # Arrotondiamo le somme finali e la sottrazione
+        # 2. GESTIONE ESENZIONE IVA
+        if p.get("no_iva"):
+            valore_iva = _str_to_float(p.get("tot_iva", "0"))
+            totale_pagato_effettivo += valore_iva
+
+        # Arrotondamenti finali
         totale_pagato_effettivo = round(totale_pagato_effettivo, 2)
         totale_da_incassare = round(totale_da_incassare, 2)
         
         p["totale_pagato"] = totale_pagato_effettivo
         p["totale_da_incassare"] = totale_da_incassare 
         p["totale_da_saldare"] = round(totale_preventivo - totale_pagato_effettivo, 2)
-        # --- FINE MODIFICA ---
-        p["stato_pagamento"] = p.get("stato_pagamento_globale", "Da Saldare" if p["totale_da_saldare"] > 0.01 else "Saldato")
+        
+        p["stato_pagamento"] = "Saldato" if p["totale_da_saldare"] <= 0.01 else "Da Saldare"
 
-        # --- INIZIO BLOCCO AGGIUNTO ---
-        # Salta i preventivi che risultano già saldati
         if p["stato_pagamento"] == "Saldato":
             continue
-        # --- FINE BLOCCO AGGIUNTO ---
 
+        # Calcolo allerta giorni (Invariato)
         p["ultimo_pagamento_data"] = None
         p["allerta_giorni"] = None
         if pagamenti:
             pagamenti.sort(key=lambda x: x.get("data", "1900-01-01"), reverse=True)
             p["ultimo_pagamento_data"] = pagamenti[0].get("data")
-
             if p["stato_pagamento"] == "Da Saldare":
                 try:
                     last_payment_date = datetime.datetime.strptime(p["ultimo_pagamento_data"], '%Y-%m-%d').date()
-                    days_diff = (datetime.date.today() - last_payment_date).days
-
+                    days_diff = (today - last_payment_date).days
                     if days_diff > 22: p["allerta_giorni"] = "rosso"
                     elif days_diff >= 16: p["allerta_giorni"] = "arancio"
                     elif days_diff >= 15: p["allerta_giorni"] = "giallo"
-                except (ValueError, TypeError):
-                    pass
+                except: pass
 
         preventivi_da_saldare.append(p)
 
@@ -3319,33 +3761,25 @@ def gestione_pagamenti(quote_id):
     pagamenti_raw = p.get("pagamenti", [])
     today = datetime.date.today()
     
-    # --- INIZIO BLOCCO MIGRAZIONE RETROCOMPATIBILITÀ ---
+    # --- MIGRAZIONE RETROCOMPATIBILITÀ (Invariata) ---
     made_changes_to_save = False
     for pag in pagamenti_raw:
         if "id" not in pag:
             pag["id"] = f"PAY-{uuid.uuid4().hex[:8].upper()}"
             made_changes_to_save = True
-    
-    if made_changes_to_save:
-        save_quote(quote_id, p)
-        print(f"INFO: Aggiunti ID di pagamento mancanti per il preventivo {quote_id}.")
-    # --- FINE BLOCCO MIGRAZIONE ---
+    if made_changes_to_save: save_quote(quote_id, p)
+    # -----------------------------------------------
 
     def _str_to_float(s):
-        try: 
-            val = float(str(s).replace(",", "."))
-            return round(val, 2)
-        except (ValueError, TypeError): return 0.0
+        try: return round(float(str(s).replace("€", "").replace(".", "").replace(",", ".").strip()), 2)
+        except: return 0.0
 
-    # --- INIZIO LOGICA MIGLIORATA BASATA SU ID ---
-
-    # 1. Troviamo subito tutti gli ID dei pagamenti che sono stati rettificati
     ids_rettificati = set(pag.get("rectifies_id") for pag in pagamenti_raw if pag.get("rectifies_id"))
-
     pagamenti_elaborati = []
     totale_da_incassare = 0.0
     totale_pagato_effettivo = 0.0
 
+    # 1. Elabora pagamenti REALI
     for pag in pagamenti_raw:
         new_pag = pag.copy()
         importo_float = _str_to_float(new_pag.get("importo"))
@@ -3358,33 +3792,43 @@ def gestione_pagamenti(quote_id):
                 totale_da_incassare += importo_float
             else:
                 totale_pagato_effettivo += importo_float
-        except (ValueError, TypeError, KeyError):
+        except:
             totale_pagato_effettivo += importo_float
         
-        # 2. Determiniamo la rettificabilità in modo univoco
-        # Un pagamento è rettificabile SE:
-        # - Ha un importo positivo
-        # - Non è un pagamento futuro
-        # - Il suo ID NON è nella lista di quelli già rettificati
-        is_rettificabile = (
-            importo_float > 0 and 
-            not is_future and 
-            new_pag.get("id") not in ids_rettificati
-        )
+        is_rettificabile = (importo_float > 0 and not is_future and new_pag.get("id") not in ids_rettificati)
         
         new_pag["is_future"] = is_future
         new_pag["is_rectifiable"] = is_rettificabile
+        new_pag["type"] = "standard" # Tipologia standard
         pagamenti_elaborati.append(new_pag)
 
-    # --- FINE LOGICA MIGLIORATA ---
+    # 2. GESTIONE RIGA VIRTUALE "NO IVA"
+    if p.get("no_iva"):
+        valore_iva = _str_to_float(p.get("tot_iva", "0"))
+        
+        if valore_iva > 0:
+            # Creiamo un pagamento "fittizio" solo per la visualizzazione
+            pagamento_virtuale = {
+                "id": "VIRTUAL-NO-IVA",
+                "data": p.get("data_conferma", today.strftime('%Y-%m-%d')), # Data preventivo o oggi
+                "importo": p.get("tot_iva", "0,00"),
+                "note": "Saldo automatico",
+                "is_future": False,
+                "type": "auto_iva" # Tipologia speciale per il template
+            }
+            # Aggiungiamo alla lista visuale
+            pagamenti_elaborati.append(pagamento_virtuale)
+            
+            # Aggiorniamo i totali matematici
+            totale_pagato_effettivo += valore_iva
 
+    # Ordina per data
     pagamenti_elaborati.sort(key=lambda x: x.get("data", ""), reverse=True)
 
-    # Arrotondiamo le somme finali e la sottrazione
+    # Totali Finali
     totale_da_incassare = round(totale_da_incassare, 2)
     totale_pagato_effettivo = round(totale_pagato_effettivo, 2)
-
-    totale_preventivo = _str_to_float(p.get("totale", "0")) # Questo è già arrotondato dall'helper
+    totale_preventivo = _str_to_float(p.get("totale", "0")) 
     totale_da_saldare = round(totale_preventivo - totale_pagato_effettivo, 2)
     
     p["totale_pagato"] = totale_pagato_effettivo
@@ -3400,7 +3844,7 @@ def gestione_pagamenti(quote_id):
 @app.route("/pagamenti/<quote_id>/aggiungi", methods=["POST"])
 @login_required
 def aggiungi_pagamento(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
     if session.get("user_role") not in allowed_roles:
         flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
         return redirect(request.referrer or url_for('dashboard'))
@@ -3449,7 +3893,7 @@ def aggiungi_pagamento(quote_id):
 @app.route("/pagamenti/<quote_id>/rettifica", methods=["POST"])
 @login_required
 def rettifica_pagamento(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
     if session.get("user_role") not in allowed_roles:
         flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
         return redirect(request.referrer)
@@ -3499,7 +3943,7 @@ def rettifica_pagamento(quote_id):
 @app.route("/pagamenti/<quote_id>/conferma_incasso", methods=["POST"])
 @login_required
 def conferma_incasso(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
     if session.get("user_role") not in allowed_roles:
         flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
         return redirect(request.referrer)
@@ -3642,30 +4086,7 @@ def dashboard_fatture():
         title="Dashboard Fatture",
         preventivi=preventivi_confermati
     )
-@app.route("/fatture/esenti")
-@login_required
-def dashboard_esenti():
-    """Mostra solo i preventivi confermati con flag IVA Esente (0%)."""
-    tutti_i_preventivi = get_all_quotes()
-    preventivi_esenti = []
-    
-    # Consideriamo validi per la fatturazione questi stati
-    stati_validi = ["Confermato", "In Lavorazione", "Chiuso"]
 
-    for prev_summary in tutti_i_preventivi:
-        p = load_quote(prev_summary["numero"])
-        
-        if not p: 
-            continue
-            
-        # FILTRO: Deve essere in uno stato valido E avere il flag no_iva attivo
-        if p.get("stato") in stati_validi and p.get("no_iva") is True:
-            preventivi_esenti.append(p)
-
-    return render_template("dashboard_esenti.html", 
-        title="Dashboard Fatture Esenti",
-        preventivi=preventivi_esenti
-    )
 @app.route("/fattura/<quote_id>")
 @login_required
 def editor_fattura(quote_id):
@@ -3733,7 +4154,7 @@ def editor_fattura(quote_id):
 @app.route("/fattura/<quote_id>/allega", methods=["POST"])
 @login_required
 def allega_fattura(quote_id):
-    allowed_roles = ['segreteria', 'amministratore', 'ceo', 'contabilità']
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
     if session.get("user_role") not in allowed_roles:
         flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
         return redirect(request.referrer or url_for('dashboard'))
@@ -3779,27 +4200,6 @@ def allega_fattura(quote_id):
     })
     # --- FINE BLOCCO RETROCOMPATIBILITÀ ---
 
-
-    # --- NUOVA LOGICA STATO FATTURA GLOBALE ---
-    # 1. Trova tutte le aliquote IVA > 0% nel preventivo
-    aliquote_da_fatturare = {
-        key for key in p.get("imponibili_iva", {}).keys() 
-        if _to_num(key) > 0 and _to_num(p["imponibili_iva"][key]) > 0
-    }
-    
-    # 2. Trova tutte le aliquote che *hanno* una fattura
-    aliquote_fatturate = {
-        key for key in p.get("fatture_per_iva", {}).keys() 
-        if p["fatture_per_iva"][key]
-    }
-
-    # 3. Se il set delle fatturate copre tutte quelle da fatturare, lo stato è "Fatturato"
-    if aliquote_da_fatturare.issubset(aliquote_fatturate):
-        p["stato_fattura"] = "Fatturato"
-    else:
-        p["stato_fattura"] = "Fatturato Parziale" # Nuovo stato
-    # --- FINE NUOVA LOGICA STATO ---
-
     aggiorna_stato_avanzamento(p) # Richiama l'aggiornamento stato globale
     save_quote(quote_id, p)
     
@@ -3832,6 +4232,57 @@ def migra_vecchie_fatture_a_iva(p):
     p["stato_fattura"] = "Fatturato"
 
     return True # Ritorna True se abbiamo modificato 'p'
+@app.route("/fattura/<quote_id>/toggle-stato", methods=["POST"])
+@login_required
+def toggle_stato_fattura_iva(quote_id):
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non autorizzato.", "error")
+        return redirect(request.referrer)
+
+    p = load_quote(quote_id)
+    if not p: return redirect(url_for("dashboard"))
+
+    iva_key = request.form.get("iva_key")
+    # "1" per Fatturato, "0" per Da Fatturare
+    nuovo_stato = request.form.get("set_stato") == "1"
+
+    if "stati_fattura_iva" not in p:
+        p["stati_fattura_iva"] = {}
+
+    # Imposta lo stato per quella specifica aliquota
+    p["stati_fattura_iva"][iva_key] = nuovo_stato
+
+    # --- Ricalcolo Stato Globale Preventivo ---
+    # Controlliamo se TUTTE le aliquote presenti (con importi > 0) sono segnate come fatturate
+    def _to_num_local(x):
+        try: return float(str(x).replace("€", "").replace(".", "").replace(",", ".").strip())
+        except: return 0.0
+
+    aliquote_presenti = [k for k in p.get("imponibili_iva", {}).keys() if _to_num_local(p["imponibili_iva"][k]) > 0]
+    
+    tutto_fatturato = True
+    almeno_uno_fatturato = False
+
+    for k in aliquote_presenti:
+        if p["stati_fattura_iva"].get(k, False):
+            almeno_uno_fatturato = True
+        else:
+            tutto_fatturato = False
+    
+    if tutto_fatturato and aliquote_presenti:
+        p["stato_fattura"] = "Fatturato"
+    elif almeno_uno_fatturato:
+        p["stato_fattura"] = "Fatturato Parziale"
+    else:
+        p["stato_fattura"] = "In Attesa"
+
+    aggiorna_stato_avanzamento(p)
+    save_quote(quote_id, p)
+    
+    flash(f"Stato fatturazione aggiornato.", "success")
+    return redirect(url_for("editor_fattura", quote_id=quote_id))
+
 @app.route("/stampa-bolla-html/<quote_id>/<bolla_id>")
 @login_required
 def stampa_bolla_html(quote_id, bolla_id):

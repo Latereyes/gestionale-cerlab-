@@ -106,22 +106,12 @@
 
       <!-- Pulsanti Satellite -->
       <div class="item" style="--i:0;">
-        
-        {# CASO 1: Solo Contabilità -> Vede Dashboard Esenti #}
-        {% if session.user_role == 'contabilità' %}
-            <a href="{{ url_for('dashboard_esenti') }}" class="item-link black-slice" title="Visualizza preventivi esenti IVA">
-              <i class="fas fa-percentage"></i>
-              <span>Fatture Esenti</span>
-            </a>
-
-        {# CASO 2: Tutti gli altri (incluso Amministratore, tranne segreteria) -> Vedono Nuovo Preventivo #}
-        {% elif session.user_role != 'segreteria' %}
-            <a href="{{ url_for('cerca_cliente', action='new_quote') }}" class="item-link black-slice" title="Crea un nuovo preventivo">
-              <i class="fas fa-plus"></i>
-              <span>Nuovo Preventivo</span>
-            </a>
+        {% if session.user_role != 'segreteria' %}
+        <a href="{{ url_for('cerca_cliente', action='new_quote') }}" class="item-link black-slice" title="Crea un nuovo preventivo">
+          <i class="fas fa-plus"></i>
+          <span>Nuovo Preventivo</span>
+        </a>
         {% endif %}
-        
       </div>
       <div class="item" style="--i:1;">
         <a href="{{ url_for('dashboard_ordini') }}" class="item-link" title="Gestisci gli ordini fornitore e le conferme">
@@ -152,13 +142,6 @@
     <!-- Menu Azioni Speciali (CEO/Admin) -->
     {% if session.user_role in ['amministratore', 'ceo'] %}
     <div class="circular-menu ceo-menu">
-      
-      <div class="item">
-        <a href="{{ url_for('dashboard_esenti') }}" class="item-link inverted" title="Visualizza preventivi esenti IVA">
-          <i class="fas fa-percentage"></i>
-          <span>Fatture Esenti</span>
-        </a>
-      </div>
       <div class="item">
         <a href="{{ url_for('gestisci_utenti') }}" class="item-link inverted" title="Aggiungi o modifica gli account utente">
           <i class="fas fa-users-cog"></i>

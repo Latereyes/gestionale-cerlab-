@@ -51,20 +51,32 @@
             <div class="form-group"><label>Referente</label><input name="referente" value="{{ p.referente }}" /></div>
             <div class="form-group"><label>FEE %</label><input class="input-fee" name="fee_pct" data-type="percent" value="{{ p.fee_pct }}" /></div>
             <div class="form-group">
-                    <label for="default-iva-switch">IVA %</label>
-                        {% set iva_salvata = p.default_iva_switch | default("22", true) %}
-                        <div class="multi-switch" id="iva-switch-component">
-                    <div class="switch-thumb"></div>
-                    <div class="switch-label" data-value="0">0%</div>
-                    <div class="switch-label" data-value="4">4%</div>
-                    <div class="switch-label" data-value="10">10%</div>
-                    <div class="switch-label" data-value="22">22%</div>
-                </div>
+                <label for="default-iva-switch" style="margin-bottom: 2px;">IVA %</label>
                 
+                {% set iva_salvata = p.default_iva_switch | default("22", true) %}
+                
+                <div class="iva-controls-wrapper" style="display: flex; gap: 12px; align-items: center; margin-top: 0;">
+                    
+                    <div class="multi-switch three-way" id="iva-switch-component">
+                        <div class="switch-thumb"></div>
+                        <div class="switch-label" data-value="4">4%</div>
+                        <div class="switch-label" data-value="10">10%</div>
+                        <div class="switch-label" data-value="22">22%</div>
+                    </div>
+                    
+                    <div class="esente-iva-wrapper">
+                        <span class="esente-label">Esente IVA</span>
+                        <label class="toggle-switch" title="Attiva Esenzione IVA">
+                            <input type="checkbox" name="no_iva" id="no-iva-checkbox" {% if p.no_iva %}checked{% endif %}>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
                 <input type="hidden" 
-                       name="default-iva-switch" 
-                       id="default-iva-switch-input" 
-                       value="{{ iva_salvata }}">
+                    name="default-iva-switch" 
+                    id="default-iva-switch-input" 
+                    value="{{ iva_salvata }}">
             </div>
             </div>
         </div>
@@ -687,33 +699,104 @@ body {
     max-height: calc(100vh - 320px); 
     overflow-y: auto;
 }
+/* --- STILE SWITCH IVA COMPATTO (3 VOCI) --- */
 .multi-switch {
     position: relative;
     display: flex;
-    background-color: #e9ecef; /* Sfondo grigio */
+    background-color: #e9ecef;
     border-radius: 8px;
     padding: 3px;
-    height: 36px; /* Altezza fissa */
-    width: 180px; /* Larghezza fissa */
+    height: 36px;
+    width: 100%;           
+    max-width: 160px;
     cursor: pointer;
     user-select: none;
+    box-sizing: border-box;
+    margin: 0; /* Forza margine zero */
 }
-.multi-switch.disabled {
-    opacity: 0.6;
-    pointer-events: none; /* Blocca i click */
-    background-color: #f1f5f9;
-}
+
+/* Cursore mobile (Thumb) */
 .switch-thumb {
     position: absolute;
-    top: 3px;
-    bottom: 3px;
-    width: 25%; /* 1/4 della larghezza */
-    background-color: #ffffff; /* Cursore bianco */
+    top: 3px; bottom: 3px; left: 3px;
+    width: calc((100% - 6px) / 3);
+    background-color: #ffffff;
     border-radius: 6px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    transition: transform 0.25s ease-out; /* Animazione fluida */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+    transition: transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1);
     z-index: 1;
 }
+
+/* Etichette (Labels) */
+.switch-label {
+    flex: 1;
+    width: 33.333%;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: #6c757d;
+    line-height: 30px; /* Centra verticalmente nel pulsante */
+    position: relative;
+    z-index: 2;
+    transition: color 0.2s;
+    white-space: nowrap;
+}
+.switch-label.active { color: #000; }
+.multi-switch.disabled { opacity: 0.6; pointer-events: none; background-color: #f1f5f9; }
+
+/* --- STILE TOGGLE ESENTE IVA --- */
+.esente-iva-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin-left: 5px; /* Piccolo distacco dallo switch */
+}
+
+/* Etichetta "Esente" molto compatta */
+.esente-label {
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    line-height: 1;
+    margin-bottom: 2px;
+    white-space: nowrap;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px; /* Leggermente più piccolo */
+  height: 22px;
+  margin: 0;
+}
+
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #cbd5e1;
+  transition: .4s;
+  border-radius: 24px;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+input:checked + .slider { background-color: #6f42c1; }
+input:checked + .slider:before { transform: translateX(18px); }
+
 .switch-label {
     flex: 1; /* Occupa 1/4 dello spazio */
     text-align: center;
@@ -1697,15 +1780,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const hiddenInput = document.getElementById('default-iva-switch-input');
         const thumb = ivaSwitchComponent.querySelector('.switch-thumb');
         const labels = ivaSwitchComponent.querySelectorAll('.switch-label');
-        const values = ['0', '4', '10', '22'];
+        
+        // Definiamo i valori validi (Esattamente 3)
+        const values = ['4', '10', '22'];
 
         function updateIvaSwitch(value, animate = true) {
-            const index = values.indexOf(String(value));
-            if (index === -1) return; 
+            let index = values.indexOf(String(value));
+            
+            // Se il valore salvato non è valido (es. vecchio "0" o vuoto), resetta a 22
+            if (index === -1) { 
+                index = 2; // Indice di '22'
+                value = '22'; 
+            }
+
+            // Calcolo posizione: 0%, 100%, 200% (rispetto alla larghezza del thumb che è 1/3)
+            const translateVal = index * 100;
 
             if (!animate) thumb.style.transition = 'none';
-            thumb.style.transform = `translateX(${index * 100}%)`;
-            if (!animate) setTimeout(() => { thumb.style.transition = 'transform 0.25s ease-out'; }, 0);
+            thumb.style.transform = `translateX(${translateVal}%)`;
+            if (!animate) setTimeout(() => { thumb.style.transition = 'transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1)'; }, 0);
 
             hiddenInput.value = value;
 
@@ -1716,10 +1809,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         labels.forEach(label => {
             label.addEventListener('click', () => {
-                if (ivaSwitchComponent.classList.contains('disabled')) return; // Non fare nulla se bloccato
+                if (ivaSwitchComponent.classList.contains('disabled')) return;
                 updateIvaSwitch(label.dataset.value);
             });
         });
+        
+        // Logica Toggle Esente (Opzionale: disabilita visivamente lo switch aliquote)
+        const noIvaCheck = document.getElementById('no-iva-checkbox');
+        if(noIvaCheck) {
+            noIvaCheck.addEventListener('change', (e) => {
+                 // Opzionale: decommenta sotto se vuoi che lo switch diventi grigio quando Esente è ON
+                 // ivaSwitchComponent.classList.toggle('disabled', e.target.checked);
+            });
+        }
 
         updateIvaSwitch(hiddenInput.value, false);
     }

@@ -92,11 +92,15 @@
                 </thead>
                 <tbody>
                     {% for pagamento in p.pagamenti_elaborati %}
-                    <tr class="{% if pagamento.is_future %}future-payment{% endif %}">
+                    <tr class="{% if pagamento.is_future %}future-payment{% elif pagamento.type == 'auto_iva' %}virtual-payment{% endif %}">
                         <td>{{ pagamento.data }}</td>
                         
                         {% if pagamento.is_future %}
                             <td class="right total-future" title="Pagamento futuro, non ancora incassato">
+                                {{ money_ui(pagamento.importo) }}
+                            </td>
+                        {% elif pagamento.type == 'auto_iva' %}
+                             <td class="right" style="color: #6c757d; font-style: italic;">
                                 {{ money_ui(pagamento.importo) }}
                             </td>
                         {% elif (pagamento.importo | replace(',', '.') | float) < 0 %}
@@ -105,10 +109,17 @@
                             <td class="right total-paid">{{ money_ui(pagamento.importo) }}</td>
                         {% endif %}
 
-                        <td>{{ pagamento.note }}</td>
+                        <td>
+                            {{ pagamento.note }}
+                            {% if pagamento.type == 'auto_iva' %}
+                                <span style="font-size: 10px; background: #e9ecef; padding: 2px 5px; border-radius: 4px; color: #495057; margin-left: 5px;">IVA</span>
+                            {% endif %}
+                        </td>
                         <td class="center">
                             {% if session.user_role in ['segreteria', 'amministratore', 'ceo'] %}
-                                {% if pagamento.is_future %}
+                                {% if pagamento.type == 'auto_iva' %}
+                                    <i class="fas fa-robot" title="Generato automaticamente da opzione Esente IVA" style="color: #adb5bd;"></i>
+                                {% elif pagamento.is_future %}
                                     <form action="{{ url_for('conferma_incasso', quote_id=p.numero) }}" method="POST">
                                         <input type="hidden" name="payment_id" value="{{ pagamento.id }}">
                                         <button type="submit" class="btn btn-outline btn-small-action" title="Conferma Incasso di questo pagamento">
@@ -127,6 +138,7 @@
                         </td>
                     </tr>
                     {% else %}
+                    <tr><td colspan="4" class="empty-state">Nessun pagamento registrato.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -208,6 +220,10 @@
 .btn.btn-blue:hover {
     background: #0b5ed7;
     border-color: #0a58ca;
+}
+.virtual-payment td {
+    background-color: #f8f9fa;
+    color: #6c757d;
 }
 </style>
 {% if p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
