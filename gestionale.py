@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "1.10.0"  
+APP_VERSION = "1.10.1"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -595,6 +595,7 @@ def load_quote(quote_id):
         with quote_file.open("r", encoding="utf-8") as f: return json.load(f)
     return None
 def save_quote(quote_id, data):
+    data = aggiorna_stato_pagamento_globale(data)
     quote_file = QUOTES_DIR / f"{quote_id}.json";
     with quote_file.open("w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -686,55 +687,59 @@ def aggiorna_stato_consegna_globale(preventivo_data):
         # Se c'è un mix (alcuni consegnati, altri in bolla, altri da consegnare)
         preventivo_data["stato_consegna_globale"] = "Parziale"
     # --- FINE BLOCCO MODIFICATO ---
-def aggiorna_stato_pagamento_globale(preventivo_data):
+def aggiorna_stato_pagamento_globale(p):
     """
-    Ricalcola e aggiorna lo stato di pagamento globale (Saldato/Da Saldare) 
-    all'interno dell'oggetto del preventivo.
+    Ricalcola il saldo correggendo:
+    1. Formati numerici misti (virgola/punto).
+    2. Gestione Esente IVA (usa l'imponibile come target).
     """
-    # 1. Se il preventivo non è in uno stato attivo, il pagamento non è applicabile.
-    stato_preventivo = preventivo_data.get("stato")
-    if stato_preventivo in ["Bozza", "Inviato", "Annullato"]:
-        preventivo_data["stato_pagamento_globale"] = "N/D"
-        return
-
-    # Helper locale
-    def _loc_to_num(val):
-        try: return float(str(val).replace("€", "").replace(".", "").replace(",", ".").strip())
-        except: return 0.0
-
-    # Arrotondiamo subito il totale
-    totale_preventivo = round(_loc_to_num(preventivo_data.get("totale", "0")), 2)
-    totale_pagato_effettivo = 0.0
-    
-    today = datetime.date.today()
-    pagamenti = preventivo_data.get("pagamenti", [])
-
-    # 1. Somma pagamenti fisici
-    for pag in pagamenti:
-        importo_float = _loc_to_num(pag.get("importo"))
+    def safe_money(val):
+        """ Helper interno per leggere qualsiasi formato moneta """
+        if not val: return 0.0
+        s = str(val).strip()
+        # Formato Italiano (es. 1.250,50) -> Ha la virgola
+        if ',' in s:
+            s = s.replace('.', '').replace(',', '.')
+        # Altrimenti è formato standard (1250.50)
         try:
-            payment_date = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
-        except (ValueError, TypeError, KeyError):
-            payment_date = today 
+            return float(s)
+        except ValueError:
+            return 0.0
 
-        if payment_date <= today:
-            totale_pagato_effettivo += importo_float
-    
-    # 2. GESTIONE ESENZIONE IVA (NO IVA)
-    # Se il flag è attivo, consideriamo l'IVA come "Già Saldata" (storno automatico)
-    if preventivo_data.get("no_iva"):
-        valore_iva = round(_loc_to_num(preventivo_data.get("tot_iva", "0")), 2)
-        totale_pagato_effettivo += valore_iva
-
-    # Arrotondiamo la somma finale e la sottrazione
-    totale_pagato_effettivo = round(totale_pagato_effettivo, 2)
-    totale_da_saldare = round(totale_preventivo - totale_pagato_effettivo, 2)
-
-    # Controlliamo se è <= 0.01 per tolleranza float
-    if totale_da_saldare <= 0.01:
-        preventivo_data["stato_pagamento_globale"] = "Saldato"
+    # 1. Determina il "Totale Dovuto" (Target)
+    if p.get("no_iva") is True:
+        # SE ESENTE IVA: Il cliente deve pagare solo l'imponibile!
+        # Usiamo tot_imponibile_cliente se esiste, altrimenti fallback su totale
+        totale_dovuto = safe_money(p.get("tot_imponibile_cliente", p.get("totale", "0")))
     else:
-        preventivo_data["stato_pagamento_globale"] = "Da Saldare"
+        # CASO NORMALE: Il cliente paga il totale (inclusa IVA)
+        totale_dovuto = safe_money(p.get("totale", "0"))
+    
+    # 2. Somma i pagamenti effettuati
+    totale_pagato = 0.0
+    for pay in p.get("pagamenti", []):
+        totale_pagato += safe_money(pay.get("importo", "0"))
+        
+    # 3. Calcola il rimanente
+    da_saldare = totale_dovuto - totale_pagato
+    
+    # Tolleranza di 0.05€ per arrotondamenti
+    if da_saldare <= 0.05:
+        da_saldare = 0.0
+        nuovo_stato = "Saldato"
+    else:
+        nuovo_stato = "Da Saldare"
+        
+    # 4. Scrive i valori corretti nel JSON
+    # Formattiamo alla 'italiana' per la visualizzazione
+    def to_ita_str(f_val):
+        return f"{f_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    p["totale_pagato"] = to_ita_str(totale_pagato)
+    p["totale_da_saldare"] = to_ita_str(da_saldare)
+    p["stato_pagamento_globale"] = nuovo_stato
+    
+    return p
 
 def aggiorna_stato_avanzamento(preventivo_data):
     """
@@ -850,17 +855,17 @@ def login():
             session["user_sigla"] = user_found.get("sigla", "XX")
             session["force_password_reset"] = user_found.get("force_password_reset", False)
 
-            # La nuova funzione @app.before_request gestirà il changelog
-            # al momento del redirect alla dashboard.
-
             flash(f"Benvenuto, {user_found['full_name']}!", "success")
-            # --- NUOVA LOGICA DI CONTROLLO CHANGELOG ---
+            
+            # --- LOGICA CORRETTA: Controlla se ci sono novità reali nel JSON ---
             last_seen_version = user_found.get("last_seen_version", "0.0")
-            if parse_version(APP_VERSION) > parse_version(last_seen_version):
-                # Se la versione dell'app è più nuova di quella vista, vai al changelog
+            nuove_voci = [entry for entry in CHANGELOG_DATA if parse_version(entry['version']) > parse_version(last_seen_version)]
+
+            if nuove_voci:
+                # Se ci sono voci nel JSON che l'utente non ha visto, vai al changelog
                 return redirect(url_for("changelog"))
             else:
-                # Altrimenti, vai alla dashboard
+                # Altrimenti, vai direttamente alla dashboard
                 return redirect(url_for("dashboard"))
         else:
             flash("Credenziali non valide. Riprova.", "error")
@@ -924,16 +929,24 @@ def changelog():
 def mark_changelog_as_seen():
     """Aggiorna la versione vista dall'utente e lo reindirizza alla dashboard."""
     users = load_users()
+    
+    # Trova la versione più alta presente nel changelog.json
+    if CHANGELOG_DATA:
+        latest_json_version = max([entry['version'] for entry in CHANGELOG_DATA], key=parse_version)
+    else:
+        latest_json_version = APP_VERSION
+
     user_updated = False
     for user in users:
         if user["username"] == session["user_id"]:
-            user["last_seen_version"] = APP_VERSION
+            # Aggiorna alla versione effettiva letta nel changelog
+            user["last_seen_version"] = latest_json_version
             user_updated = True
             break
     
     if user_updated:
         save_users(users)
-    
+        flash("Novità contrassegnate come lette.", "success")
     return redirect(url_for("dashboard"))
 
 @app.before_request
@@ -1047,35 +1060,32 @@ def dashboard():
         stati_attivi_pagamento = ["Confermato", "In Lavorazione"]
         
         if p.get("stato") in stati_attivi_pagamento:
-            # Dobbiamo ricalcolare lo stato di pagamento perché
-            # il JSON potrebbe essere "N/D"
             today = datetime.date.today()
             totale_preventivo = _to_num(p.get("totale"))
+            
+            # Somma pagamenti
             totale_pagato_effettivo = 0.0
-
             for pag in p.get("pagamenti", []):
-                importo_float = _to_num(pag.get("importo"))
-                try:
-                    payment_date = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
-                except (ValueError, TypeError, KeyError):
-                    payment_date = today 
-                
-                if payment_date <= today:
-                    totale_pagato_effettivo += importo_float
+                totale_pagato_effettivo += _to_num(pag.get("importo"))
             
-            # Arrotondiamo per sicurezza
-            totale_pagato_effettivo = round(totale_pagato_effettivo, 2)
-            totale_da_saldare = round(totale_preventivo - totale_pagato_effettivo, 2)
-            
-            if totale_da_saldare <= 0.01: # Usiamo 0.01 per sicurezza con i float
+            # Gestione No-IVA (IVA saldata virtualmente)
+            raw_no_iva = p.get("no_iva")
+            is_no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
+            if is_no_iva:
+                totale_pagato_effettivo += _to_num(p.get("tot_iva"))
+
+            # Rispetto flag SALDATO
+            if p.get("stato_pagamento_globale") == "Saldato":
                  p["stato_pagamento_globale"] = "Saldato"
             else:
-                 p["stato_pagamento_globale"] = "Da Saldare"
+                da_saldare = totale_preventivo - totale_pagato_effettivo
+                if da_saldare <= 0.05: 
+                     p["stato_pagamento_globale"] = "Saldato"
+                else:
+                     p["stato_pagamento_globale"] = "Da Saldare"
         
         elif p.get("stato") in ["Bozza", "Inviato"]:
-            # Per questi stati, è corretto che sia N/D
             p["stato_pagamento_globale"] = "N/D"
-        # --- FINE BLOCCO AGGIUNTO ---
 
         if p.get("stato") in stati_ordine_validi:
             righe_preventivo = p.get("righe", [])
@@ -1268,10 +1278,10 @@ def dashboard_clienti():
         righe_preventivo = p.get("righe", [])
         indici_confermati = set()
         stati_ordine_validi = ["Confermato", "In Lavorazione", "Chiuso"]
-        # --- 1. Calcolo Pagamenti (da dashboard_pagamenti) ---
+        
+        # Definiamo il totale lordo (con IVA) come riferimento base
         totale_preventivo = _to_num(p.get("totale"))
         
-        # --- INIZIO BLOCCO MODIFICATO ---
         if p.get("stato") in stati_ordine_validi:
             totale_pagato_effettivo = 0.0
             for pag in p.get("pagamenti", []):
@@ -1284,21 +1294,27 @@ def dashboard_clienti():
                 if payment_date <= today:
                     totale_pagato_effettivo += importo_float
             
+            # SE ESENTE IVA: Aggiungiamo il valore dell'IVA ai pagamenti effettuati
+            # per pareggiare il totale lordo (Logica identica a gestione_pagamenti)
+            if p.get("no_iva") is True:
+                totale_pagato_effettivo += _to_num(p.get("tot_iva"))
+
+            # Aggiorniamo i valori nel dizionario per il template
             p["totale_pagato"] = round(totale_pagato_effettivo, 2)
             p["totale_da_saldare"] = round(totale_preventivo - totale_pagato_effettivo, 2)
-            # --- MODIFICA CHIAVE ---
-            # Sovrascriviamo il valore del JSON con quello appena calcolato
-            if p["totale_da_saldare"] <= 0.01:
+            
+            # Rispetto del flag manuale o calcolato
+            if p.get("stato_pagamento_globale") == "Saldato" or p["totale_da_saldare"] <= 0.05:
+                p["totale_da_saldare"] = 0.0
                 p["stato_pagamento_globale"] = "Saldato"
             else:
                 p["stato_pagamento_globale"] = "Da Saldare"
-            # --- FINE MODIFICA CHIAVE ---
 
         else:
             # Se lo stato non è valido (Bozza, Inviato), imposta tutto a 0 e N/D
             p["totale_pagato"] = 0.0
             p["totale_da_saldare"] = 0.0
-            p["stato_pagamento_globale"] = "N/D" # Fondamentale per il badge
+            p["stato_pagamento_globale"] = "N/D"
 
         # --- 2. Calcolo Ordini (da dashboard_ordini) ---
         stati_ordine_validi = ["Confermato", "In Lavorazione", "Chiuso"]
@@ -3642,7 +3658,7 @@ def crea_bolla(quote_id):
     if not p: return jsonify({"success": False, "error": "Preventivo non trovato"})
 
     indici_righe_bolla = [int(i) for i in request.form.getlist("selected_items[]")]
-    indirizzo_cantiere_id = request.form.get("indirizzo_cantiere_id") # <-- NUOVO
+    indirizzo_cantiere_id = request.form.get("indirizzo_cantiere_id")
 
     if not indici_righe_bolla:
         return jsonify({"success": False, "error": "Nessun articolo selezionato per la bolla"})
@@ -3657,22 +3673,22 @@ def crea_bolla(quote_id):
         "indici_righe": indici_righe_bolla
     }
     
-    if indirizzo_cantiere_id: # <-- NUOVO
+    if indirizzo_cantiere_id:
         nuova_bolla["indirizzo_cantiere_id"] = indirizzo_cantiere_id
 
     p["bolle"].append(nuova_bolla)
 
-    for index in indici_righe_bolla:
-        if 0 <= index < len(p["righe"]):
-            p["righe"][index]["stato_consegna"] = "In Bolla"
-            p["righe"][index]["bolla_id"] = bolla_id
+    # --- MODIFICA IMPORTANTE ---
+    # ABBIAMO RIMOSSO IL CICLO CHE IMPOSTAVA "In Bolla" QUI.
+    # Lo stato verrà aggiornato solo se il PDF viene generato con successo.
+    # ---------------------------
 
     save_quote(quote_id, p)
 
     return jsonify({
         "success": True, 
         "next_url": url_for('export_bolla_pdf', quote_id=quote_id, bolla_id=bolla_id)
-    })    
+    })
 
 @app.route("/pagamenti")
 @login_required
@@ -3981,21 +3997,20 @@ def export_bolla_pdf(quote_id, bolla_id):
 @app.route("/generate-bolla-task/<quote_id>/<bolla_id>")
 @login_required
 def generate_bolla_task(quote_id, bolla_id):
-    import subprocess, shutil # Keep imports local
-    log_id = f"{quote_id}/{bolla_id}" # Use combined ID for logs
-    log_pdf_event(log_id, "INFO", "Inizio generazione PDF bolla.") # <-- LOG START
+    import subprocess, shutil
+    log_id = f"{quote_id}/{bolla_id}"
+    log_pdf_event(log_id, "INFO", "Inizio generazione PDF bolla.")
 
     p = load_quote(quote_id)
     if not p:
-        log_pdf_event(log_id, "ERRORE", "Preventivo non trovato.") # <-- LOG ERROR
+        log_pdf_event(log_id, "ERRORE", "Preventivo non trovato.")
         return jsonify({"error": "Preventivo non trovato"}), 404
 
     bolla = next((b for b in p.get("bolle", []) if b.get("id") == bolla_id), None)
     if not bolla:
-        log_pdf_event(log_id, "ERRORE", "Bolla non trovata.") # <-- LOG ERROR
+        log_pdf_event(log_id, "ERRORE", "Bolla non trovata.")
         return jsonify({"error": "Bolla non trovata"}), 404
 
-    # --- (Logic to get righe_bolla and indirizzo_consegna remains the same) ---
     righe_bolla = [p["righe"][i] for i in bolla.get("indici_righe", []) if 0 <= i < len(p["righe"])]
     indirizzo_consegna = None
     indirizzo_id = bolla.get("indirizzo_cantiere_id")
@@ -4003,65 +4018,64 @@ def generate_bolla_task(quote_id, bolla_id):
         client = load_client(p.get("id_cliente"))
         if client:
             indirizzo_consegna = next((addr for addr in client.get("indirizzi_cantiere", []) if addr.get("id") == indirizzo_id), None)
-    # ---
 
     quote_num_safe = p['numero'].replace('-', '_')
     bolla_id_safe = bolla_id.replace('-', '_')
     pdf_name = f"{bolla_id_safe}_{quote_num_safe}.pdf"
-    out_path = (QUOTES_DIR / pdf_name).resolve() # Save alongside quotes
-    log_pdf_event(log_id, "INFO", f"Percorso output PDF: {out_path}") # <-- LOG PATH
+    out_path = (QUOTES_DIR / pdf_name).resolve()
+    log_pdf_event(log_id, "INFO", f"Percorso output PDF: {out_path}")
 
     url = url_for("stampa_bolla_html", quote_id=quote_id, bolla_id=bolla_id, _external=True)
     browser_exe = next((exe for exe in [shutil.which("msedge"), shutil.which("chrome"), shutil.which("google-chrome")] if exe), None)
 
     ok = False
+    
+    # --- TENTATIVO BROWSER ---
     if browser_exe:
-        log_pdf_event(log_id, "INFO", f"Trovato browser: {browser_exe}. Tentativo con metodo Headless.") # <-- LOG BROWSER
         try:
             cmd = [browser_exe, "--headless=new", "--disable-gpu", f"--print-to-pdf={out_path}", url]
-            log_pdf_event(log_id, "DEBUG", f"Comando browser: {' '.join(cmd)}") # <-- LOG COMMAND
-            result = subprocess.run(cmd, check=True, timeout=60, capture_output=True, text=True, encoding='utf-8', errors='ignore') # Capture output
-            ok = out_path.exists() and out_path.stat().st_size > 100
+            subprocess.run(cmd, check=True, timeout=60, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+            # Controllo rigoroso: il file deve esistere ed essere > 1KB
+            ok = out_path.exists() and out_path.stat().st_size > 1000 
             if ok:
-                 log_pdf_event(log_id, "SUCCESSO", f"PDF generato con browser. Dimensione: {out_path.stat().st_size} bytes.") # <-- LOG SUCCESS BROWSER
-            else:
-                 log_pdf_event(log_id, "ERRORE", f"Comando browser eseguito (codice: {result.returncode}), ma il PDF non è valido o è troppo piccolo.") # <-- LOG BROWSER FAIL 1
-                 if result.stderr: log_pdf_event(log_id, "ERRORE", f"Output stderr browser:\n{result.stderr}") # <-- LOG BROWSER STDERR
-        except subprocess.TimeoutExpired:
-             log_pdf_event(log_id, "ERRORE", "Timeout durante la generazione PDF con browser.") # <-- LOG BROWSER TIMEOUT
+                 log_pdf_event(log_id, "SUCCESSO", f"PDF generato con browser. Size: {out_path.stat().st_size}")
         except Exception as e:
-            log_pdf_event(log_id, "ERRORE", f"Errore durante l'esecuzione del browser: {e}") # <-- LOG BROWSER EXCEPTION
-            print(f"Errore con browser headless per bolla: {e}")
+            log_pdf_event(log_id, "ERRORE", f"Errore browser: {e}")
 
+    # --- TENTATIVO WEASYPRINT ---
     if not ok:
-        log_pdf_event(log_id, "INFO", "Metodo browser fallito o non disponibile. Tentativo con WeasyPrint.") # <-- LOG FALLBACK
         try:
             from weasyprint import HTML
-            log_pdf_event(log_id, "INFO", "Libreria WeasyPrint importata.") # <-- LOG WEASY IMPORT
-            # Render template for WeasyPrint
             html_string = render_template("stampa_bolla.html", p=p, bolla=bolla, righe_bolla=righe_bolla, indirizzo_consegna=indirizzo_consegna)
             HTML(string=html_string, base_url=request.url_root).write_pdf(out_path)
-            ok = out_path.exists() and out_path.stat().st_size > 100
+            ok = out_path.exists() and out_path.stat().st_size > 1000
             if ok:
-                log_pdf_event(log_id, "SUCCESSO", f"PDF generato con WeasyPrint. Dimensione: {out_path.stat().st_size} bytes.") # <-- LOG SUCCESS WEASY
-            else:
-                log_pdf_event(log_id, "ERRORE", "Generazione con WeasyPrint eseguita, ma il PDF non è valido o è troppo piccolo.") # <-- LOG WEASY FAIL 1
-        except ImportError:
-             log_pdf_event(log_id, "ERRORE", "Libreria WeasyPrint non trovata.") # <-- LOG WEASY IMPORT ERROR
-             print("ERRORE: Libreria WeasyPrint non trovata.")
-        except OSError as e:
-             log_pdf_event(log_id, "ERRORE", f"Errore di sistema con WeasyPrint (probabile GTK mancante): {e}") # <-- LOG WEASY OS ERROR
-             print(f"ERRORE di sistema con WeasyPrint (probabile GTK mancante): {e}")
+                log_pdf_event(log_id, "SUCCESSO", f"PDF generato con WeasyPrint.")
         except Exception as e:
-            log_pdf_event(log_id, "ERRORE", f"Errore generico durante la generazione con WeasyPrint: {e}") # <-- LOG WEASY EXCEPTION
-            print(f"Errore con WeasyPrint per bolla: {e}")
+            log_pdf_event(log_id, "ERRORE", f"Errore WeasyPrint: {e}")
 
     if not ok:
-        log_pdf_event(log_id, "FALLIMENTO", "Entrambi i metodi (Browser e WeasyPrint) hanno fallito.") # <-- LOG FINAL FAIL
+        log_pdf_event(log_id, "FALLIMENTO", "Generazione fallita.")
         return jsonify({"error": "Impossibile generare il PDF della bolla."}), 500
 
-    pdf_url = url_for("pdf_inline", filename=pdf_name) # Use the same route as quotes
-    log_pdf_event(log_id, "COMPLETATO", f"Processo terminato. URL PDF: {pdf_url}") # <-- LOG COMPLETE
+    # === PUNTO CRUCIALE: AGGIORNAMENTO DI STATO ===
+    # Aggiorniamo lo stato delle righe SOLO ORA che siamo sicuri che il PDF esiste
+    made_changes = False
+    for index in bolla.get("indici_righe", []):
+        if 0 <= index < len(p["righe"]):
+            # Imposta lo stato e collega l'ID bolla
+            p["righe"][index]["stato_consegna"] = "In Bolla"
+            p["righe"][index]["bolla_id"] = bolla_id
+            made_changes = True
+
+    if made_changes:
+        # Aggiorniamo anche gli stati globali per riflettere il cambiamento
+        aggiorna_stato_consegna_globale(p)
+        aggiorna_stato_avanzamento(p)
+        save_quote(quote_id, p)
+        log_pdf_event(log_id, "INFO", "Stato righe aggiornato a 'In Bolla'.")
+
+    pdf_url = url_for("pdf_inline", filename=pdf_name)
     return jsonify({"pdf_url": pdf_url})
 
 @app.route("/fatture")
@@ -4130,7 +4144,9 @@ def editor_fattura(quote_id):
                 "imponibile_str": p.get("imponibili_iva", {}).get(iva_key, "0,00"),
                 "iva_str": p.get("tot_iva_dettaglio", {}).get(iva_key, "0,00"),
                 # Usa il NUOVO modello dati p.fatture_per_iva
-                "fatture_allegate": p.get("fatture_per_iva", {}).get(iva_key, []) 
+                "fatture_allegate": p.get("fatture_per_iva", {}).get(iva_key, []),
+                # Aggiungiamo il flag per lo stato specifico di questa aliquota
+                "is_fatturato": p.get("stati_fattura_iva", {}).get(iva_key, False)
             }
         
         dati_fattura[iva_key]["righe"].append(riga)
@@ -4331,21 +4347,20 @@ def get_new_revisione_id(preventivo_data):
 @app.route("/generate-pdf-task/<quote_id>")
 @login_required
 def generate_pdf_task(quote_id):
-    import subprocess, shutil # Keep imports local if possible
-    log_pdf_event(quote_id, "INFO", "Inizio generazione PDF preventivo.") # <-- LOG START
+    import subprocess, shutil 
+    log_pdf_event(quote_id, "INFO", "Inizio generazione PDF preventivo.") 
 
     p = load_quote(quote_id)
     if not p:
-        log_pdf_event(quote_id, "ERRORE", "Preventivo non trovato.") # <-- LOG ERROR
+        log_pdf_event(quote_id, "ERRORE", "Preventivo non trovato.") 
         return jsonify({"error": "Preventivo non trovato"}), 404
 
     if p.get("stato") == "Bozza":
-        log_pdf_event(quote_id, "ERRORE", "Tentativo di generare PDF per preventivo in Bozza.") # <-- LOG ERROR
+        log_pdf_event(quote_id, "ERRORE", "Tentativo di generare PDF per preventivo in Bozza.") 
         return jsonify({"error": "Non è possibile generare un PDF per un preventivo in stato di Bozza."}), 400
 
-    # --- INIZIO MODIFICA: Scelta del Template ---
+    # Scelta del Template
     template_choice = request.args.get('template', 'standard')
-    
     if template_choice == 'semplice':
         html_endpoint = 'stampa_semplice_html'
         html_template_file = 'stampa_semplice.html'
@@ -4354,63 +4369,65 @@ def generate_pdf_task(quote_id):
         html_endpoint = 'stampa_html'
         html_template_file = 'stampa.html'
         log_pdf_event(quote_id, "INFO", "Scelto template PDF: STANDARD (con totali riga).")
-    # --- FINE MODIFICA ---
 
     rev_num = get_new_revisione_id(p)
     pdf_name = f"Preventivo_{p.get('numero', 'file')}_REV{rev_num}.pdf"
     out_path = (QUOTES_DIR / pdf_name).resolve()
-    log_pdf_event(quote_id, "INFO", f"Percorso output PDF: {out_path}") # <-- LOG PATH
+    log_pdf_event(quote_id, "INFO", f"Percorso output PDF: {out_path}")
 
-    url = url_for(html_endpoint, quote_id=quote_id, _external=True) # <-- Modificato
+    url = url_for(html_endpoint, quote_id=quote_id, _external=True) 
     browser_exe = next((exe for exe in [shutil.which("msedge"), shutil.which("chrome"), shutil.which("google-chrome")] if exe), None)
 
     ok = False
+    
+    # --- 1. TENTATIVO CON BROWSER ---
     if browser_exe:
-        log_pdf_event(quote_id, "INFO", f"Trovato browser: {browser_exe}. Tentativo con metodo Headless.") # <-- LOG BROWSER
+        log_pdf_event(quote_id, "INFO", f"Trovato browser: {browser_exe}. Tentativo con metodo Headless.") 
         try:
             cmd = [browser_exe, "--headless=new", "--disable-gpu", f"--print-to-pdf={out_path}", url]
-            log_pdf_event(quote_id, "DEBUG", f"Comando browser: {' '.join(cmd)}") # <-- LOG COMMAND
-            result = subprocess.run(cmd, check=True, timeout=60, capture_output=True, text=True, encoding='utf-8', errors='ignore') # Capture output
-            ok = out_path.exists() and out_path.stat().st_size > 100 # Check size
+            log_pdf_event(quote_id, "DEBUG", f"Comando browser: {' '.join(cmd)}") 
+            result = subprocess.run(cmd, check=True, timeout=60, capture_output=True, text=True, encoding='utf-8', errors='ignore') 
+            
+            # --- CONTROLLO RIGOROSO (Novità) ---
+            # Il file deve esistere ed essere più grande di 1KB (1000 byte)
+            ok = out_path.exists() and out_path.stat().st_size > 1000 
+            
             if ok:
-                 log_pdf_event(quote_id, "SUCCESSO", f"PDF generato con browser. Dimensione: {out_path.stat().st_size} bytes.") # <-- LOG SUCCESS BROWSER
+                 log_pdf_event(quote_id, "SUCCESSO", f"PDF generato con browser. Dimensione: {out_path.stat().st_size} bytes.") 
             else:
-                 log_pdf_event(quote_id, "ERRORE", f"Comando browser eseguito (codice: {result.returncode}), ma il PDF non è valido o è troppo piccolo.") # <-- LOG BROWSER FAIL 1
-                 if result.stderr: log_pdf_event(quote_id, "ERRORE", f"Output stderr browser:\n{result.stderr}") # <-- LOG BROWSER STDERR
+                 log_pdf_event(quote_id, "ERRORE", f"Browser ha finito ma file troppo piccolo o assente.") 
         except subprocess.TimeoutExpired:
-             log_pdf_event(quote_id, "ERRORE", "Timeout durante la generazione PDF con browser.") # <-- LOG BROWSER TIMEOUT
+             log_pdf_event(quote_id, "ERRORE", "Timeout durante la generazione PDF con browser.") 
         except Exception as e:
-            log_pdf_event(quote_id, "ERRORE", f"Errore durante l'esecuzione del browser: {e}") # <-- LOG BROWSER EXCEPTION
-            print(f"Errore con browser headless: {e}") # Keep console print for immediate feedback
+            log_pdf_event(quote_id, "ERRORE", f"Errore durante l'esecuzione del browser: {e}") 
 
+    # --- 2. TENTATIVO CON WEASYPRINT (Fallback) ---
     if not ok:
-        log_pdf_event(quote_id, "INFO", "Metodo browser fallito o non disponibile. Tentativo con WeasyPrint.") # <-- LOG FALLBACK
+        log_pdf_event(quote_id, "INFO", "Metodo browser fallito o non disponibile. Tentativo con WeasyPrint.") 
         try:
             from weasyprint import HTML
-            log_pdf_event(quote_id, "INFO", "Libreria WeasyPrint importata.") # <-- LOG WEASY IMPORT
-            html_string = render_template(html_template_file, p=p) # <-- Modificato
+            html_string = render_template(html_template_file, p=p) 
             HTML(string=html_string, base_url=request.url_root).write_pdf(out_path)
-            ok = out_path.exists() and out_path.stat().st_size > 100
+            
+            # Anche qui controllo rigoroso
+            ok = out_path.exists() and out_path.stat().st_size > 1000
+            
             if ok:
-                log_pdf_event(quote_id, "SUCCESSO", f"PDF generato con WeasyPrint. Dimensione: {out_path.stat().st_size} bytes.") # <-- LOG SUCCESS WEASY
+                log_pdf_event(quote_id, "SUCCESSO", f"PDF generato con WeasyPrint.") 
             else:
-                 log_pdf_event(quote_id, "ERRORE", "Generazione con WeasyPrint eseguita, ma il PDF non è valido o è troppo piccolo.") # <-- LOG WEASY FAIL 1
-        except ImportError:
-             log_pdf_event(quote_id, "ERRORE", "Libreria WeasyPrint non trovata.") # <-- LOG WEASY IMPORT ERROR
-             print("ERRORE: Libreria WeasyPrint non trovata.")
-        except OSError as e:
-             log_pdf_event(quote_id, "ERRORE", f"Errore di sistema con WeasyPrint (probabile GTK mancante): {e}") # <-- LOG WEASY OS ERROR
-             print(f"ERRORE di sistema con WeasyPrint (probabile GTK mancante): {e}")
+                 log_pdf_event(quote_id, "ERRORE", "WeasyPrint ha fallito (file troppo piccolo).")
         except Exception as e:
-            log_pdf_event(quote_id, "ERRORE", f"Errore generico durante la generazione con WeasyPrint: {e}") # <-- LOG WEASY EXCEPTION
-            print(f"Errore con WeasyPrint: {e}") # Keep console print
+            log_pdf_event(quote_id, "ERRORE", f"Errore generico WeasyPrint: {e}") 
 
+    # --- 3. ESITO FINALE ---
     if not ok:
-        log_pdf_event(quote_id, "FALLIMENTO", "Entrambi i metodi (Browser e WeasyPrint) hanno fallito.") # <-- LOG FINAL FAIL
+        log_pdf_event(quote_id, "FALLIMENTO", "Tutti i metodi hanno fallito. Nessuna revisione salvata.") 
         return jsonify({"error": "Impossibile generare il PDF."}), 500
 
-    # Se PDF generato con successo... (logica invariata)
-    log_pdf_event(quote_id, "INFO", f"PDF generato. Aggiornamento JSON preventivo con REV-{rev_num}.") # <-- LOG JSON UPDATE
+    # Se arriviamo qui, il PDF esiste ed è valido. 
+    # SOLO ORA salviamo la revisione nel JSON.
+    log_pdf_event(quote_id, "INFO", f"PDF valido. Aggiornamento JSON preventivo con REV-{rev_num}.") 
+    
     if "storico_pdf" not in p: p["storico_pdf"] = []
     p["storico_pdf"].append({
         "id": f"REV-{rev_num}",
@@ -4422,7 +4439,7 @@ def generate_pdf_task(quote_id):
     save_quote(quote_id, p)
 
     pdf_url = url_for("pdf_inline", filename=pdf_name)
-    log_pdf_event(quote_id, "COMPLETATO", f"Processo terminato. URL PDF: {pdf_url}") # <-- LOG COMPLETE
+    log_pdf_event(quote_id, "COMPLETATO", f"Processo terminato. URL PDF: {pdf_url}") 
     return jsonify({"pdf_url": pdf_url})
 
 @app.route("/loading-static")

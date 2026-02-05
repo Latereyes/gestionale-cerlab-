@@ -247,56 +247,170 @@
 
 </div>
 
-<div id="order-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-        <h3>Crea Nuovo Ordine Fornitore</h3>
-        <div class="form-group"><label>Azienda Fornitore*</label><input id="modal-azienda" required></div>
-        <div class="form-group"><label>N. Conferma Ordine (lasciare vuoto se non disponibile)</label><input id="modal-numero"></div>
-        
-        <div class="form-group">
-            <label id="label-importo-articoli">Importo Articoli (IVA incl)*</label>
-            <input id="modal-importo-articoli" type="text" required>
+<div id="modal-delete-row" class="modal-overlay" style="display: none;">
+    <div class="modal-content centered-content">
+        <div class="modal-icon warning">
+            <i class="fas fa-exclamation-triangle"></i>
         </div>
-        
-        <div class="form-check-group">
-            <input type="checkbox" id="modal-trasporto-incluso" checked>
-            <label for="modal-trasporto-incluso">Trasporto incluso nel costo articoli</label>
-        </div>
-        
-        <div class="form-group">
-            <label>Importo Trasporto (IVA incl)</label>
-            <input id="modal-importo-trasporto" type="text" disabled> </div>
-        <div class="form-group"><label>Data Arrivo Stimata</label><input id="modal-data" type="date"></div>
-        <div class="modal-actions">
-            <button type="button" id="modal-order-cancel" class="btn">Annulla</button>
-            <button type="button" id="modal-order-save" class="btn primary">Salva</button>
+        <h3>Conferma Eliminazione</h3>
+        <p>Sei sicuro di voler eliminare definitivamente questa riga dal preventivo?</p>
+        <div class="modal-actions centered-actions">
+            <button type="button" id="modal-delete-row-cancel" class="btn">Annulla</button>
+            <button type="button" id="modal-delete-row-confirm" class="btn danger">Sì, Elimina</button>
         </div>
     </div>
 </div>
 
-<div id="add-to-order-modal" class="modal-overlay" style="display: none;">
+<div id="modal-longtext" class="modal-overlay" style="display: none;">
     <div class="modal-content">
-        <h3>Aggiungi Articoli a Ordine Esistente</h3>
-        <p class="muted">Seleziona l'ordine di destinazione dalla lista.</p>
+        <h3>Modifica Descrizione Articolo</h3>
         <div class="form-group">
-            <label>Ordine Fornitore*</label>
-            <select id="modal-select-ordine" required>
-                <option value="" disabled selected>Seleziona un ordine...</option>
-                {% for ordine in p.ordini_fornitore %}
-                    {% if ordine.numero_conferma %}
-                <option value="{{ ordine.ordine_id }}">{{ ordine.numero_conferma }} ({{ ordine.azienda }}) ID:{{ ordine.ordine_id[-4:] }}</option>
-                    {% endif %}
-                {% endfor %}
-            </select>
+            <textarea id="modal-textarea" rows="6" placeholder="Inserisci qui la descrizione estesa..."></textarea>
         </div>
         <div class="modal-actions">
-            <button type="button" id="modal-add-to-order-cancel" class="btn">Annulla</button>
-            <button type="button" id="modal-add-to-order-save" class="btn primary">Aggiungi</button>
+            <button type="button" id="modal-close" class="btn">Annulla</button>
+            <button type="button" id="modal-save" class="btn primary">Salva Descrizione</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-pdf-choice" class="modal-overlay" style="display: none;">
+    <div class="modal-content centered-content">
+        <div class="modal-icon info">
+            <i class="fas fa-file-pdf"></i>
+        </div>
+        <h3>Generazione PDF</h3>
+        <p>Come vuoi visualizzare i totali nel PDF?</p>
+        <div class="modal-actions centered-actions column-mobile">
+            <button type="button" id="modal-pdf-choice-annulla" class="btn">Annulla</button>
+            <button type="button" id="modal-pdf-choice-no" class="btn btn-outline">Nascondi Totali Riga</button>
+            <button type="button" id="modal-pdf-choice-si" class="btn primary">Mostra Tutto</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-iva-warning" class="modal-overlay" style="display: none;">
+    <div class="modal-content centered-content">
+        <div class="modal-icon danger">
+            <i class="fas fa-times-circle"></i>
+        </div>
+        <h3>Attenzione: IVA Multipla</h3>
+        <p>
+            Non è possibile nascondere i totali perché gli articoli hanno aliquote IVA diverse (es. 4%, 10%, 22%).
+            <br><br>
+            Il PDF verrà generato <strong>mostrando i totali</strong> per garantire la correttezza fiscale.
+        </p>
+        <div class="modal-actions centered-actions">
+            <button type="button" id="modal-iva-warning-annulla" class="btn">Annulla</button>
+            <button type="button" id="modal-iva-warning-procedi" class="btn primary">Ho capito, Procedi</button>
         </div>
     </div>
 </div>
 
 <style>
+    /* --- STILI MODALI AGGIORNATI --- */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(15, 23, 42, 0.6); /* Sfondo scuro moderno */
+    backdrop-filter: blur(4px); /* Effetto sfocatura sfondo */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    padding: 20px;
+}
+
+.modal-content {
+    background: #fff;
+    padding: 32px;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 500px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    animation: modalSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid #e2e8f0;
+}
+
+@keyframes modalSlideIn {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.modal-content h3 {
+    margin: 0 0 12px 0;
+    font-size: 20px;
+    color: #1e293b;
+    font-weight: 700;
+}
+
+.modal-content p {
+    color: #64748b;
+    line-height: 1.6;
+    margin-bottom: 24px;
+    font-size: 15px;
+}
+
+/* Stili per modali centrate (es. Conferma/Warning) */
+.centered-content {
+    text-align: center;
+    max-width: 450px;
+}
+
+/* Icone grandi sopra il titolo */
+.modal-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px auto;
+    font-size: 28px;
+}
+.modal-icon.warning { background-color: #fef3c7; color: #d97706; }
+.modal-icon.danger { background-color: #fee2e2; color: #dc2626; }
+.modal-icon.info { background-color: #e0f2fe; color: #0284c7; }
+
+/* Area di testo (per descrizione lunga) */
+.modal-content textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
+    min-height: 120px;
+}
+.modal-content textarea:focus {
+    outline: none;
+    border-color: #6f42c1;
+    box-shadow: 0 0 0 3px rgba(111, 66, 193, 0.1);
+}
+
+/* Pulsanti */
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.centered-actions {
+    justify-content: center;
+}
+
+@media (max-width: 600px) {
+    .column-mobile {
+        flex-direction: column-reverse; /* I pulsanti importanti in alto */
+    }
+    .column-mobile .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
 .editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
 .card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
 .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content: space-between; align-items:center; flex-wrap:wrap; gap:16px; }
@@ -450,14 +564,14 @@ INIZIO BLOCCO FOOTER AGGIORNATO (CON !IMPORTANT)
 .sticky-footer.order-footer .card-footer.actions-bar {
      background-color: transparent;
      border-top: none;
-     padding: 0; /* Rimuoviamo il padding da .card-footer */
+     padding: 0; 
      flex-grow: 1; /* Occupa lo spazio rimanente */
      
-     /* Allinea i suoi figli (bottoni e totali) su una riga */
+     /* --- MODIFICA: Allinea tutto il contenuto A DESTRA --- */
      display: flex;
-     justify-content: space-between;
+     justify-content: flex-end; /* Prima era 'space-between' */
      align-items: center;
-     gap: 16px;
+     gap: 16px; /* Spazio tra i due pulsanti */
 }
 
 /* Figlio 1: Blocco Navigazione */
@@ -499,85 +613,363 @@ FINE BLOCCO FOOTER AGGIORNATO
 </div>
 {% if p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
 <div class="sticky-footer order-footer"> 
-    
     <div class="status-actions">
         <div>
             {{ workflow_navbar(p, 'ordini') }}
         </div>
     </div>
-    
-    <div class="card-footer actions-bar">
-        <div class="actions-group">
-            <button type="button" id="btn-crea-ordine" class="btn primary" disabled><i class="fas fa-plus"></i> Crea Nuovo Ordine</button>
-            <button type="button" id="btn-aggiungi-a-ordine" class="btn" disabled><i class="fas fa-share"></i> Aggiungi a Ordine Esistente</button>
-        </div>
-        <div class="totals-summary">
-            <div>Totale Stimato: <strong>{{ money_ui(totale_presunto) }}</strong></div>
-            <div class="grand-total">
-                Totale Effettivo: <strong id="totale-effettivo-valore">{{ money_ui(totale_effettivo) }}</strong>
-            </div>
-        </div>
-    </div>
 
+    <div class="card-footer actions-bar">
+        {% if ordini_in_attesa or ordini_confermati %}
+        <button type="button" id="btn-aggiungi-a-ordine" class="btn btn-outline" disabled>
+            <i class="fas fa-cart-plus"></i> Aggiungi a Esistente
+        </button>
+        {% endif %}
+
+        <button type="button" id="btn-crea-ordine" class="btn primary" disabled>
+            <i class="fas fa-plus-circle"></i> Crea Nuovo Ordine
+        </button>
+    </div>
 </div>
 {% endif %}
+
+<div id="order-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3 id="order-modal-title">Crea Nuovo Ordine</h3>
+        
+        <div class="form-group">
+            <label>Fornitore</label>
+            <input id="modal-azienda" type="text" placeholder="Es. FAP, Marca Corona..." autocomplete="off">
+        </div>
+        
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label>Numero Conferma / Rif.</label>
+                <input id="modal-numero" type="text" placeholder="Inserisci numero..." autocomplete="off">
+            </div>
+            <div class="form-group">
+                 <label>Data Arrivo Prevista</label>
+                 <input id="modal-data" type="date">
+            </div>
+        </div>
+        
+        <div class="form-check-group" style="margin-top: 15px;">
+            <input type="checkbox" id="modal-trasporto-incluso" checked>
+            <label for="modal-trasporto-incluso">Il trasporto è incluso nell'importo articoli?</label>
+        </div>
+
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label id="label-importo-articoli">Importo Articoli (IVA incl)</label>
+                <input id="modal-importo-articoli" type="text" placeholder="0,00">
+            </div>
+            <div class="form-group">
+                <label>Costo Trasporto (IVA incl)</label>
+                <input id="modal-importo-trasporto" type="text" placeholder="0,00" disabled>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button type="button" id="modal-order-cancel" class="btn">Annulla</button>
+            <button type="button" id="modal-order-save" class="btn primary">Salva Ordine</button>
+        </div>
+    </div>
+</div>
+
+<div id="add-to-order-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Aggiungi a Ordine Esistente</h3>
+        <p class="muted">Seleziona l'ordine a cui aggiungere gli articoli selezionati:</p>
+        <div class="form-group">
+            <select id="modal-select-ordine" style="width: 100%; padding: 10px;">
+                <option value="">-- Seleziona Ordine --</option>
+                {% for o in ordini_in_attesa %}
+                    <option value="{{ o.ordine_id }}">{{ o.azienda }} - Rif: {{ o.numero_conferma or 'Bozza' }}</option>
+                {% endfor %}
+                {% for o in ordini_confermati %}
+                    <option value="{{ o.ordine_id }}">{{ o.azienda }} - Rif: {{ o.numero_conferma }} (Confermato)</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="modal-actions">
+            <button type="button" id="modal-add-to-order-cancel" class="btn">Annulla</button>
+            <button type="button" id="modal-add-to-order-save" class="btn primary">Aggiungi</button>
+        </div>
+    </div>
+</div>
+
+<div id="upload-order-attachment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Allega File all'Ordine</h3>
+        <p class="muted">Stai caricando un file per l'ordine <strong id="modal-upload-order-number"></strong>.</p>
+        <form id="upload-order-form" method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="ordine_id" id="modal-upload-hidden-order-number">
+            <div class="form-group">
+                <label>Descrizione File</label>
+                <input id="modal-upload-descrizione" name="descrizione" value="Conferma d'ordine" required>
+            </div>
+            <div class="form-group">
+                <label>Seleziona File (PDF, Immagine...)</label>
+                <input id="modal-upload-file" name="file" type="file" required>
+            </div>
+            <div class="modal-actions">
+                <button type="button" id="modal-upload-cancel" class="btn">Annulla</button>
+                <button type="submit" class="btn primary">Carica e Salva</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="local-confirm-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content centered-content">
+        <div class="modal-icon warning">
+            <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        <h3 id="local-confirm-title">Conferma</h3>
+        <p id="local-confirm-message">Sei sicuro di voler procedere?</p>
+        <div class="modal-actions centered-actions">
+            <button type="button" id="local-confirm-cancel" class="btn">Annulla</button>
+            <button type="button" id="local-confirm-ok" class="btn danger">Conferma</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    
+    /* NUOVA REGOLA: Allinea i campi in basso se le etichette hanno altezze diverse */
+    .form-grid-2 .form-group {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+    }
+    
+    /* Opzionale: assicura che le label abbiano spazio */
+    .form-grid-2 .form-group label {
+        margin-bottom: 6px; /* Un po' più di spazio tra testo e casella */
+    }
+    /* Layout Modali */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: center; z-index: 9999; }
+    .modal-content { background: #fff; padding: 32px; border-radius: 16px; width: 95%; max-width: 500px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    
+    .modal-content h3 { margin: 0 0 16px 0; font-size: 20px; color: #1e293b; font-weight: 700; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+    
+    /* Form */
+    .form-group { margin-bottom: 16px; }
+    .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-check-group { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; background: #f8f9fa; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .form-check-group input { width: 18px; height: 18px; margin: 0; }
+    
+    /* Stile "Warning" per Svincola/Elimina */
+    .centered-content { text-align: center; max-width: 400px; }
+    .centered-actions { justify-content: center; }
+    .modal-icon { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px auto; font-size: 28px; }
+    .modal-icon.warning { background-color: #fef3c7; color: #d97706; }
+</style>
+
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // --- RIFERIMENTI GLOBALI ---
     const itemsForm = document.getElementById('items-form');
-    // Se non c'è il form principale, non eseguiamo nessuno script
     if (!itemsForm) return; 
     
     const quoteId = itemsForm.dataset.quoteId;
     let isEditing = false;
     let originalOrderNumber = null;
 
-    // Riferimenti Modale Ordine
+    // --- MODALI ---
     const orderModal = document.getElementById('order-modal');
-    const modalSaveBtn = document.getElementById('modal-order-save');
-    const modalCancelBtn = document.getElementById('modal-order-cancel');
+    const addToOrderModal = document.getElementById('add-to-order-modal');
+    const uploadModal = document.getElementById('upload-order-attachment-modal');
+    const confirmModal = document.getElementById('local-confirm-modal');
+
+    // --- ELEMENTI MODALE ORDINE ---
     const modalTrasportoIncluso = document.getElementById('modal-trasporto-incluso');
     const modalImportoTrasporto = document.getElementById('modal-importo-trasporto');
     const labelImportoArticoli = document.getElementById('label-importo-articoli');
+
+    // --- HELPER: GESTIONE CONFERMA LOCALE (Svincola/Elimina) ---
+    // Questa funzione sostituisce il confirm() nativo e showConfirmation di base.html
+    let confirmCallback = null;
     
-    // Riferimenti Modale Aggiungi a Ordine
-    const addToOrderModal = document.getElementById('add-to-order-modal');
-    const modalAddToOrderSave = document.getElementById('modal-add-to-order-save');
-    const modalAddToOrderCancel = document.getElementById('modal-add-to-order-cancel');
+    function openLocalConfirm(title, message, callback) {
+        document.getElementById('local-confirm-title').textContent = title;
+        document.getElementById('local-confirm-message').innerHTML = message;
+        confirmCallback = callback;
+        confirmModal.style.display = 'flex';
+    }
 
-    // Riferimenti Modale Upload Allegato
-    const uploadModal = document.getElementById('upload-order-attachment-modal');
-    const uploadForm = document.getElementById('upload-order-form');
-    const uploadCancelBtn = uploadModal.querySelector('#modal-upload-cancel');
+    document.getElementById('local-confirm-ok').addEventListener('click', () => {
+        confirmModal.style.display = 'none';
+        if (confirmCallback) confirmCallback();
+    });
+    
+    document.getElementById('local-confirm-cancel').addEventListener('click', () => {
+        confirmModal.style.display = 'none';
+        confirmCallback = null;
+    });
 
-    // Riferimenti Bottoni Azione
-    const createOrderBtn = document.getElementById('btn-crea-ordine');
-    const addToOrderBtn = document.getElementById('btn-aggiungi-a-ordine');
-    const itemCheckboxes = itemsForm.querySelectorAll('input[name="selected_items"]');
-
-    // --- FUNZIONE HELPER: SPUNTA TRASPORTO ---
+    // --- LOGICA CHECKBOX TRASPORTO ---
     function toggleTransportField() {
-        if (!modalTrasportoIncluso) return; // Controllo di sicurezza
-        
+        if (!modalTrasportoIncluso) return;
         if (modalTrasportoIncluso.checked) {
             modalImportoTrasporto.disabled = true;
             modalImportoTrasporto.value = '0';
             labelImportoArticoli.textContent = 'Importo Totale (Articoli + Trasporto, IVA incl)*';
         } else {
             modalImportoTrasporto.disabled = false;
-            // Non pulire il valore se stiamo modificando (ci pensa il codice 'edit-order-btn')
-            if (!isEditing) {
-                modalImportoTrasporto.value = '';
-            }
             labelImportoArticoli.textContent = 'Importo Articoli (IVA incl)*';
         }
     }
-    // Collega l'evento change
-    if (modalTrasportoIncluso) {
-        modalTrasportoIncluso.addEventListener('change', toggleTransportField);
+    if (modalTrasportoIncluso) modalTrasportoIncluso.addEventListener('change', toggleTransportField);
+
+    // --- 1. APRIRE MODALE CREA NUOVO ---
+    const createOrderBtn = document.getElementById('btn-crea-ordine');
+    if (createOrderBtn) {
+        createOrderBtn.addEventListener('click', () => {
+            isEditing = false;
+            document.getElementById('order-modal-title').textContent = "Crea Nuovo Ordine Fornitore";
+            document.getElementById('modal-order-save').textContent = "Crea e Salva";
+            
+            // Reset campi
+            document.getElementById('modal-azienda').value = '';
+            document.getElementById('modal-numero').value = '';
+            document.getElementById('modal-data').value = '';
+            document.getElementById('modal-importo-articoli').value = '';
+            
+            modalTrasportoIncluso.checked = true;
+            toggleTransportField();
+            orderModal.style.display = 'flex';
+        });
     }
 
-    // --- FUNZIONE HELPER: STATO BOTTONI CIMA ---
+    // --- 2. APRIRE MODALE MODIFICA (FIXED) ---
+    document.body.addEventListener('click', function(e) {
+        const editBtn = e.target.closest('.edit-order-btn');
+        if (editBtn) {
+            isEditing = true;
+            originalOrderNumber = editBtn.dataset.ordineId;
+            
+            document.getElementById('order-modal-title').textContent = "Modifica Ordine";
+            document.getElementById('modal-order-save').textContent = "Salva Modifiche";
+            
+            document.getElementById('modal-azienda').value = editBtn.dataset.azienda;
+            document.getElementById('modal-numero').value = editBtn.dataset.numeroDisplay;
+            document.getElementById('modal-data').value = editBtn.dataset.data;
+            document.getElementById('modal-importo-articoli').value = editBtn.dataset.importoArticoli;
+            document.getElementById('modal-importo-trasporto').value = editBtn.dataset.importoTrasporto;
+
+            // Gestione booleano trasporto
+            const isIncluded = editBtn.dataset.trasportoIncluso === 'true';
+            modalTrasportoIncluso.checked = isIncluded;
+            toggleTransportField();
+            
+            orderModal.style.display = 'flex';
+        }
+    });
+
+    // --- 3. SALVATAGGIO ORDINE (Crea o Modifica) ---
+    document.getElementById('modal-order-save').addEventListener('click', () => {
+        const formData = new FormData();
+        formData.append('azienda', document.getElementById('modal-azienda').value);
+        formData.append('numero_conferma', document.getElementById('modal-numero').value);
+        formData.append('importo_articoli', document.getElementById('modal-importo-articoli').value);
+        formData.append('importo_trasporto', document.getElementById('modal-importo-trasporto').value);
+        formData.append('trasporto_incluso', modalTrasportoIncluso.checked ? 'true' : 'false');
+        formData.append('data_arrivo', document.getElementById('modal-data').value);
+        
+        let url;
+        if (isEditing) {
+            url = `/preventivo/${quoteId}/modifica-ordine`;
+            formData.append('ordine_id', originalOrderNumber);
+        } else {
+            url = `/preventivo/${quoteId}/salva-ordine`;
+            // Aggiungi le righe selezionate solo se è un nuovo ordine
+            const itemCheckboxes = itemsForm.querySelectorAll('input[name="selected_items"]:checked');
+            itemCheckboxes.forEach(cb => formData.append('indici_righe[]', cb.value));
+        }
+        
+        fetch(url, { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => { 
+                if (data.success) window.location.reload(); 
+                else alert('Errore: ' + data.error); 
+            });
+    });
+
+    // --- 4. GESTIONE SVINCOLA / ELIMINA (Con Modale Autonoma) ---
+    document.body.addEventListener('click', function(e) {
+        
+        // Svincola
+        const unlinkBtn = e.target.closest('.unlink-item-btn');
+        if (unlinkBtn) {
+            openLocalConfirm(
+                "Svincola Articolo", 
+                "Sei sicuro di voler rimuovere questo articolo dall'ordine? Tornerà tra i 'Non Ordinati'.", 
+                () => {
+                    const payload = { ordine_id: unlinkBtn.dataset.ordineId, item_index: parseInt(unlinkBtn.dataset.itemIndex, 10) };
+                    fetch(`/preventivo/${quoteId}/svincola-articolo`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                    }).then(res => res.json()).then(data => { if(data.success) window.location.reload(); });
+                }
+            );
+        }
+
+        // Elimina Ordine
+        const deleteBtn = e.target.closest('.delete-order-btn');
+        if (deleteBtn) {
+            openLocalConfirm(
+                "Elimina Ordine", 
+                `Stai per eliminare l'ordine <strong>${deleteBtn.dataset.numeroDisplay || 'Bozza'}</strong>.<br>Questa azione è irreversibile.`, 
+                () => {
+                    const formData = new FormData();
+                    formData.append('ordine_id', deleteBtn.dataset.ordineId);
+                    fetch(`/preventivo/${quoteId}/elimina-ordine`, { method: 'POST', body: formData })
+                        .then(res => res.json()).then(data => { if(data.success) window.location.reload(); });
+                }
+            );
+        }
+
+        // Upload Allegato
+        const uploadBtn = e.target.closest('.upload-order-attachment-btn');
+        if (uploadBtn) {
+            uploadForm.action = `/preventivo/${quoteId}/allega-a-ordine`;
+            document.getElementById('modal-upload-hidden-order-number').value = uploadBtn.dataset.ordineId;
+            document.getElementById('modal-upload-order-number').textContent = uploadBtn.dataset.numeroDisplay || 'Bozza';
+            uploadModal.style.display = 'flex';
+        }
+    });
+
+    // --- AGGIUNGI A ORDINE ESISTENTE ---
+    const addToOrderBtn = document.getElementById('btn-aggiungi-a-ordine');
+    if (addToOrderBtn) {
+        addToOrderBtn.addEventListener('click', () => { addToOrderModal.style.display = 'flex'; });
+    }
+    
+    document.getElementById('modal-add-to-order-save').addEventListener('click', () => {
+        const targetOrder = document.getElementById('modal-select-ordine').value;
+        if (!targetOrder) { alert("Seleziona un ordine."); return; }
+        
+        const formData = new FormData();
+        formData.append('target_ordine_id', targetOrder);
+        itemsForm.querySelectorAll('input[name="selected_items"]:checked').forEach(cb => formData.append('indici_righe[]', cb.value));
+        
+        fetch(`/preventivo/${quoteId}/aggiungi-a-ordine`, { method: 'POST', body: formData })
+            .then(res => res.json()).then(data => { if(data.success) window.location.reload(); });
+    });
+
+    // --- CHIUSURA MODALI (Tasto Annulla e Overlay) ---
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) overlay.style.display = 'none';
+        });
+    });
+    document.getElementById('modal-order-cancel').onclick = () => orderModal.style.display = 'none';
+    document.getElementById('modal-add-to-order-cancel').onclick = () => addToOrderModal.style.display = 'none';
+    document.getElementById('modal-upload-cancel').onclick = () => uploadModal.style.display = 'none';
+
+    // --- ABILITAZIONE BOTTONI IN ALTO ---
+    const itemCheckboxes = itemsForm.querySelectorAll('input[name="selected_items"]');
     function updateButtonState() {
         const anyChecked = [...itemCheckboxes].some(cb => cb.checked);
         const hasExistingOrders = document.querySelector('#modal-select-ordine option[value]:not([value=""])');
@@ -585,201 +977,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (addToOrderBtn) addToOrderBtn.disabled = !anyChecked || !hasExistingOrders;
     }
     itemCheckboxes.forEach(cb => cb.addEventListener('change', updateButtonState));
-    updateButtonState(); // Esegui al caricamento
+    updateButtonState();
 
-    // --- GESTIONE EVENTI BOTTONI PRINCIPALI ---
-
-    // Click: Crea Nuovo Ordine
-    if (createOrderBtn) {
-        createOrderBtn.addEventListener('click', () => {
-            isEditing = false;
-            originalOrderNumber = null;
-            orderModal.querySelector('h3').textContent = "Crea Nuovo Ordine Fornitore";
-            orderModal.querySelector('#modal-order-save').textContent = "Crea e Salva Ordine";
-            // Pulisci tutti gli input tranne la checkbox
-            orderModal.querySelectorAll('input').forEach(i => { if (i.type !== 'checkbox') i.value = ''; });
-            modalTrasportoIncluso.checked = true; // Default "incluso"
-            toggleTransportField(); // Applica la logica
-            orderModal.style.display = 'flex';
-        });
-    }
-
-    // Click: Salva (da modale crea/modifica)
-    if (modalSaveBtn) {
-        modalSaveBtn.addEventListener('click', () => {
-            const formData = new FormData();
-            formData.append('azienda', document.getElementById('modal-azienda').value);
-            formData.append('numero_conferma', document.getElementById('modal-numero').value);
-            formData.append('importo_articoli', document.getElementById('modal-importo-articoli').value);
-            formData.append('importo_trasporto', document.getElementById('modal-importo-trasporto').value);
-            formData.append('trasporto_incluso', modalTrasportoIncluso.checked ? 'true' : 'false');
-            formData.append('data_arrivo', document.getElementById('modal-data').value);
-            
-            let url;
-            if (isEditing) {
-                url = `/preventivo/${quoteId}/modifica-ordine`;
-                formData.append('ordine_id', originalOrderNumber);
-            } else {
-                url = `/preventivo/${quoteId}/salva-ordine`;
-                itemCheckboxes.forEach(cb => { if (cb.checked) formData.append('indici_righe[]', cb.value); });
-            }
-            
-            fetch(url, { method: 'POST', body: formData })
-                .then(res => res.json())
-                .then(data => { if (data.success) { window.location.reload(); } else { showNotification('Errore', data.error || 'Salvataggio fallito.'); } })
-                .catch(err => showNotification('Errore di Rete', 'Impossibile connettersi.'));
-        });
-    }
-    if (modalCancelBtn) {
-        modalCancelBtn.addEventListener('click', () => orderModal.style.display = 'none');
-    }
-
-    // Click: Aggiungi a Ordine Esistente
-    if (addToOrderBtn) {
-        addToOrderBtn.addEventListener('click', () => {
-            addToOrderModal.style.display = 'flex';
-        });
-    }
-    if (modalAddToOrderSave) {
-        modalAddToOrderSave.addEventListener('click', () => {
-            const targetOrder = document.getElementById('modal-select-ordine').value;
-            if (!targetOrder) { showNotification("Attenzione", "Per favore, seleziona un ordine di destinazione."); return; }
-            const formData = new FormData();
-            formData.append('target_ordine_id', targetOrder);
-            itemCheckboxes.forEach(cb => { if (cb.checked) formData.append('indici_righe[]', cb.value); });
-            
-            fetch(`/preventivo/${quoteId}/aggiungi-a-ordine`, { method: 'POST', body: formData })
-                .then(res => res.json())
-                .then(data => { if (data.success) { window.location.reload(); } else { showNotification('Errore', data.error || 'Operazione fallita.'); } })
-                .catch(err => showNotification("Errore di Rete", "Impossibile connettersi."));
-        });
-    }
-    if (modalAddToOrderCancel) {
-        modalAddToOrderCancel.addEventListener('click', () => addToOrderModal.style.display = 'none');
-    }
-
-    // Click: Annulla (Upload Allegato)
-    if (uploadCancelBtn) {
-        uploadCancelBtn.addEventListener('click', () => {
-            uploadModal.style.display = 'none';
-        });
-    }
-
-    // --- GESTIONE CLICK SU ICONE (Pulsanti Modifica, Copia, Svincola, Elimina, Allega) ---
-    // Usiamo un solo listener sul body per efficienza
-    document.body.addEventListener('click', function(e) {
-        
-        // Click: Modifica Ordine (IL BLOCCO CHIAVE CORRETTO)
-        const editBtn = e.target.closest('.edit-order-btn');
-        if (editBtn) {
-            isEditing = true;
-            originalOrderNumber = editBtn.dataset.ordineId;
-            
-            orderModal.querySelector('h3').textContent = `Modifica Ordine ${editBtn.dataset.numeroDisplay || originalOrderNumber}`;
-            orderModal.querySelector('#modal-order-save').textContent = "Salva Modifiche";
-            document.getElementById('modal-azienda').value = editBtn.dataset.azienda;
-            document.getElementById('modal-numero').value = editBtn.dataset.numeroDisplay;
-            document.getElementById('modal-data').value = editBtn.dataset.data;
-
-            // Logica Checkbox
-            const trasportoIncluso = editBtn.dataset.trasportoIncluso === 'true';
-            modalTrasportoIncluso.checked = trasportoIncluso;
-            toggleTransportField(); // Applica logica (abilita/disabilita campo)
-            
-            // Popola valori
-            document.getElementById('modal-importo-articoli').value = editBtn.dataset.importoArticoli;
-            document.getElementById('modal-importo-trasporto').value = editBtn.dataset.importoTrasporto;
-            
-            orderModal.style.display = 'flex';
-            return;
-        }
-
-        // Click: Allega (Upload)
-        const uploadBtn = e.target.closest('.upload-order-attachment-btn');
-        if (uploadBtn) {
-            const ordineId = uploadBtn.dataset.ordineId;
-            const numeroDisplay = uploadBtn.dataset.numeroDisplay || ordineId;
-            
-            uploadForm.action = `/preventivo/${quoteId}/allega-a-ordine`;
-            uploadModal.querySelector('#modal-upload-hidden-order-number').value = ordineId;
-            uploadModal.querySelector('#modal-upload-order-number').textContent = numeroDisplay;
-            uploadModal.style.display = 'flex';
-            return;
-        }
-
-        // Click: Copia
-        const copyBtn = e.target.closest('.copy-order-btn');
-        if (copyBtn) {
-            // (Logica di Copia - la prendiamo da base.html e la inseriamo qui)
-            const tableSelector = copyBtn.dataset.targetTable;
-            const table = document.querySelector(tableSelector);
-            if (!table) { showNotification('Errore', 'Tabella da copiare non trovata.'); return; }
-            let htmlString = '<table style="border-collapse: collapse; width: 100%; font-family: sans-serif; font-size: 12px; border: 1px solid #ccc;">';
-            let plainTextString = '';
-            table.querySelectorAll('tr').forEach(function(row) {
-                const isHeader = row.querySelector('th') !== null;
-                const cells = Array.from(row.querySelectorAll(isHeader ? 'th' : 'td')).slice(0, 3);
-                if (cells.length === 0) return;
-                let rowText = [];
-                htmlString += '<tr>';
-                cells.forEach(function(cell, index) {
-                    const tag = isHeader ? 'th' : 'td';
-                    let style = isHeader ? 'style="border: 1px solid #ccc; padding: 8px; text-align: left; background-color: #f2f2f2;"' : 'style="border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top;"';
-                    if (cell.classList.contains('right')) style = style.replace('text-align: left;', 'text-align: right;');
-                    if (index === 0) style = style.replace(';"', '; width: 60%; word-wrap: break-word;"');
-                    htmlString += `<${tag} ${style}>${cell.innerHTML.trim()}</${tag}>`;
-                    rowText.push(cell.innerText.trim());
-                });
-                htmlString += '</tr>';
-                plainTextString += rowText.join('\t') + '\n';
-            });
-            htmlString += '</table>';
-            document.body.setAttribute('data-copy-html', htmlString);
-            document.body.setAttribute('data-copy-text', plainTextString);
-            const dummy = document.createElement('textarea');
-            document.body.appendChild(dummy);
-            dummy.value = plainTextString;
-            dummy.select();
-            let success = false;
-            try { success = document.execCommand('copy'); } catch (err) { console.error('Impossibile attivare la copia:', err); }
-            document.body.removeChild(dummy);
-            if (success) {
-                const originalText = copyBtn.innerHTML;
-                copyBtn.innerHTML = 'Copiato! ✅';
-                copyBtn.disabled = true;
-                setTimeout(() => { copyBtn.innerHTML = originalText; copyBtn.disabled = false; }, 2000);
-            } else {
-                showNotification('Operazione Fallita', "Impossibile copiare. L'operazione è stata bloccata dal browser.");
-            }
-            return;
-        }
-
-        // Click: Svincola
-        const unlinkBtn = e.target.closest('.unlink-item-btn');
-        if (unlinkBtn) {
-            showConfirmation("Conferma Svincolo", "Sei sicuro di voler svincolare questo articolo dall'ordine?", () => {
-                const payload = { ordine_id: unlinkBtn.dataset.ordineId, item_index: parseInt(unlinkBtn.dataset.itemIndex, 10) };
-                fetch(`/preventivo/${quoteId}/svincola-articolo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-                    .then(res => res.json())
-                    .then(data => { if (data.success) { window.location.reload(); } else { showNotification('Errore', data.error); } });
-            });
-            return;
-        }
-
-        // Click: Elimina
-        const deleteBtn = e.target.closest('.delete-order-btn');
-        if (deleteBtn) {
-            const message = `Sei sicuro di voler eliminare l'ordine "<strong>${deleteBtn.dataset.ordineId}</strong>"?<br>L'azione non è reversibile.`;
-            showConfirmation("Conferma Eliminazione", message, () => {
-                const formData = new FormData();
-                formData.append('ordine_id', deleteBtn.dataset.ordineId);
-                fetch(`/preventivo/${quoteId}/elimina-ordine`, { method: 'POST', body: formData })
-                    .then(res => res.json())
-                    .then(data => { if (data.success) { window.location.reload(); } else { showNotification('Errore', data.error); } });
-            });
-            return;
-        }
-    });
 });
 </script>
 {% endblock %}

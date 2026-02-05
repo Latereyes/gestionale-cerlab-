@@ -79,32 +79,7 @@
                 {% endif %}
             </div>
 
-            <div class="buttons-group" style="display: flex; gap: 10px;">
-                {% if session.user_role in ['amministratore', 'segreteria', 'ceo'] %}
-                    
-                    <form action="{{ url_for('toggle_stato_fattura_iva', quote_id=p.numero) }}" method="POST" style="margin: 0;">
-                        <input type="hidden" name="iva_key" value="{{ iva_key }}">
-                        
-                   
-                            <button type="submit" name="set_stato" value="0" class="btn btn-outline danger" title="Annulla lo stato di fatturazione">
-                                <i class="fas fa-times-circle"></i> Annulla Stato
-                            </button>
-             
-                            <button type="submit" name="set_stato" value="1" class="btn success" title="Segna come fatturato manualmente">
-                                <i class="fas fa-check-double"></i> Segna Fatturato
-                            </button>
- 
-                    </form>
 
-                    <button type="button" 
-                            class="btn primary btn-allega-fattura-iva" 
-                            data-iva-key="{{ iva_key }}"
-                            data-descrizione="N. Fattura IVA {{ iva_key }}%">
-                        <i class="fas fa-paperclip"></i> 
-                        {% if data.fatture_allegate %}Allega Altra Doc.{% else %}Allega Fattura{% endif %}
-                    </button>
-                {% endif %}
-            </div>
         </div>
         {% if data.fatture_allegate %}
             <div class="attachments-section">
@@ -211,14 +186,116 @@
     .form-group { margin-bottom: 16px; }
     .form-group label { display: block; font-size: 12px; margin-bottom: 4px; }
     .form-group input { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
+    /* --- NUOVI STILI PER FOOTER AZIONI --- */
+    .sticky-footer .footer-layout {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    .footer-right-actions {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+    }
+    .iva-action-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-left: 15px;
+        border-left: 1px solid #e2e8f0;
+    }
+    .iva-badge-label {
+        font-size: 11px;
+        font-weight: 700;
+        color: #64748b;
+        text-transform: uppercase;
+    }
+    .btn-small {
+        padding: 6px 12px;
+        font-size: 12px;
+        height: 32px;
+    }
+    .btn-outline.danger {
+        border: 1px solid #dc3545;
+        color: #dc3545;
+        background: transparent;
+    }
+    .btn-outline.danger:hover {
+        background: #dc3545;
+        color: #fff;
+    }
 </style>
 
 {% if p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
 <div class="sticky-footer">
-    <div class="status-actions">
-        <div>
-            <label>&nbsp;</label>
+    <div class="footer-layout">
+        <div class="footer-left">
             {{ workflow_navbar(p, 'fatture') }}
+        </div>
+        
+        <div class="footer-right-actions">
+            {% for iva_key, data in dati_fattura.items() %}
+                {% if iva_key != '0' %}
+                <div class="iva-action-group">
+                    <span class="iva-badge-label">IVA {{ iva_key }}%</span>
+                    
+                    <form action="{{ url_for('toggle_stato_fattura_iva', quote_id=p.numero) }}" method="POST" style="display: inline-flex; gap: 8px;">
+                        <input type="hidden" name="iva_key" value="{{ iva_key }}">
+                        <button type="submit" name="set_stato" value="0" class="btn btn-outline danger btn-small" title="Annulla stato">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button type="submit" name="set_stato" value="1" class="btn success btn-small">
+                            <i class="fas fa-check"></i> Segna Fatturato
+                        </button>
+                    </form>
+
+                    <button type="button" 
+                            class="btn primary btn-small btn-allega-fattura-iva" 
+                            data-iva-key="{{ iva_key }}"
+                            data-descrizione="N. Fattura IVA {{ iva_key }}%">
+                        <i class="fas fa-paperclip"></i> Allega
+                    </button>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}{% if p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
+<div class="sticky-footer">
+    <div class="footer-layout">
+        <div class="footer-left">
+            {{ workflow_navbar(p, 'fatture') }}
+        </div>
+        
+        <div class="footer-right-actions">
+            {% for iva_key, data in dati_fattura.items() %}
+                {% if iva_key != '0' %}
+                <div class="iva-action-group">
+                    <span class="iva-badge-label">IVA {{ iva_key }}%</span>
+                    
+                    <form action="{{ url_for('toggle_stato_fattura_iva', quote_id=p.numero) }}" method="POST" style="display: inline-flex; gap: 8px;">
+                        <input type="hidden" name="iva_key" value="{{ iva_key }}">
+                        <button type="submit" name="set_stato" value="0" class="btn btn-outline danger btn-small" title="Annulla stato">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button type="submit" name="set_stato" value="1" class="btn success btn-small">
+                            <i class="fas fa-check"></i> Segna Fatturato
+                        </button>
+                    </form>
+
+                    <button type="button" 
+                            class="btn primary btn-small btn-allega-fattura-iva" 
+                            data-iva-key="{{ iva_key }}"
+                            data-descrizione="N. Fattura IVA {{ iva_key }}%">
+                        <i class="fas fa-paperclip"></i> Allega
+                    </button>
+                </div>
+                {% endif %}
+            {% endfor %}
         </div>
     </div>
 </div>

@@ -20,6 +20,9 @@
             padding: 40px;
             color: var(--text-primary);
             background-color: #fff;
+            /* Forza la stampa dei colori di sfondo */
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
         }
 
         .container {
@@ -102,8 +105,10 @@
             background-color: var(--bg-light);
         }
         
+        /* COLORAZIONE RIGHE ALTERNATE */
         .items-table tbody tr:nth-child(even) {
-            background-color: var(--bg-light);
+            background-color: var(--bg-light) !important;
+            -webkit-print-color-adjust: exact;
         }
 
         .items-table td {
@@ -113,7 +118,7 @@
         .right { text-align: right; }
         .nowrap { white-space: nowrap; }
 
-        /* --- NUOVA REGOLA CSS PER NASCONDERE LE COLONNE --- */
+        /* Classe per nascondere le colonne specifiche della stampa semplice */
         .col-simple-hide {
             display: none;
         }
@@ -161,14 +166,22 @@
             font-size: 12px;
             color: var(--text-secondary);
         }
+
         @media print {
             .print-footer-block {
                 break-inside: avoid;
                 page-break-inside: avoid;
             }
+            
+            /* Forza la visualizzazione dei background (righe grigie) */
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
             @page {
                 size: A4;
-                margin: 40px 40px 60px 40px; /* Margini della pagina sopra destra sotto sinistra */ 
+                margin: 40px 40px 60px 40px;
                 @bottom-center {
                     content: "Pagina " counter(page) " di " counter(pages);
                     font-family: 'Inter', sans-serif;
@@ -219,7 +232,8 @@
             <table class="items-table">
                 <thead>
                     <tr>
-                        <th style="width: 70%;">Articolo</th> <th>UM</th>
+                        <th style="width: 70%;">Articolo</th> 
+                        <th>UM</th>
                         <th class="right nowrap">Q.tà</th>
                         <th class="right nowrap col-simple-hide">Prezzo Unitario €</th>
                         <th class="right nowrap col-simple-hide">Imponibile €</th>
@@ -265,26 +279,27 @@
                 </tbody>
             </table>
         </section>
-    <div class="print-footer-block">    
-        <section class="notes-section">
-            <h3>Note e Condizioni</h3>
-            <div class="notes-content">
-                <strong>IMPORTANTE</strong><br>
-                - Il presente preventivo è valido 7 giorni lavorativi e si intende parte del "Contratto di vendita" allegato.<br>
-                - Le metrature e le quantità sono fornite dal cliente o dal suo tecnico di riferimento.<br>
-                - Gli sfridi si intendono come aggiunta alle metrature fornite dal cliente per le lavorazioni e la spedizione.<br><br>
-                <strong>TEMPISTICHE</strong><br>
-                Al momento della ricezione dell’acconto, CER LAB s.r.l. contatterà i fornitori per ordinare i prodotti scelti. 
-                La corretta ricezione dell’ordine è confermata entro due giorni lavorativi dai fornitori e solo da quel momento si conosceranno le stime dei tempi di produzione e consegna.
-            </div>
-        </section>
+        
+        <div class="print-footer-block">    
+            <section class="notes-section">
+                <h3>Note e Condizioni</h3>
+                <div class="notes-content">
+                    <strong>IMPORTANTE</strong><br>
+                    - Il presente preventivo è valido 7 giorni lavorativi e si intende parte del "Contratto di vendita" allegato.<br>
+                    - Le metrature e le quantità sono fornite dal cliente o dal suo tecnico di riferimento.<br>
+                    - Gli sfridi si intendono come aggiunta alle metrature fornite dal cliente per le lavorazioni e la spedizione.<br><br>
+                    <strong>TEMPISTICHE</strong><br>
+                    Al momento della ricezione dell’acconto, CER LAB s.r.l. contatterà i fornitori per ordinare i prodotti scelti. 
+                    La corretta ricezione dell’ordine è confermata entro due giorni lavorativi dai fornitori e solo da quel momento si conosceranno le stime dei tempi di produzione e consegna.
+                </div>
+            </section>
 
-        <footer>
-            <p>Data e firma per accettazione:</p>
-            <br><br>
-            <p>_______________________</p>
-        </footer>
-    </div>
+            <footer>
+                <p>Data e firma per accettazione:</p>
+                <br><br>
+                <p>_______________________</p>
+            </footer>
+        </div>
     </div>
 </body>
 </html>

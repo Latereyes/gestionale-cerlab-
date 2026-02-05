@@ -54,7 +54,15 @@
                 <div class="form-group amount-group">
                     <label for="importo">Importo (€)</label>
                     <div class="input-with-actions">
-                        <input type="text" name="importo" id="importo" placeholder="es. 1500,50" required>
+                        <input 
+                                type="text" 
+                                name="importo" 
+                                id="importo" 
+                                class="form-control" 
+                                placeholder="0,00" 
+                                inputmode="decimal" 
+                                required
+                            >
                         
                         {% if p.totale_pagato == 0 %}
                         <button type="button" id="btn-set-40" class="btn btn-blue" title="Calcola acconto 40%">40%</button>
@@ -237,94 +245,104 @@
 </div>
 {% endif %}
 <script>
-// FUNZIONE DELLA MODALE (ORA DENTRO QUESTA PAGINA)
-function showConfirmation(title, message, onConfirm) {
-    const modal = document.getElementById('confirm-modal');
-    if (!modal) return;
-    modal.querySelector('#confirm-modal-title').textContent = title;
-    modal.querySelector('#confirm-modal-text').innerHTML = message;
-    modal.style.display = 'flex';
-    const okBtn = modal.querySelector('#confirm-modal-ok');
-    const cancelBtn = modal.querySelector('#confirm-modal-cancel');
-    
-    // Pulisce i listener precedenti per evitare esecuzioni multiple
-    const newOkBtn = okBtn.cloneNode(true);
-    okBtn.parentNode.replaceChild(newOkBtn, okBtn);
-    const newCancelBtn = cancelBtn.cloneNode(true);
-    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-
-    const closeModal = () => { modal.style.display = 'none'; };
-    
-    newOkBtn.addEventListener('click', () => {
-        closeModal();
-        if (onConfirm) onConfirm();
-    }, { once: true });
-    newCancelBtn.addEventListener('click', closeModal, { once: true });
-}
-
 document.addEventListener('DOMContentLoaded', () => {
-    // Imposta la data di oggi come default
-    const dateInput = document.querySelector('[name="data"]');
-    if (!dateInput.value) {
-        const today = new Date();
-        const yyyy = today.getFullYear();
-        const mm = String(today.getMonth() + 1).padStart(2, '0');
-        const dd = String(today.getDate()).padStart(2, '0');
-        dateInput.value = `${yyyy}-${mm}-${dd}`;
-    }
-
-    const btnSet40 = document.getElementById('btn-set-40');
-    const btnSet50 = document.getElementById('btn-set-50');
-    const btnSetSaldo = document.getElementById('btn-set-saldo');
+    
+    // 1. RIFERIMENTI AGLI ELEMENTI
     const importoInput = document.getElementById('importo');
     const noteInput = document.getElementById('note');
-
-    const totalePreventivo = parseFloat("{{ p.totale | replace(',', '.') }}");
-    const totaleDaSaldare = parseFloat("{{ p.totale_da_saldare | replace(',', '.') }}");
-
-    if (btnSet40 && !isNaN(totalePreventivo)) {
-        btnSet40.addEventListener('click', () => {
-            const acconto = totalePreventivo * 0.40;
-            const formattedAcconto = acconto.toFixed(2).replace(".", ",");
-            importoInput.value = formattedAcconto;
-            noteInput.value = 'Acconto 40%';
-        });
-    }
-
-    if (btnSet50 && !isNaN(totalePreventivo)) {
-    btnSet50.addEventListener('click', () => {
-        const acconto = totalePreventivo * 0.50;
-        const formattedAcconto = acconto.toFixed(2).replace(".", ",");
-        importoInput.value = formattedAcconto;
-        noteInput.value = 'Acconto 50%';
-    });
-}
     
-    if (btnSetSaldo && !isNaN(totaleDaSaldare)) {
-        btnSetSaldo.addEventListener('click', () => {
-            const formattedSaldo = totaleDaSaldare.toFixed(2).replace(".", ",");
-            importoInput.value = formattedSaldo;
-            noteInput.value = 'Saldo finale';
+    // Bottoni rapidi
+    const btnSet30 = document.getElementById('btn-set-30');
+    const btnSet50 = document.getElementById('btn-set-50');
+    const btnSetSaldo = document.getElementById('btn-set-saldo');
+
+    // 2. FUNZIONE DI PARSING INTELLIGENTE (Fix Decimali)
+    // Gestisce sia "1.200,50" (Stringa IT) che "1200.50" (Float Python/DB)
+    function safeParse(valStr) {
+        if (!valStr) return 0.0;
+        valStr = valStr.toString().trim();
+
+        // Se c'è una virgola, è sicuramente formato Italiano (1.000,00)
+        if (valStr.includes(',')) {
+            // Rimuovi i punti delle migliaia
+            valStr = valStr.replace(/\./g, '');
+            // Sostituisci la virgola decimale con il punto per JS
+            valStr = valStr.replace(',', '.');
+        } 
+        // Se NON c'è la virgola, assumiamo sia un numero standard (1200.50)
+        // In questo caso NON rimuoviamo i punti, perché sono decimali!
+        
+        return parseFloat(valStr) || 0.0;
+    }
+
+    // Recuperiamo i valori grezzi senza filtri Jinja che potrebbero rompere i float
+    const totalePreventivo = safeParse("{{ p.totale }}");
+    const totaleDaSaldare = safeParse("{{ p.totale_da_saldare }}");
+
+    // 3. GESTIONE INPUT (Mentre scrivi: Punto -> Virgola)
+    if (importoInput) {
+        importoInput.addEventListener('input', function(e) {
+            let val = this.value;
+            // Sostituisce punto con virgola
+            val = val.replace(/\./g, ','); 
+            // Rimuove tutto ciò che non è numero o virgola
+            val = val.replace(/[^0-9,]/g, ''); 
+            // Assicura che ci sia una sola virgola
+            const parts = val.split(',');
+            if (parts.length > 2) {
+                val = parts[0] + ',' + parts.slice(1).join('');
+            }
+            if (val !== this.value) {
+                this.value = val;
+            }
         });
     }
 
-    // LOGICA PER ATTIVARE LA MODALE
+    // 4. LOGICA TASTI RAPIDI
+    // Formatta il numero per l'input (es. 120,50)
+    function formatForInput(num) {
+        return num.toFixed(2).replace('.', ',');
+    }
+
+    if (btnSet30) {
+        btnSet30.addEventListener('click', () => {
+            const val = totalePreventivo * 0.30;
+            importoInput.value = formatForInput(val);
+            if (noteInput) noteInput.value = 'Acconto 30%';
+        });
+    }
+
+    if (btnSet50) {
+        btnSet50.addEventListener('click', () => {
+            const val = totalePreventivo * 0.50;
+            importoInput.value = formatForInput(val);
+            if (noteInput) noteInput.value = 'Acconto 50%';
+        });
+    }
+
+    if (btnSetSaldo) {
+        btnSetSaldo.addEventListener('click', () => {
+            // Usiamo il totale da saldare calcolato correttamente
+            importoInput.value = formatForInput(totaleDaSaldare);
+            if (noteInput) noteInput.value = 'Saldo finale';
+        });
+    }
+
+    // 5. GESTIONE MODALE RETTIFICA
     const rettificaForms = document.querySelectorAll('.rettifica-form');
     rettificaForms.forEach(form => {
         form.addEventListener('submit', function(event) {
-            event.preventDefault(); // Blocca l'invio automatico
+            event.preventDefault(); 
+            const message = "Sei sicuro di voler rettificare questo pagamento?<br>Verrà creato un <strong>nuovo movimento di storno</strong>.";
             
-            // Chiama la funzione showConfirmation (definita sopra)
-            showConfirmation(
-                'Conferma Rettifica',
-                "Sei sicuro di voler rettificare questo pagamento?<br>Verrà creato un <strong>nuovo movimento di storno</strong> per annullare l'operazione.",
-                () => {
-                    // Questa parte viene eseguita solo se l'utente clicca "Conferma"
-                    form.submit();
-                }
-            );
+            if (typeof showConfirmation === 'function') {
+                showConfirmation('Conferma Rettifica', message, () => form.submit());
+            } else if (confirm(message.replace(/<br>|<strong>|<\/strong>/g, ' '))) {
+                form.submit();
+            }
         });
     });
+
 });
 </script>
 

@@ -1,6 +1,19 @@
 
 [ 
   {
+        "version": "1.10.1",
+        "date": "2026-02-05",
+        "title": "Stabilità PDF, Fix Ordini e Logica Pagamenti",
+        "features": [
+      "Dashboard & Cashflow: Fix critico logica 'Saldato'. Ora lo stato manuale 'Saldato' ha priorità assoluta sui calcoli (risolve falsi debiti su preventivi No-IVA o con pagamenti parziali).",
+      "Gestione Ordini: Pagina resa autonoma con nuove modali integrate (stile Editor). Fix pulsanti azione nel footer e layout griglia.",
+      "Core PDF: Implementata generazione 'Transazionale' per Bolle e Revisioni. Lo stato (es. 'In Bolla') cambia solo se il PDF viene generato correttamente (>1KB), prevenendo blocchi.",
+      "Pagamenti: Nuova gestione intelligente degli input numerici. Conversione automatica punto/virgola e fix tasti rapidi (Acconto/Saldo) per ogni formato.",
+      "Stampa: Uniformato stile 'Stampa Semplice' al layout standard (Font Inter, righe alternate grigie visibili in stampa).",
+      "Bugfix: Corretto stato 'In Attesa di Fattura' nell'Editor Fattura per aliquote specifiche."
+    ]
+    },
+  {
         "version": "1.10.0",
         "date": "2026-01-26",
         "title": "Cashflow Alignment & Fee Update",

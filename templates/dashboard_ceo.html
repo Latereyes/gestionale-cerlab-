@@ -23,12 +23,18 @@
                 <input type="date" id="end_date" name="end_date" value="{{ end_date }}" min="2025-09-01">
             </div>
             <button type="submit" class="btn primary"><i class="fas fa-filter"></i> Analizza</button>
-            
-            <button type="submit" formaction="{{ url_for('export_excel_ceo') }}" class="btn success" style="margin-left: 10px; background-color: #198754; color: white;">
+                        
+                        <button type="button" 
+                    onclick="downloadExport('{{ url_for('export_excel_ceo') }}')" 
+                    class="btn success" 
+                    style="margin-left: 10px; background-color: #198754; color: white;">
                 <i class="fas fa-file-excel"></i> Analisi
             </button>
 
-            <button type="submit" formaction="{{ url_for('export_cashflow_excel') }}" class="btn" style="margin-left: 5px; background-color: #0d6efd; color: white;">
+            <button type="button" 
+                    onclick="downloadExport('{{ url_for('export_cashflow_excel') }}')" 
+                    class="btn" 
+                    style="margin-left: 5px; background-color: #0d6efd; color: white;">
                 <i class="fas fa-file-invoice-dollar"></i> Cashflow
             </button>
         </div>
@@ -42,10 +48,10 @@
   </form>
 
   <div class="tabs-navigation">
-    <button class="tab-link active" data-tab="tab-overview"><i class="fas fa-tachometer-alt"></i> Overview & Profitti</button>
-    <button class="tab-link" data-tab="tab-cashflow"><i class="fas fa-wallet"></i> Cash Flow</button>
-    <button class="tab-link" data-tab="tab-commerciale"><i class="fas fa-bullseye"></i> Commerciale</button>
-  </div>
+    <button type="button" class="tab-link active" data-tab="tab-overview"><i class="fas fa-tachometer-alt"></i> Overview & Profitti</button>
+    <button type="button" class="tab-link" data-tab="tab-cashflow"><i class="fas fa-wallet"></i> Cash Flow</button>
+    <button type="button" class="tab-link" data-tab="tab-commerciale"><i class="fas fa-bullseye"></i> Commerciale</button>
+</div>
 
 <div class="tabs-content">
 
@@ -426,6 +432,38 @@
 .big-stat .desc { color: #9ca3af; font-size: 13px; margin: 0; }
 .chart-card .card-body { height: 400px !important; position: relative; width: 100%; }
 </style>
+
+<script>
+    function downloadExport(baseUrl) {
+        console.log("Tentativo di download verso:", baseUrl); // Debug log
+        
+        // 1. Prendi i valori delle date
+        const startInput = document.getElementById('start_date');
+        const endInput = document.getElementById('end_date');
+        
+        // Controllo di sicurezza se gli input non esistono
+        if (!startInput || !endInput) {
+            alert("Errore: impossibile trovare i campi data.");
+            return;
+        }
+
+        const start = startInput.value;
+        const end = endInput.value;
+        
+        // 2. Costruisci l'URL con i parametri
+        // Usa window.location.origin per essere sicuro di avere l'host corretto
+        try {
+            const url = new URL(baseUrl, window.location.origin);
+            if(start) url.searchParams.append('start_date', start);
+            if(end) url.searchParams.append('end_date', end);
+            
+            // 3. Avvia il download
+            window.location.href = url.toString();
+        } catch (e) {
+            alert("Errore nella generazione dell'URL: " + e.message);
+        }
+    }
+</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
