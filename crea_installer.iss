@@ -1,11 +1,11 @@
-#define MyAppVersion "1.10.1"
+#define MyAppVersion "1.10.2"
 ; Script Inno Setup per Gestionale Preventivi
 
 [Setup]
 AppName=Gestionale Preventivi
 AppVersion={#MyAppVersion}
 ; <-- CORREZIONE: La riga AppId era malformattata
-AppId={{df9d9376-d159-4d7a-9ac1-53ede98be708}}
+AppId={{f65b0231-f4b6-4171-acef-e9bf1ec5cacc}}
 AppPublisher=Cerlab srls
 UninstallDisplayIcon={app}\Gestionale.exe
 DefaultDirName={autopf}\Gestionale Preventivi
@@ -27,6 +27,12 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 ; La cartella di output di PyInstaller ora si chiama 'Gestionale'
 Source: "dist\Gestionale\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+Source: "version.txt"; DestDir: "{userappdata}\gestionalepreventivi"; Flags: ignoreversion
+
+; NUOVO: Modelli Excel per analisi e cashflow
+Source: "modello cashflow.xlsx"; DestDir: "{userappdata}\gestionalepreventivi\templates"; Flags: ignoreversion
+Source: "template_analisi.xlsx"; DestDir: "{userappdata}\gestionalepreventivi\templates"; Flags: ignoreversion
 
 ; La migrazione dei dati utente rimane identica, ed è corretta
 Source: "data\*"; DestDir: "{userappdata}\GestionalePreventivi"; Excludes: "users.json, comuni.json, preventivi, allegati, clienti, gh_token.txt"; Flags: recursesubdirs createallsubdirs uninsneveruninstall

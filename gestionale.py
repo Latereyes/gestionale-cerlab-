@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "1.10.1"  
+APP_VERSION = "1.10.2"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -81,6 +81,15 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 CLIENTS_DIR.mkdir(exist_ok=True)
 QUOTES_DIR.mkdir(exist_ok=True)
 ALLEGATI_DIR.mkdir(exist_ok=True)
+
+# Definiamo il percorso scrivibile in AppData
+APPDATA_DIR = os.path.join(os.environ.get('APPDATA', ''), 'gestionalepreventivi')
+TEMPLATES_DIR = os.path.join(APPDATA_DIR, 'templates')
+
+if not os.path.exists(TEMPLATES_DIR):
+    os.makedirs(TEMPLATES_DIR)
+USERS_FILE = os.path.join(APPDATA_DIR, 'users.json')
+VERSION_FILE = os.path.join(APPDATA_DIR, 'version.txt')
 
 
 # Il nome del file del token che leggeremo
@@ -534,7 +543,15 @@ def setup_first_run():
             print(f"INFO: 'comuni.json' copiato in {dest_comuni_file}")
         except Exception as e:
             print(f"ERRORE CRITICO: Impossibile copiare i dati iniziali. Dettagli: {e}")
-
+def get_installed_version():
+    """Legge la versione dal file in AppData."""
+    try:
+        if os.path.exists(VERSION_FILE):
+            with open(VERSION_FILE, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+    except Exception:
+        pass
+    return "1.0.0"
 def resource_path(relative_path):
     """ Ottiene il percorso assoluto della risorsa, funziona sia in dev che con PyInstaller """
     try:
@@ -549,19 +566,53 @@ try:
     with open(resource_path("data/comuni.json"), "r", encoding="utf-8") as f: GEO_DATA = json.load(f)
 except FileNotFoundError: GEO_DATA = []; print("ATTENZIONE: File 'data/comuni.json' non trovato.")
 def load_users():
-    if USERS_FILE.exists():
-        with USERS_FILE.open("r", encoding="utf-8") as f: return json.load(f)
-    return []
-# Carichiamo il changelog (se esiste)
+    """Carica gli utenti da AppData, creandolo se manca."""
+    if not os.path.exists(USERS_FILE):
+        # Se non esiste in AppData, prova a copiarlo dalla cartella 'data' del programma
+        legacy_path = resource_path("data/users.json")
+        if os.path.exists(legacy_path):
+            shutil.copy(legacy_path, USERS_FILE)
+        else:
+            return []
+    
+    try:
+        with open(USERS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+# Carichiamo il changelog (Sola lettura, resta nella cartella app)
 try:
     with open(resource_path("data/changelog.json"), "r", encoding="utf-8") as f:
         CHANGELOG_DATA = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
+    CHANGELOG_DATA = []
+
+# Carichiamo il changelog (Sola lettura, resta nella cartella app)
+try:
+    with open(resource_path("data/changelog.json"), "r", encoding="utf-8") as f:
+        CHANGELOG_DATA = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    CHANGELOG_DATA = []
 
     CHANGELOG_DATA = []
     print("ATTENZIONE: File 'data/changelog.json' non trovato o corrotto.")
 def save_users(users_data):
     with USERS_FILE.open("w", encoding="utf-8") as f: json.dump(users_data, f, ensure_ascii=False, indent=2)
+def get_template_path(filename):
+    """Restituisce il percorso assoluto del template in AppData."""
+    return os.path.join(TEMPLATES_DIR, filename)
+def check_templates():
+    """Verifica che i template esistano, altrimenti li ricopia dalla cartella app."""
+    for template in ["modello cashflow.xlsx", "template_analisi.xlsx"]:
+        dest = os.path.join(TEMPLATES_DIR, template)
+        if not os.path.exists(dest):
+            src = resource_path(os.path.join("data", template))
+            if os.path.exists(src):
+                shutil.copy(src, dest)
+
+# Richiama la funzione all'avvio
+check_templates()    
 def get_all_quotes(user_role=None, full_name=None): # Rinominato user_name -> username
     """Restituisce un elenco di preventivi, filtrato per venditore se richiesto."""
     quotes = []
@@ -899,6 +950,26 @@ def role_required(*roles):
             return f(*args, **kwargs)
         return decorated_function
     return wrapper
+@app.route('/ack_changelog', methods=['POST'])
+def ack_changelog():
+    if 'user' not in session:
+        return jsonify({'success': False, 'error': 'Non loggato'}), 401
+    
+    installed_ver = get_installed_version()
+    users = load_users()
+    updated = False
+    
+    for u in users:
+        if u['username'] == session['user']:
+            u['last_seen_version'] = installed_ver
+            updated = True
+            break
+    
+    if updated:
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(users, f, indent=4)
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': 'Utente non trovato'})
 
 @app.route("/changelog")
 @login_required
@@ -956,6 +1027,14 @@ def make_session_permanent_and_timed():
     app.permanent_session_lifetime = timedelta(hours=1)
     # Questa riga resetta il timer ad ogni azione dell'utente
     session.modified = True
+    if 'user' in session:
+        users = load_users()
+        user_data = next((u for u in users if u['username'] == session['user']), None)
+        installed_ver = get_installed_version()
+        
+        # Verifica usando la chiave last_seen_version
+        if user_data and user_data.get('last_seen_version') != installed_ver:
+            return redirect(url_for('show_changelog'))
 
 # ### NUOVE ROUTE PER GESTIONE PASSWORD ###
 @app.route("/cambia-password", methods=["GET", "POST"])

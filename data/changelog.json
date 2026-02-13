@@ -1,5 +1,14 @@
 
-[ 
+[ {
+        "version": "1.10.2",
+        "date": "2026-02-05",
+        "title": "Stabilità PDF, Fix Ordini e Logica Pagamenti",
+        "features": [
+      "CONFERME D'ORDINE: fix bug che non permetteva di allegare conferme d'ordine",
+      "MODALITA' CEO: fix bug che non permetteva download file excel analisi e cashflow",
+      "CHANGELOG: fix bug che non permetteva comparsa del changelog"
+    ]
+    },
   {
         "version": "1.10.1",
         "date": "2026-02-05",
