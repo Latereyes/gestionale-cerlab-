@@ -61,8 +61,9 @@
             Versione {{ update.version }}
             <span class="version-date">({{ update.date }})</span>
         </h2>
+        <p><strong>{{ update.title }}</strong></p>
         <ul>
-            {% for change in update.changes %}
+            {% for change in (update.features or update.changes) %}
             <li>{{ change }}</li>
             {% endfor %}
         </ul>

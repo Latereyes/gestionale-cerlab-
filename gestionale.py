@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "1.10.3"  
+APP_VERSION = "1.10.4"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -952,7 +952,7 @@ def role_required(*roles):
     return wrapper
 @app.route('/ack_changelog', methods=['POST'])
 def ack_changelog():
-    if 'user' not in session:
+    if 'user_id' not in session:
         return jsonify({'success': False, 'error': 'Non loggato'}), 401
     
     installed_ver = get_installed_version()
@@ -960,14 +960,13 @@ def ack_changelog():
     updated = False
     
     for u in users:
-        if u['username'] == session['user']:
+        if u['username'] == session['user_id']:
             u['last_seen_version'] = installed_ver
             updated = True
             break
     
     if updated:
-        with open(USERS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(users, f, indent=4)
+        save_users(users)
         return jsonify({'success': True})
     return jsonify({'success': False, 'error': 'Utente non trovato'})
 
@@ -1027,14 +1026,21 @@ def make_session_permanent_and_timed():
     app.permanent_session_lifetime = timedelta(hours=1)
     # Questa riga resetta il timer ad ogni azione dell'utente
     session.modified = True
-    if 'user' in session:
+    
+    # Lista di endpoint da escludere per evitare loop infiniti
+    excluded_endpoints = ['changelog', 'mark_changelog_as_seen', 'static', 'logout', 'login', 'ack_changelog']
+    
+    if 'user_id' in session and request.endpoint not in excluded_endpoints:
         users = load_users()
-        user_data = next((u for u in users if u['username'] == session['user']), None)
-        installed_ver = get_installed_version()
+        user_data = next((u for u in users if u['username'] == session['user_id']), None)
         
-        # Verifica usando la chiave last_seen_version
-        if user_data and user_data.get('last_seen_version') != installed_ver:
-            return redirect(url_for('show_changelog'))
+        if user_data:
+            last_seen = user_data.get('last_seen_version', '0.0.0')
+            # Verifica se ci sono novità reali nel JSON rispetto all'ultima vista dell'utente
+            has_new_updates = any(parse_version(entry['version']) > parse_version(last_seen) for entry in CHANGELOG_DATA)
+            
+            if has_new_updates:
+                return redirect(url_for('changelog'))
 
 # ### NUOVE ROUTE PER GESTIONE PASSWORD ###
 @app.route("/cambia-password", methods=["GET", "POST"])
