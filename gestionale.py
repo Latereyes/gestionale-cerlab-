@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "1.10.2"  
+APP_VERSION = "1.10.3"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -2924,8 +2924,8 @@ def export_cashflow_excel():
         next_month = today.replace(day=28) + datetime.timedelta(days=4)
         end_date = next_month - datetime.timedelta(days=next_month.day)
 
-    # Caricamento Template
-    template_filename = "modello cashflow.xlsx"
+    # Caricamento Template dal percorso AppData
+    template_filename = get_template_path("modello cashflow.xlsx")
     if not os.path.exists(template_filename):
         flash(f"File modello '{template_filename}' non trovato nel server!", "error")
         return redirect(url_for("dashboard_ceo"))
@@ -3093,8 +3093,8 @@ def export_excel_ceo():
     else:
         end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
 
-    # --- CARICAMENTO TEMPLATE ---
-    template_filename = "template_analisi.xlsx"
+    # --- CARICAMENTO TEMPLATE DAL PERCORSO APPDATA ---
+    template_filename = get_template_path("template_analisi.xlsx")
     if not os.path.exists(template_filename):
         flash(f"File modello '{template_filename}' non trovato nel server!", "error")
         return redirect(url_for("dashboard_ceo"))
