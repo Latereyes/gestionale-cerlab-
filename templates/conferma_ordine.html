@@ -769,6 +769,8 @@ FINE BLOCCO FOOTER AGGIORNATO
 </style>
 
 <script>
+    
+    
 document.addEventListener('DOMContentLoaded', () => {
     const itemsForm = document.getElementById('items-form');
     if (!itemsForm) return; 
@@ -776,6 +778,68 @@ document.addEventListener('DOMContentLoaded', () => {
     const quoteId = itemsForm.dataset.quoteId;
     let isEditing = false;
     let originalOrderNumber = null;
+
+    // --- LOGICA COPIA NEGLI APPUNTI (Con Fallback per HTTP) ---
+    function fallbackCopyTextToClipboard(text) {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed"; 
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            document.execCommand('copy');
+        } catch (err) {
+            console.error('Fallback: Impossibile copiare', err);
+        }
+        document.body.removeChild(textArea);
+    }
+
+    function copyToClipboard(text) {
+        if (!navigator.clipboard) {
+            fallbackCopyTextToClipboard(text);
+            return Promise.resolve();
+        }
+        return navigator.clipboard.writeText(text);
+    }
+
+    document.body.addEventListener('click', function(e) {
+        const copyBtn = e.target.closest('.copy-order-btn');
+        if (!copyBtn) return;
+
+        const targetSelector = copyBtn.dataset.targetTable;
+        const table = document.querySelector(targetSelector);
+        if (!table) return;
+
+        let textToCopy = "";
+        const rows = table.querySelectorAll('tbody tr');
+        
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 3) {
+                const articolo = cells[0].textContent.trim();
+                const um = cells[1].textContent.trim();
+                const qta = cells[2].textContent.trim();
+                textToCopy += `• ${articolo} - Q.tà: ${qta} ${um}\n`;
+            }
+        });
+
+        if (textToCopy) {
+            copyToClipboard(textToCopy).then(() => {
+                const icon = copyBtn.querySelector('i');
+                const originalClass = icon.className;
+                icon.className = 'fas fa-check';
+                copyBtn.style.backgroundColor = '#d1fae5'; // Verde chiaro
+                
+                setTimeout(() => {
+                    icon.className = originalClass;
+                    copyBtn.style.backgroundColor = '';
+                }, 2000);
+            });
+        }
+    });
 
     // --- MODALI ---
     const orderModal = document.getElementById('order-modal');
@@ -788,6 +852,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalTrasportoIncluso = document.getElementById('modal-trasporto-incluso');
     const modalImportoTrasporto = document.getElementById('modal-importo-trasporto');
     const labelImportoArticoli = document.getElementById('label-importo-articoli');
+
 
     // --- HELPER: GESTIONE CONFERMA LOCALE (Svincola/Elimina) ---
     // Questa funzione sostituisce il confirm() nativo e showConfirmation di base.html
@@ -979,6 +1044,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     itemCheckboxes.forEach(cb => cb.addEventListener('change', updateButtonState));
     updateButtonState();
+
+    
 
 });
 </script>
