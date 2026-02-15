@@ -26,7 +26,7 @@
     <div class="divider"><span>Oppure</span></div>
     
     <div class="new-client-action">
-        <a href="{{ url_for('crea_cliente') }}" class="btn">
+        <a href="{{ url_for('crea_cliente', action=action) }}" class="btn">
           <i class="fas fa-plus"></i> Crea una Nuova Anagrafica
         </a>
     </div>
@@ -127,6 +127,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (searchAction === 'new_quote') {
                             url = `/preventivo/nuovo/${client.id_cliente}`;
                             linkText = 'Seleziona e Crea Preventivo';
+                        } else if (searchAction === 'new_quote_edile') {
+                            url = `/preventivo-edile/nuovo/${client.id_cliente}`;
+                            linkText = 'Seleziona e Crea Edile';
                         } else {
                             url = `/cliente/dettaglio/${client.id_cliente}`;
                             linkText = 'Apri Archivio';

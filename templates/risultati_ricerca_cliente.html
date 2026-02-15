@@ -25,6 +25,10 @@
                                 <a href="{{ url_for('nuovo_preventivo', client_id=client.id_cliente) }}" class="btn primary">
                                     <i class="fas fa-plus"></i> Seleziona e Crea Preventivo
                                 </a>
+                            {% elif action == 'new_quote_edile' %}
+                                <a href="{{ url_for('nuovo_preventivo_edile', client_id=client.id_cliente) }}" class="btn primary">
+                                    <i class="fas fa-hard-hat"></i> Seleziona e Crea Edile
+                                </a>
                             {% else %}
                                 <a href="{{ url_for('dettaglio_cliente', client_id=client.id_cliente) }}" class="btn">
                                     <i class="fas fa-folder-open"></i> Apri Archivio

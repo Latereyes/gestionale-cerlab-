@@ -131,9 +131,15 @@
                                     <form action="{{ url_for('conferma_incasso', quote_id=p.numero) }}" method="POST">
                                         <input type="hidden" name="payment_id" value="{{ pagamento.id }}">
                                         <button type="submit" class="btn btn-outline btn-small-action" title="Conferma Incasso di questo pagamento">
-                                            <i class="fas fa-check-circle"></i> Conferma Incasso
+                                            <i class="fas fa-check-circle"></i> Conferma
                                         </button>
                                     </form>
+                                        <button type="button" 
+                                                class="btn btn-outline btn-small-action" 
+                                                title="Modifica Pagamento"
+                                                onclick="openEditPaymentModal('{{ pagamento.id }}', '{{ pagamento.data }}', '{{ pagamento.importo }}')">
+                                            <i class="fas fa-pen"></i> Modifica
+                                        </button>
                                 {% elif pagamento.is_rectifiable %}
                                     <form action="{{ url_for('rettifica_pagamento', quote_id=p.numero) }}" method="POST" class="rettifica-form">
                                         <input type="hidden" name="payment_id" value="{{ pagamento.id }}">
@@ -141,6 +147,8 @@
                                             <i class="fas fa-undo"></i> Rettifica
                                         </button>
                                     </form>
+                                    
+                                        </form>
                                 {% endif %}
                             {% endif %}
                         </td>
@@ -162,6 +170,30 @@
             <button type="button" id="confirm-modal-cancel" class="btn">Annulla</button>
             <button type="button" id="confirm-modal-ok" class="btn primary">Conferma</button>
         </div>
+    </div>
+</div>
+
+<div id="edit-payment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 400px;">
+        <h3><i class="fas fa-edit"></i> Modifica Pagamento</h3>
+        <form action="{{ url_for('modifica_pagamento_programmato', quote_id=p.numero) }}" method="POST" id="edit-payment-form">
+            <input type="hidden" name="payment_id" id="edit-payment-id">
+            
+            <div class="form-group" style="margin-top: 15px;">
+                <label>Data Prevista</label>
+                <input type="date" name="nuova_data" id="edit-payment-data" class="form-control" required style="width: 100%;">
+            </div>
+
+            <div class="form-group" style="margin-top: 15px;">
+                <label>Importo (€)</label>
+                <input type="text" name="nuovo_importo" id="edit-payment-importo" class="form-control" required style="width: 100%;">
+            </div>
+
+            <div class="modal-actions" style="margin-top: 25px; justify-content: flex-end; gap: 10px;">
+                <button type="button" class="btn" onclick="closeEditPaymentModal()">Annulla</button>
+                <button type="submit" class="btn primary">Salva Modifiche</button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -344,6 +376,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 });
+// FUNZIONI MODALE EDITING
+function openEditPaymentModal(id, data, importo) {
+    document.getElementById('edit-payment-id').value = id;
+    document.getElementById('edit-payment-data').value = data;
+    document.getElementById('edit-payment-importo').value = importo;
+    document.getElementById('edit-payment-modal').style.display = 'flex';
+}
+
+function closeEditPaymentModal() {
+    document.getElementById('edit-payment-modal').style.display = 'none';
+}
+
+// Chiudi modale cliccando fuori
+window.onclick = function(event) {
+    const editModal = document.getElementById('edit-payment-modal');
+    if (event.target == editModal) {
+        closeEditPaymentModal();
+    }
+}
 </script>
 
 {% endblock %}

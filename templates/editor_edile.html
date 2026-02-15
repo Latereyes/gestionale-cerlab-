@@ -1,0 +1,722 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1>Preventivo Edile <span class="quote-number">#{{ p.numero }}</span>
+    <div class="header-client-info">
+        <i class="fas fa-building"></i>
+        <span>{{ p.cliente }}</span>
+    </div>
+</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<form id="grid-form" method="post" action="{{ url_for('salva_righe_edili', quote_id=p.numero) }}" data-quote-id="{{ p.numero }}" enctype="multipart/form-data">
+    <input type="hidden" name="is_locked" value="{{ 'true' if p.is_locked else 'false' }}">
+
+    <div class="editor-container">
+
+        <!-- CARD DETTAGLI CLIENTE (Stile Editor Standard) -->
+        <details class="details-card">
+            <summary class="details-summary">
+                <i class="fas fa-chevron-down"></i>
+                <div class="summary-text">
+                    Dati Cliente: <strong>{{ p.cliente }}</strong> - Cantiere: <strong>{{ p.indirizzo }} {{ p.comune }}</strong>
+                </div>
+            </summary>
+            <div class="details-content">
+                <div class="form-grid">
+                    <div class="form-group"><label>Numero preventivo</label><input name="numero" value="{{ p.numero }}" readonly /></div>
+                    <div class="form-group"><label>Data</label><input type="date" name="data" value="{{ p.data }}" /></div>
+                    <div class="form-group"><label>Venditore</label><input name="venditore" value="{{ p.venditore }}" readonly /></div>
+                    <div class="form-group"><label>Riferimento/Oggetto</label><input name="referente" value="{{ p.referente }}" /></div>
+                    
+                    <div class="form-group"><label>Cliente</label><input name="cliente" value="{{ p.cliente }}" /></div>
+                    <div class="form-group"><label>Email</label><input name="email" value="{{ p.email }}" /></div>
+                    <div class="form-group"><label>Telefono</label><input name="telefono" value="{{ p.telefono }}" /></div>
+                    <div class="form-group full-width"><label>Indirizzo Cantiere</label><input name="indirizzo" value="{{ p.indirizzo }}" /></div>
+                </div>
+            </div>
+        </details>
+
+        <!-- CARD GRIGLIA LAVORAZIONI -->
+        <div class="card" id="tabella-righe">
+            <div class="card-header">
+                <h3>Computo Metrico / Lavorazioni</h3>
+                <div class="form-grid" style="grid-template-columns: repeat(2, 1fr); max-width: 400px;">
+                    <!-- Eventuali campi extra header specifici per edile possono andare qui -->
+                </div>
+            </div>
+            
+            <div class="table-wrap-vertical">
+                <div class="responsive-table">
+                    <!-- HEADER TABELLA -->
+                    <div class="rt-header">
+                        <div class="rt-col col-drag"></div>
+                        <div class="rt-col col-main">Descrizione Lavorazione</div>
+                        <div class="rt-col col-money text-right">Prezzo Vendita</div>
+                        <div class="rt-col col-iva text-center">IVA</div>
+                        <div class="rt-col col-costo text-right">Costi Vivi</div>
+                        <div class="rt-col col-attach">Allegato</div>
+                        <div class="rt-col col-totals text-right">Riepilogo</div>
+                        <div class="rt-col col-actions"></div>
+                    </div>
+
+                    <!-- BODY TABELLA (Sortable) -->
+                    <div class="rt-body" id="sortable-rows">
+                        {% for i, r in enumerate(p.righe_edili) %}
+                        <div class="rt-row item" data-index="{{ i }}">
+                            
+                            <!-- Maniglia Drag -->
+                            <div class="rt-col col-drag">
+                                <div class="drag-handle"><i class="fas fa-grip-vertical"></i></div>
+                                <span class="row-number">{{ i + 1 }}</span>
+                            </div>
+
+                            <!-- Descrizione -->
+                            <div class="rt-col col-main">
+                                <textarea name="r[{{i}}][articolo]" class="cell-input textarea-autosize" placeholder="Descrizione lavorazione...">{{ r.articolo }}</textarea>
+                            </div>
+
+                            <!-- Prezzo Vendita -->
+                            <div class="rt-col col-money">
+                                <label class="mobile-label">Vendita</label>
+                                <input type="text" name="r[{{i}}][prezzo_vendita]" value="{{ r.prezzo_vendita }}" 
+                                       class="cell-input right input-money-vendita calc-trigger" data-type="currency" placeholder="0.00€">
+                            </div>
+
+                            <div class="rt-col col-iva">
+                                <label class="mobile-label">IVA</label>
+                                <select name="r[{{i}}][iva_pct]" class="cell-input text-center calc-trigger">
+                                    <option value="4" {{ 'selected' if r.iva_pct == '4' }}>4%</option>
+                                    <option value="10" {{ 'selected' if r.iva_pct == '10' or not r.iva_pct }}>10%</option>
+                                    <option value="22" {{ 'selected' if r.iva_pct == '22' }}>22%</option>
+                                </select>
+                            </div>
+
+                            <!-- Costi Stimati -->
+                            <div class="rt-col col-costo">
+                                <label class="mobile-label">Costo Stimato</label>
+                                <input type="text" name="r[{{i}}][costo_stimato]" value="{{ r.costo_stimato }}" 
+                                       class="cell-input right input-money-costo calc-trigger" data-type="currency" placeholder="0.00€">
+                                <div class="row-margin-indicator" id="margin-{{i}}"></div>
+                            </div>
+
+                            <!-- Allegato -->
+                            <div class="rt-col col-attach">
+                                <input type="hidden" name="r[{{i}}][word_file]" value="{{ r.word_file or '' }}" id="input-file-{{i}}">
+                                <button type="button" class="btn-row-attach {{ 'has-file' if r.word_file }}" onclick="triggerUpload({{i}})">
+                                    <i class="fas {{ 'fa-file-word' if r.word_file else 'fa-paperclip' }}"></i>
+                                    <span id="label-file-{{i}}">{{ r.word_file if r.word_file else 'Allega' }}</span>
+                                </button>
+                            </div>
+
+                            <div class="rt-col col-totals">
+                                <div class="row-imponibile">
+                                    <label>Imponibile</label>
+                                    <span id="row-imp-{{i}}">0,00 €</span>
+                                </div>
+                                <div class="total-ivato">
+                                    <label>Tot. Ivato</label>
+                                    <span id="row-tot-{{i}}">0,00 €</span>
+                                </div>
+                            </div>
+
+                            <div class="rt-col col-actions">
+                                <button class="btn icon-btn delete-row-btn" type="button"
+                                    onclick="confirmDeleteRow({{i}})"
+                                    title="Elimina Riga">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                                <input type="checkbox" name="delete_row" value="{{i}}" id="delete-check-{{i}}" style="display:none;">
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card-footer">
+                <button class="btn btn-outline" type="submit" name="add_row" value="1">
+                    <i class="fas fa-plus"></i> Aggiungi Lavorazione
+                </button>
+            </div>
+        </div>
+
+        <!-- CARD DOCUMENTI E AZIONI -->
+        <div class="card">
+            <div class="card-header">
+                <h3>Documenti e Azioni</h3>
+            </div>
+            <div class="card-body spaced">
+                
+
+                <div class="actions-group">
+                    <h4>Azioni Rapide</h4>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+
+                        {% if p.stato not in ['Annullato', 'Chiuso'] %}
+                            <button type="submit" formaction="{{ url_for('annulla_preventivo', quote_id=p.numero) }}" 
+                                    class="btn danger" onclick="return confirm('Sicuro di voler annullare?')">
+                                <i class="fas fa-times"></i> Annulla Preventivo
+                            </button>
+                        {% endif %}
+                    </div>
+                </div>
+        </div>
+
+    </div>
+
+    <!-- STICKY FOOTER -->
+    <div class="sticky-footer">
+        
+        <div class="footer-status-controls">
+             <div class="status-display">
+                <label>Stato</label>
+                <div class="status-badge status-{{ p.stato | lower | replace(' ', '-') }}">{{ p.stato }}</div>
+            </div>
+
+            <div class="status-actions">
+                {% if p.stato == 'Bozza' %}
+                    <div><label>&nbsp;</label>
+                    <button type="button" class="btn" onclick="handleStateChangeAndSave(event, 'invia_preventivo')">
+                        <i class="fas fa-paper-plane"></i> Marca Inviato
+                    </button></div>
+                {% elif p.stato == 'Inviato' %}
+                    <div><label>&nbsp;</label>
+                    <button type="button" class="btn success" onclick="handleStateChangeAndSave(event, 'conferma_preventivo')">
+                        <i class="fas fa-check"></i> Marca Confermato
+                    </button></div>
+                {% elif p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
+                    <div>
+                        <label>Navigazione</label>
+                        <div class="action-buttons-grid">
+                            {{ workflow_navbar(p, 'preventivo') }}
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="totals">
+            <div>
+                <span class="muted">Totale Costi Vivi</span>
+                <strong id="sum-costi" style="color: #dc2626;">0,00 €</strong>
+            </div>
+            <div>
+                <span class="muted">Margine Operativo</span>
+                <strong id="sum-margine" style="color: #10b981;">0,00 €</strong>
+            </div>
+            <div class="grand-total">
+                <span class="muted">Totale Vendita (Imp)</span>
+                <strong id="sum-vendita">0,00 €</strong>
+            </div>
+        </div>
+
+        <div class="main-actions">
+            <button type="button" id="lock-btn" class="btn icon-btn large-icon" 
+                    title="Blocca/Sblocca modifiche">
+                {% if p.is_locked %}
+                  <i class="fas fa-lock"></i>
+                {% else %}
+                  <i class="fas fa-unlock-alt"></i>
+                {% endif %}
+            </button>
+
+            <div class="status-actions">
+                <div><label>&nbsp;</label>
+                <button id="save-quote-btn" class="btn primary btn-large" type="submit">
+                    <i class="fas fa-save"></i> Salva Modifiche
+                </button></div>
+            </div>
+        </div>
+    </div>
+
+</form>
+
+<!-- INPUT NASCOSTO PER UPLOAD -->
+<input type="file" id="global-uploader" style="display:none;" accept=".doc,.docx,.pdf,.jpg,.png">
+
+<style>
+
+
+
+
+  .sticky-footer { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #e2e8f0; padding: 12px 40px; box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.05); z-index: 1000; }
+  .status-actions { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+  .status-badges { display: flex; gap: 8px; align-items: center; }
+  .totals { display: flex; align-items: center; gap: 32px; }
+
+
+
+
+    .main-actions { display: flex; gap: 12px; align-items: center; }
+.btn.icon-btn.large-icon { font-size: 20px; padding: 10px; width: 48px; height: 48px; background: #f1f5f9; border: 1px solid #e2e8f0; }
+
+.row-calc-details { font-size: 10px; color: #64748b; margin-top: 4px; line-height: 1.2; }
+.row-calc-details strong { color: #0f172a; }
+
+.col-money { width: 160px; } /* Allargata leggermente per i dettagli */
+/* --- STILI COPIATI E ADATTATI DA EDITOR.HTML --- */
+body { padding-bottom: 90px; }
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+
+/* Dettagli Collapsible */
+.details-card { border: 1px solid #e2e8f0; border-radius: 12px; background-color: #fff; margin-bottom: 24px; overflow: hidden; }
+.details-summary { display: flex; align-items: center; gap: 12px; padding: 16px 24px; font-size: 16px; font-weight: 600; cursor: pointer; list-style: none; }
+.details-summary::-webkit-details-marker { display: none; }
+.details-summary .fa-chevron-down { transition: transform 0.2s; }
+.details-card[open] > .details-summary .fa-chevron-down { transform: rotate(180deg); }
+.details-content { padding: 24px; border-top: 1px solid #e2e8f0; }
+
+.form-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.form-group { display: flex; flex-direction: column; }
+.form-group label { font-size: 12px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; font-weight: 600; }
+.form-group input { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; font-size: 14px; }
+.form-group.full-width { grid-column: span 2; }
+
+/* Card Generale */
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.card-body.spaced { display: flex; gap: 32px; padding: 24px; flex-wrap: wrap; }
+.card-footer { padding: 16px 24px; background-color: #f8f9fa; border-top: 1px solid #e2e8f0; }
+
+/* Tabella Responsive */
+.responsive-table { display: flex; flex-direction: column; }
+.rt-header { display: flex; font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600; padding: 8px 16px; background-color: #f8f9fa; border-bottom: 1px solid #e2e8f0; }
+.rt-row { display: flex; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid #e2e8f0; background: #fff; gap: 10px; }
+.rt-row:hover { background-color: #fcfcfc; }
+.rt-col { display: flex; flex-direction: column; justify-content: center; }
+
+/* Colonne Specifiche Edile */
+.col-drag { width: 30px; align-items: center; color: #94a3b8; padding-top: 10px; }
+.col-main { flex: 1; } /* La descrizione prende tutto lo spazio */
+.col-money { width: 140px; }
+.col-iva { width: 70px; }
+.col-costo { width: 140px; }
+.col-attach { width: 160px; }
+.col-actions { width: 50px; align-items: center; padding-top: 5px; }
+
+/* Input Styles */
+.cell-input { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; width: 100%; font-size: 14px; transition: border-color 0.2s; }
+.cell-input:focus { border-color: #6366f1; outline: none; }
+.cell-input.right { text-align: right; }
+.cell-input.text-center { text-align: center; }
+
+.textarea-autosize { min-height: 38px; resize: vertical; font-family: inherit; }
+.input-money-vendita { font-weight: 600; color: #0f172a; }
+.input-money-costo { font-weight: 600; color: #b91c1c; background: #fef2f2; }
+
+/* Pulsante Allegato */
+.btn-row-attach { width: 100%; padding: 6px; font-size: 12px; border: 1px dashed #cbd5e1; border-radius: 6px; background: #f8fafc; color: #64748b; cursor: pointer; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-row-attach:hover { border-color: #0d6efd; color: #0d6efd; background: #f0f7ff; }
+.btn-row-attach.has-file { background: #dcfce7; border: 1px solid #bbf7d0; color: #166534; }
+
+/* Margine Indicatore */
+.row-margin-indicator { font-size: 10px; text-align: right; margin-top: 4px; font-weight: 700; min-height: 15px; }
+
+/* Sticky Footer */
+.sticky-footer { position: fixed; bottom: 0; left: 0; right: 0; background: white; border-top: 1px solid #e2e8f0; padding: 12px 24px; box-shadow: 0 -4px 6px -1px rgba(0,0,0,0.1); z-index: 100; display: flex; justify-content: space-between; align-items: center; }
+.footer-status-controls { display: flex; gap: 16px; align-items: center; }
+.status-display { text-align: center; }
+.status-display label { font-size: 10px; color: #64748b; text-transform: uppercase; display: block; margin-bottom: 2px; }
+.totals { display: flex; gap: 24px; text-align: right; }
+.totals div { display: flex; flex-direction: column; }
+.totals span { font-size: 11px; text-transform: uppercase; }
+.totals strong { font-size: 18px; }
+.grand-total strong { font-size: 22px; color: #0f172a; }
+
+/* Status Badges */
+.status-badge { font-size: 13px; font-weight: 600; color: #fff; padding: 4px 12px; border-radius: 99px; text-transform: capitalize; }
+.status-bozza { background-color: #64748b; }
+.status-inviato { background-color: #0ea5e9; }
+.status-confermato { background-color: #22c55e; }
+.status-annullato { background-color: #ef4444; }
+
+/* Pulsanti */
+.btn { padding: 8px 16px; border-radius: 6px; border: 1px solid transparent; font-weight: 500; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; text-decoration: none; }
+.btn.primary { background-color: #4f46e5; color: white; }
+.btn.primary:hover { background-color: #4338ca; }
+.btn.success { background-color: #22c55e; color: white; }
+.btn.danger { background-color: #ef4444; color: white; }
+.btn.btn-outline { border-color: #cbd5e1; background: white; color: #475569; }
+.btn.btn-outline:hover { background: #f8fafc; border-color: #94a3b8; }
+.btn.icon-btn { padding: 8px; color: #64748b; background: transparent; border: 1px solid transparent; }
+.btn.icon-btn:hover { color: #ef4444; background: #fef2f2; }
+.mobile-label { display: none; }
+
+/* Responsive Mobile */
+@media (max-width: 992px) {
+    .rt-header { display: none; }
+    .rt-row { flex-wrap: wrap; position: relative; padding-bottom: 16px; }
+    .col-drag { position: absolute; top: 10px; left: 10px; }
+    .row-number { display: none; }
+    .col-main { width: 100%; margin-left: 30px; margin-bottom: 10px; }
+    .col-money, .col-iva, .col-costo, .col-attach { width: 48%; margin-bottom: 10px; }
+    .col-actions { position: absolute; top: 10px; right: 10px; width: auto; }
+    .mobile-label { display: block; font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 2px; }
+    .sticky-footer { flex-direction: column; gap: 12px; align-items: stretch; }
+    .totals { justify-content: space-between; }
+}
+/* ... dopo .col-attach ... */
+.col-totals { width: 150px; text-align: right; background-color: #f8fafc; padding: 12px; border-radius: 8px; }
+.col-totals label { font-size: 10px; color: #64748b; text-transform: uppercase; display: block; }
+.col-totals span { font-weight: 600; font-size: 14px; display: block; }
+.col-totals .total-ivato { color: #4f46e5; font-size: 15px; border-top: 1px solid #e2e8f0; margin-top: 4px; padding-top: 4px; }
+
+.main-actions { display: flex; gap: 12px; align-items: center; }
+.icon-btn.large-icon { font-size: 20px; padding: 10px; width: 48px; height: 48px; background: #f1f5f9; border: 1px solid #e2e8f0; }
+/* ... prima di @media ... */
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
+
+
+<script>
+    // --- SISTEMA DI BLOCCO VISIVO SPECIFICO PER EDILE ---
+
+    function toggleEditorLock(shouldBeLocked) {
+        const form = document.getElementById('grid-form');
+        if (shouldBeLocked) form.classList.add('is-locked');
+        else form.classList.remove('is-locked');
+
+        // Disabilita input per impedire modifiche, MA ESCLUDE la casella password
+        const inputs = document.querySelectorAll('#grid-form input, #grid-form select, #grid-form textarea');
+        inputs.forEach(el => {
+            // Aggiunta eccezione per unlock-password-input
+            if (el.id !== 'lock-btn' && el.name !== 'is_locked' && el.id !== 'unlock-password-input') {
+                el.disabled = shouldBeLocked;
+            }
+        });
+
+        // Nasconde controlli riga e drag
+        document.querySelectorAll('.drag-handle, .delete-row-btn, .btn-outline, .btn-row-attach').forEach(el => {
+            el.style.display = shouldBeLocked ? 'none' : 'flex';
+        });
+
+        // Gestione bottone salva
+        const saveBtn = document.getElementById('save-quote-btn');
+        if (saveBtn) {
+            saveBtn.disabled = shouldBeLocked;
+            saveBtn.style.opacity = shouldBeLocked ? '0.5' : '1';
+        }
+    }
+
+    // Inizializzazione basata sullo stato del file JSON
+    document.addEventListener('DOMContentLoaded', () => {
+        const isLockedInput = document.querySelector('input[name="is_locked"]');
+        const initiallyLocked = (isLockedInput && isLockedInput.value === 'true');
+        
+        toggleEditorLock(initiallyLocked);
+    });
+
+    // --- FUNZIONI DI UTILITÀ ---
+    function normalizeNumberString(raw) {
+        if (raw == null) return ""; 
+        let s = String(raw).trim().replace(/[ €%]/g, ""); 
+        const lastDot = s.lastIndexOf("."); 
+        const lastComma = s.lastIndexOf(","); 
+        if (lastDot !== -1 && lastComma !== -1) { 
+            if (lastComma > lastDot) s = s.replace(/\./g, "").replace(/,/g, "."); 
+            else s = s.replace(/,/g, ""); 
+        } else if (lastComma !== -1) { 
+            s = s.replace(/,/g, "."); 
+        } 
+        return s; 
+    }
+    function parseNum(str) { 
+        const s = normalizeNumberString(str); 
+        const n = parseFloat(s); 
+        return isNaN(n) ? 0 : n; 
+    }
+    function fmtMoney(n) { 
+        return Number(n).toLocaleString('it-IT', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " €"; 
+    }
+
+
+    // --- CALCOLO TOTALI E DETTAGLI RIGA ---
+    // --- CALCOLO TOTALI EDILI ---
+function updateTotalsEdile() {
+    let totalVendita = 0;
+    let totalCosti = 0;
+
+    document.querySelectorAll('.rt-row.item').forEach(row => {
+        const index = row.dataset.index;
+        const vendita = parseNum(row.querySelector(`[name="r[${index}][prezzo_vendita]"]`).value);
+        const costo = parseNum(row.querySelector(`[name="r[${index}][costo_stimato]"]`).value);
+        const ivaPct = parseNum(row.querySelector(`[name="r[${index}][iva_pct]"]`).value);
+        
+        totalVendita += vendita;
+        totalCosti += costo;
+
+        // Calcoli riga
+        const valoreIva = vendita * (ivaPct / 100);
+        const totaleIvato = vendita + valoreIva;
+        
+        document.getElementById(`row-imp-${index}`).textContent = fmtMoney(vendita);
+        document.getElementById(`row-tot-${index}`).textContent = fmtMoney(totaleIvato);
+
+        const margine = vendita - costo;
+        const marginEl = document.getElementById(`margin-${index}`);
+        if(marginEl) {
+            marginEl.textContent = (margine >= 0 ? '+' : '') + fmtMoney(margine);
+            marginEl.style.color = margine < 0 ? '#dc2626' : '#10b981';
+        }
+    });
+
+        const totaleMargine = totalVendita - totalCosti;
+
+        // Aggiorna Footer
+        document.getElementById('sum-vendita').textContent = fmtMoney(totalVendita);
+        document.getElementById('sum-costi').textContent = fmtMoney(totalCosti);
+        
+        const elMargine = document.getElementById('sum-margine');
+        elMargine.textContent = fmtMoney(totaleMargine);
+        elMargine.style.color = totaleMargine < 0 ? '#dc2626' : '#10b981';
+    }
+
+
+    // Inizializzazione Lock nel DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', () => {
+        const lockBtn = document.getElementById('lock-btn');
+        const isLockedInput = document.querySelector('input[name="is_locked"]');
+        const currentStato = "{{ p.stato }}";
+
+        // Se lo stato non è Bozza, blocca tutto a prescindere dal tasto manuale
+        const initiallyLocked = (isLockedInput.value === 'true') || (currentStato !== 'Bozza');
+        toggleEditorLock(initiallyLocked);
+    });
+
+    // Funzione Anteprima
+    window.handlePreview = function(ev) {
+        ev.preventDefault();
+        // Simula il click sul tasto salva per essere sicuri dei dati, poi apre anteprima
+        const form = document.getElementById('grid-form');
+        const formData = new FormData(form);
+        fetch(form.action, { method: 'POST', body: formData })
+            .then(() => {
+                window.open("{{ url_for('stampa_html', quote_id=p.numero) }}", "_blank");
+            });
+    };
+
+// --- Intorno alla riga 267 (Sostituisci interamente la funzione triggerUpload) ---
+
+async function triggerUpload(index) {
+    if (document.querySelector('[name="is_locked"]').value === 'true') return;
+    
+    const uploader = document.getElementById('global-uploader');
+    uploader.onchange = async () => {
+        if (!uploader.files[0]) return;
+        
+        const formData = new FormData();
+        formData.append('file', uploader.files[0]);
+        // Usiamo la nuova rotta specifica per le righe
+        const uploadUrl = `/preventivo/{{p.numero}}/upload-riga-edile`;
+
+        const btn = document.querySelector(`.rt-row[data-index="${index}"] .btn-row-attach`);
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>...';
+        
+        try {
+            const res = await fetch(uploadUrl, { 
+                method: 'POST', 
+                body: formData,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            const data = await res.json();
+            
+            if(data.success) {
+                // Aggiorna l'input nascosto che verrà inviato con "Salva Modifiche"
+                const hiddenInput = document.getElementById(`input-file-${index}`);
+                if (hiddenInput) {
+                    hiddenInput.value = data.filename;
+                }
+                
+                // Aggiorna l'interfaccia
+                const label = document.getElementById(`label-file-${index}`);
+                if (label) label.textContent = data.filename;
+                
+                btn.classList.add('has-file');
+                btn.innerHTML = `<i class="fas fa-file-word"></i> <span>${data.filename}</span>`;
+                
+                // Opzionale: updateTotals per rinfrescare lo stato visivo
+                if(typeof updateTotalsEdile === 'function') updateTotalsEdile();
+            } else {
+                throw new Error(data.error || "Errore caricamento");
+            }
+        } catch (e) { 
+            alert("Errore caricamento: " + e.message); 
+            btn.innerHTML = originalHtml;
+        }
+    };
+    uploader.click();
+}
+
+
+
+    // --- ELIMINAZIONE RIGA ---
+    function confirmDeleteRow(index) {
+        if(confirm("Eliminare questa riga?")) {
+            // Checkbox nascosto per il backend (se usi form submit classico)
+            // Oppure submit diretto:
+            const form = document.getElementById('grid-form');
+            // Creiamo un input hidden temporaneo per simulare il delete_row
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'delete_row';
+            input.value = index;
+            form.appendChild(input);
+            form.submit();
+        }
+    }
+
+    // --- CAMBIO STATO SMART (Preso da Editor Standard) ---
+    function handleStateChangeAndSave(event, targetActionUrlName) {
+        event.preventDefault();
+        const form = document.getElementById('grid-form');
+        const btn = event.currentTarget;
+        const originalHtml = btn.innerHTML;
+        
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Attendi...';
+        btn.disabled = true;
+
+        const formData = new FormData(form);
+        formData.append('is_ajax', '1');
+        const quoteId = form.dataset.quoteId;
+
+        // 1. Salva prima i dati
+        fetch(form.action, { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(saveData => {
+            if (!saveData.success) throw new Error('Salvataggio fallito');
+            
+            btn.innerHTML = '<i class="fas fa-cog fa-spin"></i> Cambio Stato...';
+            // Costruisce URL target (es. /preventivo/123/invia)
+            const targetUrl = "{{ url_for('dashboard') }}" + `preventivo/${quoteId}/${targetActionUrlName.replace('_preventivo', '')}`;
+            return fetch(targetUrl, { method: 'POST' });
+        })
+        .then(res => {
+            if(!res.ok) throw new Error('Errore cambio stato');
+            // Se inviato, genera PDF (opzionale, qui ricarichiamo e basta per semplicità edile)
+            window.location.reload();
+        })
+        .catch(err => {
+            alert("Errore: " + err.message);
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        });
+    }
+    
+    // Esponi per onclick
+    window.handleStateChangeAndSave = handleStateChangeAndSave;
+
+    // --- INIZIALIZZAZIONE ---
+    document.addEventListener('DOMContentLoaded', () => {
+        
+        // 1. SortableJS
+        const el = document.getElementById('sortable-rows');
+        if(el) {
+            new Sortable(el, {
+                handle: '.drag-handle',
+                animation: 150,
+                onEnd: function() {
+                    // Ricalcola indici r[X] se necessario per il backend,
+                    // oppure lascia che il backend legga l'ordine di arrivo.
+                    // Qui per semplicità aggiorniamo solo visivamente i numeri riga
+                    document.querySelectorAll('.row-number').forEach((span, idx) => {
+                        span.textContent = idx + 1;
+                    });
+                    
+                    // IMPORTANTE: Aggiornare gli attributi 'name' per il submit corretto
+                    document.querySelectorAll('.rt-row.item').forEach((row, idx) => {
+                        row.dataset.index = idx; // Aggiorna dataset
+                        row.querySelectorAll('[name]').forEach(input => {
+                            const name = input.getAttribute('name');
+                            if(name && name.includes('r[')) {
+                                input.setAttribute('name', name.replace(/r\[\d+\]/, `r[${idx}]`));
+                            }
+                        });
+                        // Aggiorna ID univoci per upload e margini
+                        const fileLabel = row.querySelector('[id^="label-file-"]');
+                        if(fileLabel) fileLabel.id = `label-file-${idx}`;
+                        
+                        const fileInput = row.querySelector('[id^="input-file-"]');
+                        if(fileInput) fileInput.id = `input-file-${idx}`;
+
+                        const btnAttach = row.querySelector('.btn-row-attach');
+                        if(btnAttach) btnAttach.setAttribute('onclick', `triggerUpload(${idx})`);
+                        
+                        const marginInd = row.querySelector('.row-margin-indicator');
+                        if(marginInd) marginInd.id = `margin-${idx}`;
+
+                        const btnDel = row.querySelector('.delete-row-btn');
+                        if(btnDel) btnDel.setAttribute('onclick', `confirmDeleteRow(${idx})`);
+                    });
+                }
+            });
+        }
+
+        // 2. Autosize Textarea
+        const tx = document.querySelectorAll('textarea');
+        for (let i = 0; i < tx.length; i++) {
+            tx[i].setAttribute('style', 'height:' + (tx[i].scrollHeight) + 'px;overflow-y:hidden;');
+            tx[i].addEventListener("input", function() {
+                this.style.height = 'auto';
+                this.style.height = (this.scrollHeight) + 'px';
+            }, false);
+        }
+
+        // 3. Listener Calcoli
+        document.getElementById('sortable-rows').addEventListener('input', (e) => {
+            if (e.target.classList.contains('calc-trigger')) updateTotalsEdile();
+        });
+
+        // 4. Calcolo Iniziale
+        updateTotalsEdile();
+    });
+    // Funzione per rimuovere l'allegato dalla riga
+    function removeEdileFile(btn) {
+        if (!confirm("Vuoi rimuovere l'allegato? La modifica sarà effettiva dopo il salvataggio.")) return;
+        
+        const cell = btn.closest('td');
+        const rowIndex = btn.closest('tr').dataset.index || 0; // Se non hai data-index, usa l'indice del loop
+        
+        // Sostituisce il contenuto della cella con l'input per il nuovo upload
+        cell.innerHTML = `
+            <label class="btn icon-btn file-upload-label" title="Allega File Word/PDF">
+                <i class="fas fa-paperclip"></i>
+                <input type="file" name="r[${rowIndex}][word_file]" class="hidden-file-input" accept=".doc,.docx,.pdf" onchange="this.parentElement.style.color='#198754'">
+            </label>
+            <input type="hidden" name="r[${rowIndex}][word_file]" value="">
+        `;
+    }    
+    // Hook per PDF (se presente in base.html)
+    window.handlePdf = function(ev) {
+        ev.preventDefault();
+        const btn = ev.currentTarget;
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Genero...';
+        
+        // Logica semplificata: chiama task PDF e ricarica
+        fetch(`/generate-pdf-task/{{p.numero}}`)
+            .then(res => res.json())
+            .then(data => {
+                if(data.pdf_url) window.open(data.pdf_url, '_blank');
+                setTimeout(() => window.location.reload(), 1000);
+            })
+            .catch(e => {
+                alert("Errore PDF");
+                btn.innerHTML = original;
+            });
+    };
+
+</script>
+{% endblock %}
+{% block footer_nav %}
+<footer class="sticky-footer">
+    {{ workflow_navbar(p, 'preventivo') }}
+</footer>
+{% endblock %}

@@ -3,6 +3,13 @@
 {% block page_title %}
 <h1></i> La tua Dashboard</h1>
 {% endblock %}
+{% block extra_fab %}
+    <a href="{{ url_for('allert_page') }}" class="fab-btn alert-fab" title="Centro Notifiche">
+        <i class="fas fa-exclamation"></i>
+        <span class="fab-label">ALERT</span>
+    </a>
+{% endblock %}
+
 
 {% block body %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
@@ -94,6 +101,24 @@
 
 <div class="dashboard-container">
 
+<div class="tagbox-container">
+      <div class="tagbox-header">
+          <span><i class="fas fa-comment-alt"></i> TAG BOARD</span>
+          <div class="tagbox-hints">
+              <small>Usa @ per taggare un collega</small>
+              <small>Usa # per richiamare un cliente o un preventivo</small>
+          </div>
+      </div>
+      <div class="tagbox-content" id="tagboxContent">
+      </div>
+      <div class="tagbox-input-area">
+          <input type="text" id="tagboxInput" placeholder="Scrivi un messaggio veloce..." autocomplete="off">
+          <div id="mentionSuggestions" class="mention-list"></div>
+          <button id="sendShoutBtn"><i class="fas fa-paper-plane"></i></button>
+      </div>
+  </div>
+  </div>
+
   <!-- Contenitore per i menu circolari -->
   <div class="circular-layout-wrapper">
     <!-- Menu Principale -->
@@ -104,13 +129,21 @@
         <span>Preventivi Cliente</span>
       </a>
 
+
       <!-- Pulsanti Satellite -->
-      <div class="item" style="--i:0;">
+        <div class="item" style="--i:0;">
         {% if session.user_role != 'segreteria' %}
-        <a href="{{ url_for('cerca_cliente', action='new_quote') }}" class="item-link black-slice" title="Crea un nuovo preventivo">
-          <i class="fas fa-plus"></i>
-          <span>Nuovo Preventivo</span>
-        </a>
+            {% if session.user_role in ['amministratore', 'ceo'] %}
+            <a href="javascript:void(0);" onclick="openQuoteTypeModal()" class="item-link black-slice" title="Crea un nuovo preventivo">
+              <i class="fas fa-plus"></i>
+              <span>Nuovo Preventivo</span>
+            </a>
+            {% else %}
+            <a href="{{ url_for('cerca_cliente', action='new_quote') }}" class="item-link black-slice" title="Crea un nuovo preventivo">
+              <i class="fas fa-plus"></i>
+              <span>Nuovo Preventivo</span>
+            </a>
+            {% endif %}
         {% endif %}
       </div>
       <div class="item" style="--i:1;">
@@ -138,6 +171,7 @@
         </a>
       </div>
     </div>
+      
 
     <!-- Menu Azioni Speciali (CEO/Admin) -->
     {% if session.user_role in ['amministratore', 'ceo'] %}
@@ -170,105 +204,19 @@
     </div>
     {% endif %}
   </div>
-
-  <!-- 4. Tabella Preventivi Attivi -->
-  {% if session.user_role == 'venditore' %}
-    <div class="card">
-        <div class="card-header">
-          <h3>I tuoi Preventivi Attivi</h3>
-        </div>
-        <div class="card-body">
-          <div class="table-wrap">
-            <table>
-              {{ render_table_header() }} <tbody>
-                {% for p in my_quotes %}
-                   {{ render_quote_row(p) }} {% else %}
-                   {{ render_empty_state("venditore") }} {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
-    </div>
-
-{% elif session.user_role in ['amministratore', 'ceo'] %}
-    {% if grouped_quotes %}
-    <div class="card">
-        <div class="card-header">
-          <h3>Preventivi Attivi Venditori</h3>
-        </div>
-        <div class="card-body">
-          {% for venditore, quotes_list in grouped_quotes.items() | sort %}
-              <h4 class="venditore-group-title">{{ venditore }}</h4>
-              <div class="table-wrap indented-table">
-                <table>
-                  {{ render_table_header() }}
-                  <tbody>
-                       {% for p in quotes_list %}
-                           {{ render_quote_row(p) }}
-                       {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-          {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    <div class="card">
-        <div class="card-header">
-          <h3>I tuoi Preventivi Attivi</h3>
-        </div>
-        <div class="card-body">
-          <div class="table-wrap">
-            <table>
-              {{ render_table_header() }}
-              <tbody>
-                {% for p in my_quotes %}
-                   {{ render_quote_row(p) }}
-                {% else %}
-                   {{ render_empty_state("admin") }}
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
-    </div>
-    
-{% elif session.user_role == 'segreteria' %}
-    <div class="card">
-        <div class="card-header">
-          <h3>Preventivi Attivi (Tutti i Venditori)</h3>
-        </div>
-        <div class="card-body">
-          {% for venditore, quotes_list in grouped_quotes.items() | sort %}
-              <h4 class="venditore-group-title">{{ venditore }}</h4>
-              <div class="table-wrap indented-table">
-                <table>
-                   {{ render_table_header() }}
-                   <tbody>
-                       {% for p in quotes_list %}
-                           {{ render_quote_row(p) }}
-                       {% endfor %}
-                   </tbody>
-                </table>
-              </div>
-          {% else %}
-              <div class="empty-state">
-                  <i class="fas fa-file-signature"></i>
-                  <h4>Nessun preventivo attivo</h4>
-                  <p>Non ci sono preventivi in lavorazione al momento.</p>
-                </div>
-          {% endfor %}
-        </div>
-    </div>
-{% endif %}
+  
 
   <!-- 5. Card Archivio Clienti -->
-  <div class="card archive-card">
-    <p>Cerchi un preventivo chiuso o annullato?</p>
-    <a href="{{ url_for('archivio_globale') }}" class="btn with-icon">
-      <i class="fas fa-archive"></i> Vai all'Archivio Clienti
-    </a>
+<div class="card archive-card">
+    <p>Gestione documentale e anagrafica clienti</p>
+    <div style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
+        <a href="{{ url_for('anagrafica_clienti') }}" class="btn with-icon" style="background-color: #0d6efd;">
+            <i class="fas fa-address-card"></i> Anagrafica Clienti
+        </a>
+        <a href="{{ url_for('archivio_globale') }}" class="btn with-icon">
+            <i class="fas fa-archive"></i>Archivio Preventivi
+        </a>
+    </div>
   </div>
 <div id="confirmModalOverlay" class="modal-overlay">
   <div id="confirmModal" class="modal-content">
@@ -282,6 +230,27 @@
     </div>
   </div>
 </div>
+<div id="quoteTypeModalOverlay" class="modal-overlay">
+  <div class="modal-content" style="max-width: 400px; text-align: center;">
+    <h3><i class="fas fa-hammer"></i> Tipo di Preventivo</h3>
+    <p>Scegli il flusso di lavoro desiderato:</p>
+    <div class="modal-actions" style="justify-content: center; flex-direction: column; gap: 10px;">
+      <a href="{{ url_for('cerca_cliente', action='new_quote_edile') }}" class="btn primary" style="width: 100%; justify-content: center;">
+        <i class="fas fa-hard-hat"></i> Preventivo EDILE
+      </a>
+      <a href="{{ url_for('cerca_cliente', action='new_quote') }}" class="btn" style="width: 100%; justify-content: center; border: 1px solid #0d6efd; color: #0d6efd;">
+        <i class="fas fa-truck-loading"></i> Solo FORNITURA
+      </a>
+      <button type="button" onclick="closeQuoteTypeModal()" class="btn secondary" style="width: 100%; margin-top: 10px;">Annulla</button>
+    </div>
+  </div>
+</div>
+
+<script>
+    window.openQuoteTypeModal = () => { document.getElementById('quoteTypeModalOverlay').classList.add('visible'); };
+    window.closeQuoteTypeModal = () => { document.getElementById('quoteTypeModalOverlay').classList.remove('visible'); };
+</script>
+
 <style>
 /* --- Stili per Tabelle Raggruppate --- */
 .venditore-group-title {
@@ -525,89 +494,155 @@ th[data-sortable].sort-asc .sort-arrow,
 th[data-sortable].sort-desc .sort-arrow {
     color: #334155; /* Colore scuro (attivo) */
 }  
+
+
+
+/* Ottimizzazione Mobile */
+@media (max-width: 768px) {
+    .floating-action-group {
+        bottom: 20px;
+        right: 20px;
+    }
+    .fab-btn {
+        width: 55px;
+        height: 55px;
+        font-size: 20px;
+    }
+}
+
+  /* STILI PER TAGBOX */
+  .tagbox-container {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    margin-bottom: 30px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+.tagbox-header {
+    background: #f8fafc;
+    padding: 8px 15px; /* Leggermente ridotto per compattezza */
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 700;
+    font-size: 12px;
+}
+
+/* NUOVA CLASSE PER AVVICINARE LE ISTRUZIONI */
+.tagbox-hints {
+    display: flex;
+    flex-direction: column; /* Mette le scritte una sotto l'altra */
+    align-items: flex-end;  /* Le allinea a destra */
+    gap: 0px;               /* DISTANZA TRA LE RIGHE: 0px per la massima vicinanza */
+    line-height: 1.1;       /* Riduce lo spazio verticale del testo */
+}
+
+.tagbox-hints small {
+    color: #64748b;
+    font-weight: 500;
+}
+.tagbox-content {
+    height: 180px;
+    overflow-y: auto;
+    padding: 10px;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.shout { padding: 4px 8px; border-radius: 6px; position: relative; }
+.shout.pinned { background: #fffbeb; border-left: 4px solid #f59e0b; }
+.shout-user { font-weight: 800; color: #0d6efd; margin-right: 5px; }
+.shout-time { font-size: 10px; color: #94a3b8; }
+.shout-mention { background: #dbeafe; color: #1e40af; padding: 0 4px; border-radius: 4px; font-weight: 600; }
+.pin-btn { cursor: pointer; color: #cbd5e1; float: right; font-size: 11px; }
+.pin-btn.active { color: #f59e0b; }
+
+.tagbox-input-area {
+    display: flex;
+    padding: 8px;
+    background: #f1f5f9;
+    gap: 10px;
+}
+.tagbox-input-area input {
+    flex: 1;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+}
+/* SUGGERIMENTI MENZIONI @ */
+  .tagbox-input-area { position: relative; }
+  .mention-list {
+      position: absolute;
+      bottom: 100%;
+      left: 8px;
+      right: 8px;
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+      display: none;
+      max-height: 150px;
+      overflow-y: auto;
+      z-index: 10001;
+  }
+  .mention-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex;
+      justify-content: space-between;
+  }
+  .mention-item:hover { background: #f1f5f9; color: #0d6efd; }
+  .mention-item .tag-sigla { font-size: 9px; opacity: 0.6; }
+  .mention-item i { margin-right: 8px; width: 14px; text-align: center; }
+  .shout-link { color: #0d6efd; font-weight: 600; text-decoration: underline; cursor: pointer; }
+  .shout-link:hover { color: #004dc0; }
+
+
 </style>
 
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-  const openBtn = document.getElementById('openConfirmModalBtn');
-  const modalOverlay = document.getElementById('confirmModalOverlay');
-  const cancelBtn = document.getElementById('modalCancel');
+document.addEventListener('DOMContentLoaded', () => {
+    // --- Riferimenti solo alla Tag Box ---
+    const shoutContent = document.getElementById('tagboxContent');
+    const shoutInput = document.getElementById('tagboxInput');
+    const shoutBtn = document.getElementById('sendShoutBtn');
+    const shoutMentionList = document.getElementById('mentionSuggestions');
 
-  if (openBtn) {
-    openBtn.addEventListener('click', function(event) {
-      event.preventDefault(); // Impedisce la navigazione immediata
-      modalOverlay.classList.add('visible');
-    });
-  }
+    async function refreshTagbox() {
+        const res = await fetch('/api/tagbox');
+        const shouts = await res.json();
+        shoutContent.innerHTML = '';
+        shouts.forEach(s => {
+            const div = document.createElement('div');
+            div.className = `shout ${s.pinned ? 'pinned' : ''}`;
+            let pinIcon = ['amministratore', 'ceo', 'segreteria'].includes("{{ session.user_role }}") 
+                ? `<i class="fas fa-thumbtack pin-btn ${s.pinned ? 'active' : ''}" onclick="togglePin('${s.id}')"></i>` : '';
+            // Usa la funzione globale window.parseMessage
+            div.innerHTML = `${pinIcon}<span class="shout-time">${s.timestamp}</span> <span class="shout-user">${s.user}:</span> ${window.parseMessage(s.text)}`;
+            shoutContent.appendChild(div);
+        });
+    }
 
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', function() {
-      modalOverlay.classList.remove('visible');
-    });
-  }
+    shoutInput.addEventListener('input', () => window.handleAutocomplete(shoutInput, shoutMentionList));
+    
+    shoutBtn.onclick = async () => {
+        const val = shoutInput.value.trim();
+        if(!val) return;
+        await fetch('/api/tagbox', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: val }) });
+        shoutInput.value = ''; refreshTagbox();
+    };
 
-  if (modalOverlay) {
-    // Chiudi se si clicca sull'overlay (fuori dalla modale)
-    modalOverlay.addEventListener('click', function(event) {
-      if (event.target === modalOverlay) {
-        modalOverlay.classList.remove('visible');
-      }
-    });
-  }
+    window.togglePin = async (id) => { await fetch(`/api/tagbox/pin/${id}`, { method: 'POST' }); refreshTagbox(); };
+    shoutInput.onkeypress = (e) => { if(e.key === 'Enter') shoutBtn.click(); };
+    
+    setInterval(refreshTagbox, 20000); refreshTagbox();
 });
-// --- Logica per tabelle ordinabili ---
-  document.querySelectorAll('table').forEach(table => {
-      const headers = table.querySelectorAll('th[data-sortable]');
-      if (headers.length === 0) return; // Salta tabelle non ordinabili
-
-      headers.forEach(header => {
-          header.addEventListener('click', () => {
-              const tbody = table.querySelector('tbody');
-              if (!tbody) return;
-
-              // Trova l'indice della colonna
-              const colIndex = Array.from(header.parentNode.children).indexOf(header);
-              // Prendi tutte le righe della tabella
-              const rows = Array.from(tbody.querySelectorAll('tr'));
-              
-              // Determina la nuova direzione
-              const currentDir = header.dataset.sortDir;
-              const newDirection = (currentDir === 'asc') ? 'desc' : 'asc';
-              
-              // Ordina le righe
-              rows.sort((a, b) => {
-                  const cellA = a.querySelectorAll('td')[colIndex]?.innerText.trim().toLowerCase() || '';
-                  const cellB = b.querySelectorAll('td')[colIndex]?.innerText.trim().toLowerCase() || '';
-                  
-                  // 'localeCompare' ordina alfabeticamente, 'numeric: true' gestisce correttamente i numeri
-                  const compare = cellA.localeCompare(cellB, undefined, {numeric: true});
-                  
-                  return newDirection === 'asc' ? compare : -compare;
-              });
-
-              // Ridisegna le righe nel tbody nell'ordine corretto
-              rows.forEach(row => tbody.appendChild(row));
-              
-              // Aggiorna le frecce in tutte le intestazioni
-              headers.forEach(th => {
-                  const icon = th.querySelector('.sort-arrow');
-                  if (th === header) {
-                      // Imposta l'intestazione attiva
-                      th.dataset.sortDir = newDirection;
-                      icon.className = `sort-arrow fas ${newDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'}`;
-                      th.classList.remove('sort-asc', 'sort-desc');
-                      th.classList.add(newDirection === 'asc' ? 'sort-asc' : 'sort-desc');
-                  } else {
-                      // Resetta le altre intestazioni
-                      th.removeAttribute('data-sort-dir');
-                      icon.className = 'sort-arrow fas fa-sort';
-                      th.classList.remove('sort-asc', 'sort-desc');
-                  }
-              });
-          });
-      });
-  });
 </script>
 {% endblock %}
-

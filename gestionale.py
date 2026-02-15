@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "1.10.5"  
+APP_VERSION = "2.0.0"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -74,7 +74,9 @@ CLIENTS_DIR = DATA_DIR / "clienti"
 QUOTES_DIR = DATA_DIR / "preventivi"
 ALLEGATI_DIR = DATA_DIR / "allegati"
 USERS_FILE = DATA_DIR / "users.json"
+MESSAGES_FILE = DATA_DIR / "messages.json"
 PDF_LOG_FILE = DATA_DIR / "pdf_generation.log"
+TAGBOX_FILE = DATA_DIR / "tagbox.json"
 
 # Creiamo le sottocartelle se non esistono
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -613,14 +615,15 @@ def check_templates():
 
 # Richiama la funzione all'avvio
 check_templates()    
+
 def get_all_quotes(user_role=None, full_name=None): # Rinominato user_name -> username
     """Restituisce un elenco di preventivi, filtrato per venditore se richiesto."""
     quotes = []
-    for quote_file in QUOTES_DIR.glob("P*.json"):
+    # Cambiato da "P*.json" a "*.json" per includere anche EDIL-
+    for quote_file in QUOTES_DIR.glob("*.json"):
         try:
             with quote_file.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Filtro per venditore basato su FULLNAME
                 if user_role == 'venditore' and data.get('venditore') != full_name:
                     continue
                 
@@ -650,14 +653,33 @@ def save_quote(quote_id, data):
     quote_file = QUOTES_DIR / f"{quote_id}.json";
     with quote_file.open("w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
 
+# --- File: gestionale.py (intorno alla riga 176) ---
+
 def aggiorna_stato_consegna_globale(preventivo_data):
     """
-    Ricalcola lo stato di consegna globale basandosi sullo stato delle sole righe
-    incluse in ordini fornitore CONFERMATI.
+    Ricalcola lo stato di consegna globale.
     """
     stato_preventivo = preventivo_data.get("stato")
+    is_edile = preventivo_data.get("tipo_preventivo") == "edile"
     
-    # 1. Trova tutti gli indici confermati
+    if is_edile:
+        righe = preventivo_data.get("righe_edili", [])
+        if not righe:
+            preventivo_data["stato_consegna_globale"] = "N/D"
+            return
+            
+        # Consideriamo "Da Consegnare" se lo stato è nullo
+        stati = {r.get("stato_consegna") or "Da Consegnare" for r in righe}
+        
+        if all(s == "Consegnato" for s in stati):
+            preventivo_data["stato_consegna_globale"] = "Completato"
+        elif any(s in ["Consegnato", "In Bolla", "Pronto per Consegna"] for s in stati):
+            preventivo_data["stato_consegna_globale"] = "Parziale"
+        else:
+            preventivo_data["stato_consegna_globale"] = "Da Consegnare"
+        return
+
+    # 1. Trova tutti gli indici confermati (Per preventivi STANDARD)
     ordini_confermati = [
         o for o in preventivo_data.get("ordini_fornitore", []) 
         if o.get("numero_conferma", "").strip()
@@ -743,19 +765,37 @@ def aggiorna_stato_pagamento_globale(p):
     Ricalcola il saldo correggendo:
     1. Formati numerici misti (virgola/punto).
     2. Gestione Esente IVA (usa l'imponibile come target).
+    3. Supporto specifico per Preventivi Edili.
     """
     def safe_money(val):
-        """ Helper interno per leggere qualsiasi formato moneta """
+        """ Helper interno robusto per leggere formati moneta con simboli """
         if not val: return 0.0
-        s = str(val).strip()
-        # Formato Italiano (es. 1.250,50) -> Ha la virgola
+        # Rimuove simboli valuta, percentuali e spazi extra
+        s = re.sub(r"[€%\s]", "", str(val))
         if ',' in s:
+            # Se c'è la virgola, rimuove il punto delle migliaia e usa la virgola come decimale
             s = s.replace('.', '').replace(',', '.')
-        # Altrimenti è formato standard (1250.50)
         try:
             return float(s)
         except ValueError:
             return 0.0
+
+    if p.get("tipo_preventivo") == "edile":
+        righe = p.get("righe_edili", [])
+        tot_imp = sum(safe_money(r.get("prezzo_vendita")) for r in righe)
+        tot_iva = sum(safe_money(r.get("prezzo_vendita")) * (safe_money(r.get("iva_pct")) / 100) for r in righe)
+        
+        # Sincronizziamo i campi principali per la compatibilità con la UI
+        p["tot_imponibile_cliente"] = f"{tot_imp:.2f}".replace(".", ",")
+        p["tot_iva"] = f"{tot_iva:.2f}".replace(".", ",")
+        p["totale"] = f"{(tot_imp + tot_iva):.2f}".replace(".", ",")
+
+        # --- AGGIUNTA: Popolamento dettaglio IVA per fatturazione ---
+        imp_iva_map = {}
+        for r in righe:
+            k = str(r.get("iva_pct", "10")).replace("%", "").strip()
+            imp_iva_map[k] = imp_iva_map.get(k, 0.0) + safe_money(r.get("prezzo_vendita"))
+        p["imponibili_iva"] = {k: f"{v:.2f}".replace(".", ",") for k, v in imp_iva_map.items()}
 
     # 1. Determina il "Totale Dovuto" (Target)
     if p.get("no_iva") is True:
@@ -766,10 +806,11 @@ def aggiorna_stato_pagamento_globale(p):
         # CASO NORMALE: Il cliente paga il totale (inclusa IVA)
         totale_dovuto = safe_money(p.get("totale", "0"))
     
-    # 2. Somma i pagamenti effettuati
+    # 2. Somma i pagamenti effettuati (escludendo quelli ancora programmati/non confermati)
     totale_pagato = 0.0
     for pay in p.get("pagamenti", []):
-        totale_pagato += safe_money(pay.get("importo", "0"))
+        if not pay.get("is_scheduled"):
+            totale_pagato += safe_money(pay.get("importo", "0"))
         
     # 3. Calcola il rimanente
     da_saldare = totale_dovuto - totale_pagato
@@ -1173,6 +1214,10 @@ def dashboard():
             p["stato_pagamento_globale"] = "N/D"
 
         if p.get("stato") in stati_ordine_validi:
+            totale_pagato_effettivo = 0.0
+            for pag in p.get("pagamenti", []):
+                if pag.get("is_scheduled"): 
+                    continue
             righe_preventivo = p.get("righe", [])
             indici_righe_valide = {i for i, r in enumerate(righe_preventivo) if r.get("articolo", "").strip() and r.get("unt", "").strip().upper() != "S"}
             indici_gia_ordinati = set()
@@ -1216,6 +1261,135 @@ def dashboard():
         my_quotes=my_active_quotes, # Per 'venditore' e 'admin'/'ceo'
         grouped_quotes=grouped_active_quotes # Per 'segreteria' e 'admin'/'ceo'
     )
+@app.route("/allert")
+@login_required
+def allert_page():
+    """Pagina che raccoglie pagamenti scaduti e documenti mancanti solo per i clienti attivi."""
+    alerts = []
+    today = datetime.date.today()
+    today_str = today.strftime('%Y-%m-%d')
+    active_statuses = ["Bozza", "Inviato", "In Lavorazione"]
+    active_client_ids = set()
+
+    # 1. Scansione Preventivi per Pagamenti Scaduti, Merce e Identificazione Clienti Attivi
+    for quote_file in QUOTES_DIR.glob("P*.json"):
+        try:
+            with quote_file.open("r", encoding="utf-8") as f:
+                p = json.load(f)
+                
+                # Segnamo il cliente come attivo se il preventivo è in uno stato operativo
+                if p.get("stato") in active_statuses:
+                    active_client_ids.add(p.get("id_cliente"))
+                
+                if p.get("stato") in ["Annullato", "Chiuso"]: 
+                    continue
+                
+                # --- ALERT PAGAMENTI ---
+                for pag in p.get("pagamenti", []):
+                    if pag.get("is_scheduled") and pag.get("data") <= today_str:
+                        alerts.append({
+                            "tipo": "PAGAMENTO",
+                            "oggetto_id": p.get("numero"),
+                            "oggetto_nome": p.get("cliente"),
+                            "dettaglio": f"Pagamento da {money_ui(pag.get('importo'))} scaduto il {pag.get('data')}",
+                            "link_risoluzione": url_for('gestione_pagamenti', quote_id=p.get("numero")),
+                            "icona": "fas fa-hand-holding-usd",
+                            "colore": "text-danger"
+                        })
+
+                # --- ALERT PAGAMENTI ---
+                for pag in p.get("pagamenti", []):
+                    if pag.get("is_scheduled") and pag.get("data") <= today_str:
+                        alerts.append({
+                            "tipo": "PAGAMENTO",
+                            "oggetto_id": p.get("numero"),
+                            "oggetto_nome": p.get("cliente"),
+                            "dettaglio": f"Pagamento da {money_ui(pag.get('importo'))} scaduto il {pag.get('data')}",
+                            "link_risoluzione": url_for('gestione_pagamenti', quote_id=p.get("numero")),
+                            "icona": "fas fa-hand-holding-usd",
+                            "colore": "text-danger"
+                        })
+
+                # --- ALERT MERCE & INSERIMENTO DATE ---
+                for ordine in p.get("ordini_fornitore", []):
+                    data_creazione_ordine = ordine.get("data_ordine") 
+                    data_prevista = ordine.get("data_arrivo")
+                    
+                    # 1. CONTROLLO INSERIMENTO DATA (Entro 3gg dalla creazione)
+                    if data_creazione_ordine and not data_prevista:
+                        try:
+                            d_creazione = datetime.datetime.strptime(data_creazione_ordine, '%Y-%m-%d').date()
+                            scadenza_inserimento = d_creazione + datetime.timedelta(days=3)
+                            
+                            if today > scadenza_inserimento:
+                                alerts.append({
+                                    "tipo": "ORDINE",
+                                    "oggetto_id": p.get("numero"),
+                                    "oggetto_nome": p.get("cliente"),
+                                    "dettaglio": f"Manca data arrivo prevista per ordine {ordine.get('azienda')} (Creato il {data_creazione_ordine})",
+                                    "link_risoluzione": url_for('conferma_ordine', quote_id=p.get("numero")),
+                                    "icona": "fas fa-calendar-exclamation",
+                                    "colore": "text-warning"
+                                })
+                        except (ValueError, TypeError): pass
+
+                    # 2. CONTROLLO RITARDO ARRIVO (Con tolleranza 5gg)
+                    if data_prevista:
+                        try:
+                            d_prevista = datetime.datetime.strptime(data_prevista, '%Y-%m-%d').date()
+                            data_limite_tolleranza = d_prevista + datetime.timedelta(days=5)
+                            
+                            if data_limite_tolleranza <= today:
+                                righe = p.get("righe", [])
+                                mancanti_in_ordine = []
+                                for idx in ordine.get("indici_righe", []):
+                                    if 0 <= idx < len(righe):
+                                        riga = righe[idx]
+                                        if not riga.get("data_arrivo_in_house"):
+                                            mancanti_in_ordine.append(riga.get("articolo", "Articolo"))
+                                
+                                if mancanti_in_ordine:
+                                    alerts.append({
+                                        "tipo": "MERCE",
+                                        "oggetto_id": p.get("numero"),
+                                        "oggetto_nome": p.get("cliente"),
+                                        "dettaglio": f"Ritardo da {ordine.get('azienda')} (Previsto: {data_prevista}). {len(mancanti_in_ordine)} articoli mancanti.",
+                                        "link_risoluzione": url_for('gestione_consegna', quote_id=p.get("numero")),
+                                        "icona": "fas fa-truck-loading",
+                                        "colore": "text-blue"
+                                    })
+                        except (ValueError, TypeError): continue
+        except: continue
+
+    # 2. Scansione Clienti per Documenti Mancanti (Solo se il cliente è attivo)
+    for client_file in CLIENTS_DIR.glob("*.json"):
+        try:
+            with client_file.open("r", encoding="utf-8") as f:
+                c = json.load(f)
+                client_id = c.get("id_cliente")
+
+                # Salta il controllo se il cliente non ha preventivi attivi
+                if client_id not in active_client_ids:
+                    continue
+
+                mancanti = []
+                if not c.get("has_ci"): mancanti.append("Carta Identità")
+                if not c.get("has_privacy"): mancanti.append("Privacy")
+                if not c.get("has_contratto"): mancanti.append("Contratto")
+                
+                if mancanti:
+                    alerts.append({
+                        "tipo": "DOCUMENTI",
+                        "oggetto_id": client_id,
+                        "oggetto_nome": c.get("cliente"),
+                        "dettaglio": "Mancano: " + ", ".join(mancanti),
+                        "link_risoluzione": url_for('dettaglio_cliente', client_id=client_id),
+                        "icona": "fas fa-id-card",
+                        "colore": "text-warning"
+                    })
+        except: continue
+
+    return render_template("allert.html", title="Centro Notifiche & Alert", alerts=alerts)
 
 @app.route("/admin/refresh-all-quotes")
 @login_required
@@ -1329,6 +1503,42 @@ def archivio_globale():
         all_quotes=all_quotes_full
     )
 
+@app.route("/anagrafica-clienti")
+@login_required
+def anagrafica_clienti():
+    """Mostra l'elenco completo dei dati anagrafici con flag per preventivi attivi."""
+    clients = []
+    active_statuses = ["Bozza", "Inviato", "In Lavorazione"]
+    active_client_ids = set()
+
+    # 1. Scansiona i preventivi per trovare i clienti con pratiche attive
+    for quote_file in QUOTES_DIR.glob("P*.json"):
+        try:
+            with quote_file.open("r", encoding="utf-8") as f:
+                q_data = json.load(f)
+                if q_data.get("stato") in active_statuses:
+                    active_client_ids.add(q_data.get("id_cliente"))
+        except:
+            continue
+
+    # 2. Carica i dati anagrafici dei clienti
+    for client_file in CLIENTS_DIR.glob("*.json"):
+        try:
+            with client_file.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+                # Segna se il cliente ha almeno un preventivo attivo
+                data["has_active_quote"] = data.get("id_cliente") in active_client_ids
+                clients.append(data)
+        except Exception:
+            continue
+    
+    clients.sort(key=lambda x: x.get("cliente", "").lower())
+    
+    return render_template("anagrafica_clienti.html", 
+        title="Anagrafica Clienti", 
+        clients=clients
+    )
+
 @app.route("/preventivi-cliente")
 @login_required
 def dashboard_clienti():
@@ -1338,11 +1548,29 @@ def dashboard_clienti():
     clienti_preventivi = {}
     today = datetime.date.today()
 
+# --- Intorno alla riga 650 (all'interno di dashboard_clienti) ---
     for prev_summary in tutti_i_preventivi:
         p = load_quote(prev_summary["numero"])
         if not p:
             continue
 
+        # Gestione differenziata per preventivi Edili
+        is_edile = p.get("tipo_preventivo") == "edile"
+        
+        if is_edile:
+            # Calcolo totale al volo per Edile (Somma prezzo_vendita)
+            tot_edile = sum(_to_num(r.get("prezzo_vendita")) for r in p.get("righe_edili", []))
+            p["totale"] = tot_edile
+            # Calcolo IVA (assumendo media o leggendo righe) per il saldo
+            tot_iva_edile = sum(_to_num(r.get("prezzo_vendita")) * (_to_num(r.get("iva_pct"))/100) for r in p.get("righe_edili", []))
+            p["tot_iva"] = tot_iva_edile
+            p["totale_lordo"] = tot_edile + tot_iva_edile
+            
+            # Reset dei contatori ordini per evitare errori nel template
+            p["articoli_da_ordinare_count"] = 0
+            p["articoli_da_ordinare_totale"] = 0
+            p["articoli_in_attesa_conferma"] = 0
+        
         # Se l'utente è segreteria, salta anche le bozze
         if session.get("user_role") == 'segreteria' and p.get("stato") == "Bozza":
             continue
@@ -1351,8 +1579,13 @@ def dashboard_clienti():
         if not is_attivo:
             continue
         
+        # Individua la sorgente delle righe in base al tipo
+        is_edile = p.get("tipo_preventivo") == "edile"
+        righe_preventivo = p.get("righe_edili", []) if is_edile else p.get("righe", [])
+        
         cliente_nome = p.get("cliente", "Senza Nome")
         if cliente_nome not in clienti_preventivi:
+
             clienti_preventivi[cliente_nome] = {
                 "preventivi": [],
                 "totale_attivo": 0.0,
@@ -1368,6 +1601,10 @@ def dashboard_clienti():
         totale_preventivo = _to_num(p.get("totale"))
         
         if p.get("stato") in stati_ordine_validi:
+            totale_pagato_effettivo = 0.0
+            for pag in p.get("pagamenti", []):
+                if pag.get("is_scheduled"): 
+                    continue
             totale_pagato_effettivo = 0.0
             for pag in p.get("pagamenti", []):
                 importo_float = _to_num(pag.get("importo"))
@@ -1405,6 +1642,7 @@ def dashboard_clienti():
         stati_ordine_validi = ["Confermato", "In Lavorazione", "Chiuso"]
         if p.get("stato") in stati_ordine_validi:
             
+            # Utilizza righe_preventivo (che ora punta alla lista corretta)
             indici_righe_valide = {i for i, r in enumerate(righe_preventivo) if r.get("articolo", "").strip() and r.get("unt", "").strip().upper() != "S"}
             indici_gia_ordinati = set()
 
@@ -1432,15 +1670,24 @@ def dashboard_clienti():
 
         # --- 3. Calcolo Consegne (da dashboard_consegne) ---
         if p.get("stato") in stati_ordine_validi:
-            articoli_da_consegnare_count = 0
-            for index in indici_confermati:
-                if 0 <= index < len(righe_preventivo):
-                    riga = righe_preventivo[index]
-                    if riga.get("stato_consegna") != "Consegnato":
-                        articoli_da_consegnare_count += 1
-            
-            p["articoli_da_consegnare_count"] = articoli_da_consegnare_count
-            p["articoli_da_consegnare_totale"] = len(indici_confermati)
+            # --- MODIFICA PER EDILIZIA ---
+            if is_edile:
+                righe_lavorazione = p.get("righe_edili", [])
+                p["articoli_da_consegnare_totale"] = len(righe_lavorazione)
+                p["articoli_da_consegnare_count"] = sum(
+                    1 for r in righe_lavorazione if r.get("stato_consegna") != "Consegnato"
+                )
+            else:
+                # Logica standard per preventivi con articoli
+                articoli_da_consegnare_count = 0
+                for index in indici_confermati:
+                    if 0 <= index < len(righe_preventivo):
+                        riga = righe_preventivo[index]
+                        if riga.get("stato_consegna") != "Consegnato":
+                            articoli_da_consegnare_count += 1
+                
+                p["articoli_da_consegnare_count"] = articoli_da_consegnare_count
+                p["articoli_da_consegnare_totale"] = len(indici_confermati)
 
         else:
             # Se lo stato non è valido, imposta i contatori a 0
@@ -1497,16 +1744,112 @@ def dettaglio_cliente(client_id):
         source_quote=source_quote,
     )
 
+@app.route("/preventivo/<quote_id>/upload-riga-edile", methods=["POST"])
+@login_required
+@role_required('amministratore', 'ceo')
+def upload_riga_edile_ajax(quote_id):
+    """Upload tecnico per riga edile: salva il file ma non modifica il JSON."""
+    file = request.files.get('file')
+    if not file or file.filename == '':
+        return jsonify({"success": False, "error": "Nessun file selezionato"}), 400
+    
+    try:
+        quote_dir = ALLEGATI_DIR / quote_id
+        quote_dir.mkdir(parents=True, exist_ok=True)
+        
+        filename = secure_filename(file.filename)
+        file.save(quote_dir / filename)
+        
+        # Restituiamo solo il successo e il nome, il salvataggio nel JSON 
+        # avverrà al click su "Salva Modifiche" nel form principale.
+        return jsonify({"success": True, "filename": filename})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# --- Cerca la rotta allega_documento esistente (intorno alla 920) e assicurati che sia invariata per gli allegati generici ---
+@app.route("/cliente/<client_id>/allega", methods=["POST"])
+@login_required
+def allega_documento_cliente(client_id):
+    """Gestisce l'upload di documenti anagrafici per il cliente."""
+    c = load_client(client_id)
+    file = request.files.get('file')
+    tipo_doc = request.form.get("tipo_documento", "Altro")
+    
+    if file and file.filename != '':
+        client_dir = ALLEGATI_DIR / "clienti" / client_id
+        client_dir.mkdir(parents=True, exist_ok=True)
+        filename = secure_filename(file.filename)
+        file.save(client_dir / filename)
+        
+        if "documenti_anagrafici" not in c: 
+            c["documenti_anagrafici"] = []
+            
+        c["documenti_anagrafici"].append({
+            "filename": filename, 
+            "tipo": tipo_doc, 
+            "data_upload": datetime.date.today().strftime('%Y-%m-%d')
+        })
+
+        # --- GESTIONE FLAG ---
+        if tipo_doc == "Carta Identità":
+            c["has_ci"] = True
+        elif tipo_doc == "Autorizzazione Privacy":
+            c["has_privacy"] = True
+        elif tipo_doc == "Contratto Vendita":
+            c["has_contratto"] = True
+        # ---------------------
+
+        save_client(client_id, c)
+        flash(f"Documento '{tipo_doc}' caricato!", "success")
+    return redirect(request.referrer)
+@app.route("/cliente/<client_id>/elimina-documento", methods=["POST"])
+@login_required
+def elimina_documento_cliente(client_id):
+    """Elimina un documento anagrafico dal JSON e dal disco."""
+    c = load_client(client_id)
+    filename = request.form.get("filename")
+    
+    if c and filename:
+        # Rimuove il file dalla lista
+        c["documenti_anagrafici"] = [d for d in c.get("documenti_anagrafici", []) if d.get("filename") != filename]
+        
+        # --- RICALCOLO FLAG ---
+        documenti = c.get("documenti_anagrafici", [])
+        c["has_ci"] = any(d.get("tipo") == "Carta Identità" for d in documenti)
+        c["has_privacy"] = any(d.get("tipo") == "Autorizzazione Privacy" for d in documenti)
+        c["has_contratto"] = any(d.get("tipo") == "Contratto Vendita" for d in documenti)
+        # ----------------------
+
+        try:
+            file_path = ALLEGATI_DIR / "clienti" / client_id / filename
+            if file_path.exists(): os.remove(file_path)
+        except: pass
+        
+        save_client(client_id, c)
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Dati mancanti"})
+
+@app.route("/allegati/cliente/<client_id>/<path:filename>")
+@login_required
+def serve_allegato_cliente(client_id, filename):
+    """Serve i file caricati nell'anagrafica cliente."""
+    directory = (ALLEGATI_DIR / "clienti" / client_id).resolve()
+    action = request.args.get('action', 'download')
+    return send_from_directory(directory, filename, as_attachment=(action != 'view'))
+
+
 @app.route("/preventivo/<quote_id>/allega", methods=["POST"])
 @login_required
 def allega_documento(quote_id):
     """Gestisce l'upload di un nuovo allegato per un preventivo."""
     p = load_quote(quote_id)
     if not p:
+        if request.form.get("is_ajax") == "1": return jsonify({"success": False, "error": "Non trovato"}), 404
         flash("Preventivo non trovato.", "error")
         return redirect(request.referrer or url_for('dashboard'))
 
     if 'file' not in request.files:
+        if request.form.get("is_ajax") == "1": return jsonify({"success": False, "error": "No file"}), 400
         flash("Nessun file selezionato.", "error")
         return redirect(request.referrer)
 
@@ -1514,18 +1857,17 @@ def allega_documento(quote_id):
     descrizione = request.form.get("descrizione", "Nessuna descrizione")
 
     if file.filename == '':
+        if request.form.get("is_ajax") == "1": return jsonify({"success": False, "error": "No filename"}), 400
         flash("Nessun file selezionato.", "error")
         return redirect(request.referrer)
 
     if file:
-        # Crea la cartella specifica per questo preventivo, se non esiste
         quote_allegati_dir = ALLEGATI_DIR / quote_id
         quote_allegati_dir.mkdir(exist_ok=True)
         
         filename = secure_filename(file.filename)
         file.save(quote_allegati_dir / filename)
 
-        # Aggiungi il riferimento al file nel JSON del preventivo
         if "allegati" not in p:
             p["allegati"] = []
         
@@ -1535,6 +1877,10 @@ def allega_documento(quote_id):
             "data_upload": datetime.date.today().strftime('%Y-%m-%d')
         })
         save_quote(quote_id, p)
+        
+        if request.form.get("is_ajax") == "1":
+            return jsonify({"success": True, "filename": filename})
+            
         flash("Documento allegato con successo!", "success")
 
     return redirect(request.referrer)
@@ -1588,28 +1934,26 @@ def serve_allegato(quote_id, filename):
     
     return send_from_directory(directory, filename, as_attachment=should_download)
 
+# --- LOGICA: Recupera l'azione sia dal link (GET) che dal form (POST) ---
 @app.route("/cliente/cerca", methods=["GET", "POST"])
 @login_required
 def cerca_cliente():
+    # Recupera l'azione: se non c'è nel form (POST), cercala nell'URL (GET)
+    action = request.form.get('action') or request.args.get('action') or 'open_archive'
+    
     if request.method == "POST":
         search_term = request.form.get("search_term", "")
-        
-        # 1. RECUPERA 'action' DAL FORM INVIATO
-        action = request.form.get('action', 'open_archive')
-        
         clients = find_clients_by_term(search_term)
 
-        # 2. PASSA 'action' AL TEMPLATE
         return render_template(
             "risultati_ricerca_cliente.html", 
             title="Risultati Ricerca", 
             clients=clients, 
             search_term=search_term,
-            action=action  # <-- Aggiungi questo!
+            action=action  # Assicurati di passare l'action ai risultati
         )
         
-    # La parte GET per mostrare il form di ricerca rimane invariata
-    return render_template("cerca_cliente.html", title="Cerca Cliente")
+    return render_template("cerca_cliente.html", title="Cerca Cliente", action=action)
 @app.route("/cliente/cerca/live")
 @login_required
 def cerca_cliente_live():
@@ -1626,6 +1970,9 @@ def cerca_cliente_live():
 @app.route("/cliente/crea", methods=["GET", "POST"])
 @login_required
 def crea_cliente():
+    # Recupera l'azione dalla query string (GET) o dal form (POST)
+    action = request.args.get('action') or request.form.get('action') or 'new_quote'
+    
     if request.method == "POST":
         new_client_id = get_new_client_id()
         client_data = { "id_cliente": new_client_id }
@@ -1633,8 +1980,124 @@ def crea_cliente():
         for key in form_keys: client_data[key] = request.form.get(key, "")
         save_client(new_client_id, client_data)
         flash("Nuovo cliente creato con successo.")
+        
+        # Reindirizza al tipo di preventivo corretto in base all'azione
+        if action == 'new_quote_edile':
+            return redirect(url_for("nuovo_preventivo_edile", client_id=new_client_id))
         return redirect(url_for("nuovo_preventivo", client_id=new_client_id))
-    return render_template("crea_cliente.html", title="Crea Nuovo Cliente", geo_data=GEO_DATA)
+        
+    return render_template("crea_cliente.html", title="Crea Nuovo Cliente", geo_data=GEO_DATA, action=action)
+
+# --- FLUSSO PREVENTIVI EDILI (LOGICA SEPARATA) ---
+
+# --- NUOVA ROTTA: Crea il file del preventivo Edile ---
+@app.route("/preventivo-edile/nuovo/<client_id>")
+@login_required
+@role_required('amministratore', 'ceo')
+def nuovo_preventivo_edile(client_id):
+    client_data = load_client(client_id)
+    if not client_data:
+        flash("Cliente non trovato.")
+        return redirect(url_for("dashboard"))
+
+    venditore_sigla = session.get("user_sigla", "XX")
+    full_name = session.get("user_name", "Sconosciuto")
+    
+    # Genera ID con prefisso ED (Edile) per tenerlo separato
+    now = datetime.datetime.now()
+    new_quote_id = f"EDIL-{venditore_sigla.upper()}-{now.strftime('%d%m%y%H%M')}"
+    
+    p = EMPTY_STATE.copy()
+    p.update(client_data)
+    p["numero"] = new_quote_id
+    p["tipo_preventivo"] = "edile"
+    p["venditore"] = full_name
+    p["data"] = now.strftime('%Y-%m-%d')
+    p["righe_edili"] = [] # Inizializza la lista specifica
+    
+    save_quote(new_quote_id, p)
+    return redirect(url_for("editor_preventivo_edile", quote_id=new_quote_id))
+
+# --- NUOVA ROTTA: Apre l'editor specifico ---
+@app.route("/preventivo-edile/edit/<quote_id>")
+@login_required
+@role_required('amministratore', 'ceo')
+def editor_preventivo_edile(quote_id):
+    p = load_quote(quote_id)
+    if p is None: 
+        flash(f"Preventivo Edile '{quote_id}' non trovato.")
+        return redirect(url_for("dashboard"))
+    
+    return render_template("editor_edile.html", title=f"Edile - {quote_id}", p=p, geo_data=GEO_DATA)
+
+# --- File: gestionale.py ---
+
+# --- File: gestione.py ---
+
+@app.route("/salva-righe-edili/<quote_id>", methods=["POST"])
+@login_required
+@role_required('amministratore', 'ceo')
+def salva_righe_edili(quote_id):
+    p = load_quote(quote_id)
+    if not p: return jsonify({"success": False, "error": "Non trovato"}), 404
+    
+    form = request.form
+    # Aggiorna i dati generali solo se l'editor non è bloccato nel form
+    if form.get("is_locked") != 'true':
+        p["data"] = form.get("data", p.get("data"))
+        p["referente"] = form.get("referente", p.get("referente"))
+
+    # Costruisce la lista righe_edili dal form
+    nuove_righe = []
+    pat = re.compile(r"^r\[(\d+)\]\[(.+)\]$")
+    righe_mappate = {}
+    for key, val in form.items():
+        m = pat.match(key)
+        if m:
+            i, field = int(m.group(1)), m.group(2)
+            righe_mappate.setdefault(i, {})[field] = val
+            
+    # --- INIZIO AGGIUNTA GESTIONE FILE ---
+    for key, file in request.files.items():
+        if file and file.filename != '':
+            m = pat.match(key)
+            if m:
+                i, field = int(m.group(1)), m.group(2)
+                if field == "word_file":
+                    # Crea cartella se non esiste
+                    quote_dir = ALLEGATI_DIR / quote_id
+                    quote_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    filename = secure_filename(file.filename)
+                    file.save(quote_dir / filename)
+                    
+                    # Registra il nome del file nella riga corretta
+                    righe_mappate.setdefault(i, {})["word_file"] = filename
+    # --- FINE AGGIUNTA GESTIONE FILE ---
+    
+    # AGGIORNA LE RIGHE SOLO SE IL FORM NE CONTIENE (evita lo svuotamento da campi disabled)
+    if righe_mappate:
+        for i in sorted(righe_mappate.keys()):
+            nuove_righe.append(righe_mappate[i])
+        p["righe_edili"] = nuove_righe
+    
+    # --- AGGIUNTA: Ricalcola totali e stato pagamento ---
+    aggiorna_stato_pagamento_globale(p)
+    aggiorna_stato_avanzamento(p)
+    # ----------------------------------------------------
+
+    # Gestione aggiunta/eliminazione riga
+    if request.form.get("add_row") == "1":
+        if "righe_edili" not in p: p["righe_edili"] = []
+        p["righe_edili"].append({"articolo": "", "prezzo_vendita": "0", "iva_pct": "10", "costo_stimato": "0"})
+        save_quote(quote_id, p)
+        return redirect(url_for("editor_preventivo_edile", quote_id=quote_id))
+        
+    save_quote(quote_id, p)
+    
+    if form.get("is_ajax") == "1": return jsonify({"success": True})
+    return redirect(url_for("editor_preventivo_edile", quote_id=quote_id))
+
 @app.route("/preventivo/nuovo/<client_id>")
 @login_required
 def nuovo_preventivo(client_id):
@@ -1981,6 +2444,7 @@ def conferma_ordine(quote_id):
     for ordine in ordini_fornitore:
         if "ordine_id" not in ordine or not ordine["ordine_id"]:
             ordine["ordine_id"] = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+            ordine["data_ordine"] = datetime.date.today().strftime('%Y-%m-%d')
             needs_saving = True
 
     if needs_saving:
@@ -2145,6 +2609,7 @@ def salva_ordine(quote_id):
     # Crea un nuovo oggetto "Ordine Fornitore"
     nuovo_ordine = {
         "ordine_id": f"ORD-{uuid.uuid4().hex[:8].upper()}",
+        "data_ordine": datetime.date.today().strftime('%Y-%m-%d'),
         "azienda": form_data.get("azienda"),
         "numero_conferma": form_data.get("numero_conferma"),
         
@@ -2501,6 +2966,8 @@ def invia_preventivo(quote_id):
     flash("Preventivo impostato come 'Inviato' e bloccato.", "success")
     return redirect(url_for("editor_preventivo", quote_id=quote_id))    
 
+# --- File: gestionale.py (intorno alla riga 1680) ---
+
 @app.route("/preventivo/<quote_id>/conferma", methods=["POST"])
 @login_required
 def conferma_preventivo(quote_id):
@@ -2516,11 +2983,17 @@ def conferma_preventivo(quote_id):
     p["is_locked"] = True
     p["data_conferma"] = datetime.date.today().strftime('%Y-%m-%d')
 
+    # Se Edile, marca tutto come Pronto per Consegna automaticamente
+    if p.get("tipo_preventivo") == "edile":
+        for riga in p.get("righe_edili", []):
+            if riga.get("stato_consegna") != "Consegnato":
+                riga["stato_consegna"] = "Pronto per Consegna"
+                riga["data_arrivo_in_house"] = datetime.date.today().strftime('%Y-%m-%d')
+
     # --- BLOCCO AGGIUNTO ---
-    # Aggiorniamo lo stato di pagamento, che passerà
-    # da "N/D" a "Da Saldare"
+    # Aggiorniamo lo stato di pagamento, che passerà a "Da Pagare" se era "Non Definito"
     aggiorna_stato_pagamento_globale(p)
-    # --- FINE BLOCCO ---
+
 
     save_quote(quote_id, p)
     flash("Preventivo confermato e bloccato.", "success")
@@ -2710,9 +3183,15 @@ def dashboard_ceo():
     for summary in all_quotes:
         p = load_quote(summary["numero"])
         if not p: continue
+
+        # Determiniamo la data di riferimento: data_conferma per i confermati/chiusi, data creazione per gli altri
+        st_competenza = p.get("stato")
+        raw_date = p.get("data_conferma") if st_competenza in ["Confermato", "In Lavorazione", "Chiuso"] and p.get("data_conferma") else p.get("data")
         
-        try: p_date = datetime.datetime.strptime(p.get("data"), "%Y-%m-%d").date()
-        except: continue
+        try: 
+            p_date = datetime.datetime.strptime(raw_date, "%Y-%m-%d").date()
+        except: 
+            continue
 
         imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
         tot_lordo = _to_float(p.get("totale", 0))
@@ -2743,6 +3222,11 @@ def dashboard_ceo():
 
                 # Costi Reali (Ordini - NETTO)
                 c_reale = 0.0
+                
+                # Se è edile, il costo stimato manuale viene considerato costo reale (effettivo)
+                if p.get("tipo_preventivo") == "edile":
+                    c_reale += sum(_to_float(r.get("costo_stimato")) for r in p.get("righe_edili", []))
+
                 for ordine in p.get("ordini_fornitore", []):
                     # Usiamo il helper per il netto
                     c_reale += _get_netto_ordine(ordine)
@@ -2798,18 +3282,21 @@ def dashboard_ceo():
                 quota_iva = val_lordo - val_netto
                 fee_su_incasso = val_netto * (fee_pct / 100.0) if fee_pct > 0 else 0.0
 
-                # A. PAGAMENTI GIÀ INCASSATI
-                if start_date <= d_pag <= end_date and d_pag <= today:
+                # A. PAGAMENTI GIÀ INCASSATI (Solo se NON programmati/scheduled)
+                if start_date <= d_pag <= end_date and not pag.get("is_scheduled"):
                     cashflow["incassato_netto"] += val_netto
                     cashflow["fee_versata"] += fee_su_incasso
                     if not is_no_iva: cashflow["iva_preventivi"] += quota_iva
 
-                # B. PAGAMENTI FUTURI
-                if d_pag > today:
+                # B. PAGAMENTI PROGRAMMATI / IN ATTESA (Riconosciuti dal flag is_scheduled)
+                if pag.get("is_scheduled"):
                     cashflow["in_attesa_netto"] += val_netto
                     future_payments.append({
-                        "data": d_pag, "cliente": p.get("cliente"), "preventivo": p.get("numero"),
-                        "importo_netto": val_netto, "note": pag.get("note", "")
+                        "data": d_pag, 
+                        "cliente": p.get("cliente"), 
+                        "preventivo": p.get("numero"),
+                        "importo_netto": val_netto, 
+                        "note": pag.get("note", "")
                     })
             
             # --- USCITE (ORDINI) ---
@@ -2946,10 +3433,11 @@ def export_cashflow_excel():
         if p.get("stato") in ["Annullato", "Bozza", "Inviato"]: 
             continue
 
+        # --- MODIFICA: Assicuriamo che i totali siano popolati (Edile usa campi standard per i totali) ---
         imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
         totale_lordo = _to_float(p.get("totale", 0))
         tot_iva = _to_float(p.get("tot_iva", 0))
-        fee_pct = _to_float(p.get("fee_pct", 0)) 
+        fee_pct = _to_float(p.get("fee_pct", 0))
         
         raw_no_iva = p.get("no_iva")
         is_no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
@@ -2991,12 +3479,29 @@ def export_cashflow_excel():
                     "FEE VERSATA ": fee_val, 
                     "IVA ORDINE (€)": 0.0, "IVA PREVENTIVO (€)": val_iva_prev, "IVA ESENTE (€)": val_iva_esente,   
                     "TIPO": "INCASSO"
-                })
+            })
 
         # --- B. USCITE (ORDINI) ---
+        # Aggiunta: Gestione costi manuali per preventivi Edili
+        if p.get("tipo_preventivo") == "edile":
+            costo_manuale_tot = sum(_to_num(r.get("costo_stimato", 0)) for r in p.get("righe_edili", []))
+            if costo_manuale_tot > 0:
+                # Usiamo la data di conferma o quella del preventivo come data transazione
+                d_trans = _str_to_date(p.get("data_conferma")) or _str_to_date(p.get("data"))
+                if d_trans and start_date <= d_trans <= end_date:
+                    cashflow_rows.append({
+                        "N. PREVENTIVO": p.get("numero"), "CLIENTE": p.get("cliente"), "STATO": p.get("stato"),
+                        "VENDITORE": p.get("venditore"), "ID (Rif.)": "Costi Stimati (Manuali Edile)",
+                        "DATA TRANSAZIONE": d_trans,
+                        "ENTRATE NETTE (€)": 0.0, "USCITE NETTE (€)": costo_manuale_tot,
+                        "FEE VERSATA ": 0.0, 
+                        "IVA ORDINE (€)": 0.0, "IVA PREVENTIVO (€)": 0.0, "IVA ESENTE (€)": 0.0,   
+                        "TIPO": "USCITA"
+                    })
+
         for ordine in p.get("ordini_fornitore", []):
             d_transazione = None
-            if ordine.get("allegati"): 
+            if ordine.get("allegati"):
                 try: d_transazione = datetime.datetime.strptime(ordine["allegati"][0]["data_upload"], "%Y-%m-%d").date()
                 except: pass
             if not d_transazione and ordine.get("data_arrivo"):
@@ -3127,8 +3632,11 @@ def export_excel_ceo():
         if stato_attuale in ["Annullato", "Bozza", "Inviato"]:
             continue
 
+        # Usiamo la data di conferma per i preventivi confermati/lavorazione/chiusi
+        raw_date = p.get("data_conferma") if stato_attuale in ["Confermato", "In Lavorazione", "Chiuso"] and p.get("data_conferma") else p.get("data")
+
         try:
-            p_date = datetime.datetime.strptime(p.get("data"), "%Y-%m-%d").date()
+            p_date = datetime.datetime.strptime(raw_date, "%Y-%m-%d").date()
         except:
             continue
             
@@ -3137,30 +3645,43 @@ def export_excel_ceo():
             # --- CALCOLI ---
             somma_importi_ordini = 0.0
             somma_iva_ordini = 0.0
+
+            # Se è edile, aggiungiamo il costo stimato manuale ai costi da ordini (effettivi)
+            if p.get("tipo_preventivo") == "edile":
+                somma_importi_ordini += sum(_to_float(r.get("costo_stimato")) for r in p.get("righe_edili", []))
+
             for ordine in p.get("ordini_fornitore", []):
                 imp = _to_float(ordine.get("importo", 0))
                 iva = _to_float(ordine.get("iva_ordine", 0)) 
                 somma_importi_ordini += imp
-                somma_iva_ordini += iva
 
+            # --- MODIFICA: Calcolo Costo Negozio differenziato ---
             costo_negozio_totale = 0.0
-            for r in p.get("righe", []):
-                qt = _to_float(r.get("qt", 0))
-                cat = _to_float(r.get("prezzo_catalogo", 0))
-                s1 = _to_float(r.get("s1", 0))
-                s2 = _to_float(r.get("s2", 0))
-                s3 = _to_float(r.get("s3", 0))
-                price_netto = cat * (1 - s1/100) * (1 - s2/100) * (1 - s3/100)
-                trasp = _to_float(r.get("costo_trasporto", 0))
-                extra = _to_float(r.get("extra", 0))
-                unt = str(r.get("unt", "")).strip().upper()
-                
-                row_cost = 0.0
-                if unt == "MQ": row_cost = (price_netto * qt) + (trasp * qt) + extra
-                elif unt in ["PZ", "ML", "PZ."]: row_cost = (price_netto * qt) + trasp + extra
-                elif unt == "S": row_cost = (price_netto * qt)
-                else: row_cost = (price_netto * qt) + extra
-                costo_negozio_totale += row_cost
+            is_edile = p.get("tipo_preventivo") == "edile"
+            
+            if is_edile:
+                # Per l'edile sommiamo semplicemente il costo stimato di ogni riga
+                for r in p.get("righe_edili", []):
+                    costo_negozio_totale += _to_float(r.get("costo_stimato", 0))
+            else:
+                # Logica standard per articoli da listino
+                for r in p.get("righe", []):
+                    qt = _to_float(r.get("qt", 0))
+                    cat = _to_float(r.get("prezzo_catalogo", 0))
+                    s1 = _to_float(r.get("s1", 0))
+                    s2 = _to_float(r.get("s2", 0))
+                    s3 = _to_float(r.get("s3", 0))
+                    price_netto = cat * (1 - s1/100) * (1 - s2/100) * (1 - s3/100)
+                    trasp = _to_float(r.get("costo_trasporto", 0))
+                    extra = _to_float(r.get("extra", 0))
+                    unt = str(r.get("unt", "")).strip().upper()
+                    
+                    row_cost = 0.0
+                    if unt == "MQ": row_cost = (price_netto * qt) + (trasp * qt) + extra
+                    elif unt in ["PZ", "ML", "PZ."]: row_cost = (price_netto * qt) + trasp + extra
+                    elif unt == "S": row_cost = (price_netto * qt)
+                    else: row_cost = (price_netto * qt) + extra
+                    costo_negozio_totale += row_cost
 
             imponibile_cliente = _to_float(p.get("tot_imponibile_cliente", 0))
             
@@ -3190,7 +3711,7 @@ def export_excel_ceo():
             # --- RIGA DATI ---
             row = {
                 "N. Preventivo": p.get("numero"),
-                "Data": p.get("data"),
+                "Data": p_date.strftime("%Y-%m-%d"),
                 "Cliente": p.get("cliente"),
                 "Stato": p.get("stato"),
                 "Totale Preventivo (€)": totale_preventivo,
@@ -3289,6 +3810,10 @@ def analisi_preventivo(quote_id):
         _get_ordine_costo_effettivo_netto(o)
         for o in p.get("ordini_fornitore", [])
     )
+
+    # Se è edile, integriamo il costo stimato manuale nei costi effettivi
+    if p.get("tipo_preventivo") == "edile":
+        costi_effettivi_netti += sum(_to_num(r.get("costo_stimato")) for r in p.get("righe_edili", []))
     
     # Recuperiamo i profitti stimati dal calcolo riga per riga
     profitti = _calculate_profits_from_quote(p)
@@ -3410,6 +3935,10 @@ def analisi_cliente(client_id):
             # B. Costi Effettivi (Somma ordini netti)
             costo_eff = sum(_get_ordine_costo_effettivo_netto(o) for o in p.get("ordini_fornitore", []))
             
+            # Se è edile, integriamo il costo stimato manuale nei costi effettivi
+            if p.get("tipo_preventivo") == "edile":
+                costo_eff += sum(_to_num(r.get("costo_stimato")) for r in p.get("righe_edili", []))
+            
             # C. Fee Semplificata (Imponibile * Fee%)
             fee_pct = _to_num(p.get("fee_pct"))
             fee_val = imp_cliente * (fee_pct / 100)
@@ -3457,16 +3986,16 @@ def analisi_cliente(client_id):
                     if giorni >= 0: tempi_chiusura_list.append(giorni)
                 except: pass
 
-        # Cash Flow (incassi)
+        # Cash Flow (incassi - distingue tra incassato e da incassare via flag)
         for pag in p.get("pagamenti", []):
             if pag.get("rectifies_id"): continue
             imp_pag = _to_num(pag.get("importo"))
             if imp_pag <= 0: continue
-            try:
-                d_pag = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
-                if d_pag <= today: analisi['incassato'] += imp_pag
-                else: analisi['da_incassare'] += imp_pag
-            except: pass
+            
+            if pag.get("is_scheduled"):
+                analisi['da_incassare'] += imp_pag
+            else:
+                analisi['incassato'] += imp_pag
 
     # 3. Calcolo Percentuali Medie Finali
     if analisi['imponibile_cliente'] > 0:
@@ -3541,6 +4070,8 @@ def dashboard_ordini():
         title="Dashboard Ordini Fornitore",
         preventivi=preventivi_con_ordini
     )
+# --- File: gestionale.py (intorno alla riga 1970) ---
+
 @app.route("/consegne")
 @login_required
 def dashboard_consegne():
@@ -3553,16 +4084,24 @@ def dashboard_consegne():
         p = load_quote(prev_summary["numero"])
         if not p: continue
 
+        # Gestione Preventivi Edili
+        if p.get("tipo_preventivo") == "edile":
+            if p.get("stato") in ["Confermato", "In Lavorazione"]:
+                non_consegnati = [r for r in p.get("righe_edili", []) if r.get("stato_consegna") != "Consegnato"]
+                if non_consegnati:
+                    p["articoli_da_consegnare_count"] = len(non_consegnati)
+                    preventivi_da_consegnare.append(p)
+            continue
+
         ordini_confermati = [o for o in p.get("ordini_fornitore", []) if o.get("numero_conferma", "").strip()]
         if not ordini_confermati: continue
 
+        # --- RECUPERO INDICI CONFERMATI ---
         indici_confermati = set()
         for o in ordini_confermati:
             indici_confermati.update(o.get("indici_righe", []))
 
-        if not indici_confermati: continue
-
-# --- NUOVA LOGICA CORRETTA ---
+        # --- NUOVA LOGICA CORRETTA ---
         # Trova tutti gli articoli degli ordini confermati che NON sono ancora stati "Consegnati"
         articoli_non_consegnati = []
         for index in indici_confermati:
@@ -3592,18 +4131,36 @@ def gestione_consegna(quote_id):
         flash("Preventivo non trovato.")
         return redirect(url_for("dashboard_consegne"))
 
-    ordini_confermati = [o for o in p.get("ordini_fornitore", []) if o.get("numero_conferma", "").strip()]
-    
-    for ordine in ordini_confermati:
-        items_in_ordine = []
-        for item_index in ordine.get("indici_righe", []):
-            if 0 <= item_index < len(p["righe"]):
-                riga = p["righe"][item_index]
-                riga["original_index"] = item_index
-                items_in_ordine.append(riga)
-        ordine["articoli"] = items_in_ordine
+    if p.get("tipo_preventivo") == "edile":
+        # Crea un ordine virtuale per le lavorazioni edili
+        items = []
+        for i, r in enumerate(p.get("righe_edili", [])):
+            r_copy = r.copy()
+            r_copy["stato_consegna"] = r.get("stato_consegna") or "Pronto per Consegna"
+            r_copy["original_index"] = i
+            r_copy["unt"] = r.get("unt", "Lav.")
+            r_copy["qt"] = "1"
+            items.append(r_copy)
+            
+        ordini_confermati = [{
+            "numero_conferma": "LAVORAZIONI EDILI",
+            "azienda": "Gestione Interna",
+            "data_arrivo": p.get("data"),
+            "articoli": items
+        }]
+    else:
+        ordini_confermati = [o for o in p.get("ordini_fornitore", []) if o.get("numero_conferma", "").strip()]
+        
+        for ordine in ordini_confermati:
+            items_in_ordine = []
+            for item_index in ordine.get("indici_righe", []):
+                if 0 <= item_index < len(p["righe"]):
+                    riga = p["righe"][item_index]
+                    riga["original_index"] = item_index
+                    items_in_ordine.append(riga)
+            ordine["articoli"] = items_in_ordine
 
-    # --- NUOVA LOGICA DI ORDINAMENTO ---
+   
     # Funzione che controlla se un ordine è completato (tutti gli articoli 'Consegnato')
     def is_ordine_completato(ordine):
         if not ordine.get("articoli"):
@@ -3620,6 +4177,8 @@ def gestione_consegna(quote_id):
         ordini_confermati=ordini_confermati,
         geo_data=GEO_DATA
     )
+# --- File: gestionale.py (intorno alla riga 2043) ---
+
 @app.route("/consegna/<quote_id>/marca-pronto", methods=["POST"])
 @login_required
 def marca_pronto(quote_id):
@@ -3630,11 +4189,14 @@ def marca_pronto(quote_id):
     if not indici_da_marcare:
         return jsonify({"success": False, "error": "Nessun articolo selezionato"})
 
+    # Seleziona la lista corretta in base al tipo
+    target_list = "righe_edili" if p.get("tipo_preventivo") == "edile" else "righe"
+
     today_str = datetime.date.today().strftime('%Y-%m-%d')
     for index in indici_da_marcare:
-        if 0 <= index < len(p["righe"]):
-            p["righe"][index]["stato_consegna"] = "Pronto per Consegna"
-            p["righe"][index]["data_arrivo_in_house"] = today_str # <-- AGGIUNTO
+        if 0 <= index < len(p[target_list]):
+            p[target_list][index]["stato_consegna"] = "Pronto per Consegna"
+            p[target_list][index]["data_arrivo_in_house"] = today_str
 
     save_quote(quote_id, p)
     return jsonify({"success": True})
@@ -3652,11 +4214,14 @@ def marca_consegnato(quote_id):
     if not indici_da_marcare:
         return jsonify({"success": False, "error": "Nessun articolo selezionato"})
 
+    # Seleziona la lista corretta in base al tipo
+    target_list = "righe_edili" if p.get("tipo_preventivo") == "edile" else "righe"
+    
     today_str = datetime.date.today().strftime('%Y-%m-%d')
     for index in indici_da_marcare:
-        if 0 <= index < len(p["righe"]):
-            p["righe"][index]["stato_consegna"] = "Consegnato"
-            p["righe"][index]["data_consegna"] = today_str # <-- AGGIUNTO
+        if 0 <= index < len(p[target_list]):
+            p[target_list][index]["stato_consegna"] = "Consegnato"
+            p[target_list][index]["data_consegna"] = today_str
 
     aggiorna_stato_consegna_globale(p) 
     aggiorna_stato_avanzamento(p) 
@@ -3679,12 +4244,17 @@ def annulla_stato_consegna(quote_id):
     keep_bolla = form.get("keep_bolla") == "true"
     item_indices = [int(i) for i in form.getlist("indices[]")]
 
+    # --- File: gestionale.py (intorno alla riga 2091) ---
+
     if not item_indices or not target_status:
         return jsonify({"success": False, "error": "Dati mancanti per l'operazione."})
 
+    # Seleziona la lista corretta in base al tipo
+    target_list = "righe_edili" if p.get("tipo_preventivo") == "edile" else "righe"
+
     for index in item_indices:
-        if 0 <= index < len(p["righe"]):
-            riga = p["righe"][index]
+        if 0 <= index < len(p[target_list]):
+            riga = p[target_list][index]
             original_bolla_id = riga.get("bolla_id")
 
             # 1. Aggiorna lo stato e resetta le date successive
@@ -3799,14 +4369,11 @@ def dashboard_pagamenti():
         totale_pagato_effettivo = 0.0
         totale_da_incassare = 0.0
         
-        # 1. Calcolo Pagamenti Fisici
+        # 1. Calcolo Pagamenti Fisici (rispettando il flag programmato)
         for pag in pagamenti:
             importo_float = _str_to_float(pag.get("importo"))
-            try:
-                payment_date = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
-            except: payment_date = today 
-
-            if payment_date > today and importo_float > 0:
+            
+            if pag.get("is_scheduled") and importo_float > 0:
                 totale_da_incassare += importo_float
             else:
                 totale_pagato_effettivo += importo_float
@@ -3859,6 +4426,10 @@ def gestione_pagamenti(quote_id):
         flash("Preventivo non trovato.")
         return redirect(url_for("dashboard_pagamenti"))
 
+    # --- AGGIUNTA: Forza ricalcolo all'apertura per aggiornare i campi a 0 ---
+    aggiorna_stato_pagamento_globale(p)
+    # -----------------------------------------------------------------------
+
     pagamenti_raw = p.get("pagamenti", [])
     today = datetime.date.today()
     
@@ -3884,16 +4455,11 @@ def gestione_pagamenti(quote_id):
     for pag in pagamenti_raw:
         new_pag = pag.copy()
         importo_float = _str_to_float(new_pag.get("importo"))
-        is_future = False
+        is_future = new_pag.get("is_scheduled", False)
 
-        try:
-            payment_date = datetime.datetime.strptime(new_pag.get("data"), '%Y-%m-%d').date()
-            if payment_date > today and importo_float > 0:
-                is_future = True
-                totale_da_incassare += importo_float
-            else:
-                totale_pagato_effettivo += importo_float
-        except:
+        if is_future and importo_float > 0:
+            totale_da_incassare += importo_float
+        else:
             totale_pagato_effettivo += importo_float
         
         is_rettificabile = (importo_float > 0 and not is_future and new_pag.get("id") not in ids_rettificati)
@@ -3975,8 +4541,10 @@ def aggiungi_pagamento(quote_id):
         "id": f"PAY-{uuid.uuid4().hex[:8].upper()}",
         "data": request.form.get("data", datetime.date.today().strftime('%Y-%m-%d')),
         "importo": request.form.get("importo"),
-        "note": nota_finale
+        "note": nota_finale,
+        "is_scheduled": (request.form.get("data") > datetime.date.today().strftime('%Y-%m-%d'))
     }
+
 
     # Validazione semplice
     if not nuovo_pagamento["importo"] or float(nuovo_pagamento["importo"].replace(",", ".")) <= 0:
@@ -4060,6 +4628,7 @@ def conferma_incasso(quote_id):
     for pag in p.get("pagamenti", []):
         if pag.get("id") == payment_id_to_confirm:
             pag["data"] = datetime.date.today().strftime('%Y-%m-%d')
+            pag["is_scheduled"] = False
             payment_found = True
             break
     
@@ -4070,6 +4639,79 @@ def conferma_incasso(quote_id):
         flash("Pagamento futuro confermato e incassato oggi.", "success")
     else:
         flash("Errore: Pagamento da confermare non trovato.", "error")
+
+    return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+@app.route("/pagamenti/<quote_id>/modifica-data", methods=["POST"])
+@login_required
+def modifica_data_pagamento(quote_id):
+    """Aggiorna la data di un pagamento programmato (futuro)."""
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non autorizzato.", "error")
+        return redirect(request.referrer)
+
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.", "error")
+        return redirect(url_for("dashboard_pagamenti"))
+
+    payment_id = request.form.get("payment_id")
+    nuova_data = request.form.get("nuova_data")
+
+    if not nuova_data:
+        flash("Inserire una data valida.", "error")
+        return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+    payment_found = False
+    for pag in p.get("pagamenti", []):
+        if pag.get("id") == payment_id:
+            pag["data"] = nuova_data
+            payment_found = True
+            break
+
+    if payment_found:
+        save_quote(quote_id, p)
+        flash("Data del pagamento aggiornata con successo.", "success")
+    else:
+        flash("Errore: Pagamento non trovato.", "error")
+
+    return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+@app.route("/pagamenti/<quote_id>/modifica-programmato", methods=["POST"])
+@login_required
+def modifica_pagamento_programmato(quote_id):
+    """Modifica data e importo di un pagamento futuro tramite modale."""
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non autorizzato.", "error")
+        return redirect(request.referrer)
+
+    p = load_quote(quote_id)
+    if not p: return redirect(url_for("dashboard"))
+
+    payment_id = request.form.get("payment_id")
+    nuova_data = request.form.get("nuova_data")
+    nuovo_importo = request.form.get("nuovo_importo")
+
+    payment_found = False
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    for pag in p.get("pagamenti", []):
+        if pag.get("id") == payment_id:
+            pag["data"] = nuova_data
+            pag["importo"] = nuovo_importo
+            pag["is_scheduled"] = (nuova_data > today_str)
+            payment_found = True
+            break
+    
+    if payment_found:
+        # Ricalcola i totali globali perché l'importo potrebbe essere cambiato
+        aggiorna_stato_pagamento_globale(p)
+        aggiorna_stato_avanzamento(p)
+        save_quote(quote_id, p)
+        flash("Pagamento aggiornato con successo.", "success")
+    else:
+        flash("Errore: Pagamento non trovato.", "error")
 
     return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
 
@@ -4096,7 +4738,13 @@ def generate_bolla_task(quote_id, bolla_id):
         log_pdf_event(log_id, "ERRORE", "Bolla non trovata.")
         return jsonify({"error": "Bolla non trovata"}), 404
 
-    righe_bolla = [p["righe"][i] for i in bolla.get("indici_righe", []) if 0 <= i < len(p["righe"])]
+    # Determina sorgente righe e template in base al tipo
+    is_edile = p.get("tipo_preventivo") == "edile"
+    target_list = "righe_edili" if is_edile else "righe"
+    template_name = "stampa_consegna_lavori.html" if is_edile else "stampa_bolla.html"
+    
+    righe_bolla = [p[target_list][i] for i in bolla.get("indici_righe", []) if 0 <= i < len(p[target_list])]
+    
     indirizzo_consegna = None
     indirizzo_id = bolla.get("indirizzo_cantiere_id")
     if indirizzo_id:
@@ -4108,22 +4756,18 @@ def generate_bolla_task(quote_id, bolla_id):
     bolla_id_safe = bolla_id.replace('-', '_')
     pdf_name = f"{bolla_id_safe}_{quote_num_safe}.pdf"
     out_path = (QUOTES_DIR / pdf_name).resolve()
-    log_pdf_event(log_id, "INFO", f"Percorso output PDF: {out_path}")
 
     url = url_for("stampa_bolla_html", quote_id=quote_id, bolla_id=bolla_id, _external=True)
     browser_exe = next((exe for exe in [shutil.which("msedge"), shutil.which("chrome"), shutil.which("google-chrome")] if exe), None)
 
     ok = False
-    
     # --- TENTATIVO BROWSER ---
     if browser_exe:
         try:
             cmd = [browser_exe, "--headless=new", "--disable-gpu", f"--print-to-pdf={out_path}", url]
             subprocess.run(cmd, check=True, timeout=60, capture_output=True, text=True, encoding='utf-8', errors='ignore')
-            # Controllo rigoroso: il file deve esistere ed essere > 1KB
             ok = out_path.exists() and out_path.stat().st_size > 1000 
-            if ok:
-                 log_pdf_event(log_id, "SUCCESSO", f"PDF generato con browser. Size: {out_path.stat().st_size}")
+            if ok: log_pdf_event(log_id, "SUCCESSO", f"PDF generato con browser. Size: {out_path.stat().st_size}")
         except Exception as e:
             log_pdf_event(log_id, "ERRORE", f"Errore browser: {e}")
 
@@ -4131,34 +4775,30 @@ def generate_bolla_task(quote_id, bolla_id):
     if not ok:
         try:
             from weasyprint import HTML
-            html_string = render_template("stampa_bolla.html", p=p, bolla=bolla, righe_bolla=righe_bolla, indirizzo_consegna=indirizzo_consegna)
+            html_string = render_template(template_name, p=p, bolla=bolla, righe_bolla=righe_bolla, indirizzo_consegna=indirizzo_consegna)
             HTML(string=html_string, base_url=request.url_root).write_pdf(out_path)
             ok = out_path.exists() and out_path.stat().st_size > 1000
-            if ok:
-                log_pdf_event(log_id, "SUCCESSO", f"PDF generato con WeasyPrint.")
+            if ok: log_pdf_event(log_id, "SUCCESSO", f"PDF generato con WeasyPrint.")
         except Exception as e:
             log_pdf_event(log_id, "ERRORE", f"Errore WeasyPrint: {e}")
 
     if not ok:
         log_pdf_event(log_id, "FALLIMENTO", "Generazione fallita.")
-        return jsonify({"error": "Impossibile generare il PDF della bolla."}), 500
+        return jsonify({"error": "Impossibile generare il PDF."}), 500
 
-    # === PUNTO CRUCIALE: AGGIORNAMENTO DI STATO ===
-    # Aggiorniamo lo stato delle righe SOLO ORA che siamo sicuri che il PDF esiste
+    # === AGGIORNAMENTO DI STATO SULLA LISTA CORRETTA ===
     made_changes = False
     for index in bolla.get("indici_righe", []):
-        if 0 <= index < len(p["righe"]):
-            # Imposta lo stato e collega l'ID bolla
-            p["righe"][index]["stato_consegna"] = "In Bolla"
-            p["righe"][index]["bolla_id"] = bolla_id
+        if 0 <= index < len(p[target_list]):
+            p[target_list][index]["stato_consegna"] = "In Bolla"
+            p[target_list][index]["bolla_id"] = bolla_id
             made_changes = True
 
     if made_changes:
-        # Aggiorniamo anche gli stati globali per riflettere il cambiamento
         aggiorna_stato_consegna_globale(p)
         aggiorna_stato_avanzamento(p)
         save_quote(quote_id, p)
-        log_pdf_event(log_id, "INFO", "Stato righe aggiornato a 'In Bolla'.")
+        log_pdf_event(log_id, "INFO", f"Stato righe {target_list} aggiornato.")
 
     pdf_url = url_for("pdf_inline", filename=pdf_name)
     return jsonify({"pdf_url": pdf_url})
@@ -4191,24 +4831,14 @@ def dashboard_fatture():
 def editor_fattura(quote_id):
     """Pagina di visualizzazione snellita di un preventivo per la fatturazione."""
     p = load_quote(quote_id)
-    # --- BLOCCO DI MIGRAZIONE DA AGGIUNGERE ---
-    if p and migra_vecchie_fatture_a_iva(p):
-        save_quote(quote_id, p)
-        print(f"MIGRAZIONE: Dati fattura migrati per {quote_id}")
-    # --- FINE BLOCCO MIGRAZIONE ---
-    if not p:
-        flash("Preventivo non trovato.", "error")
-        return redirect(url_for("dashboard_fatture"))
+    # ... (migrazione esistente) ...
+
+    # --- INIZIO LOGICA EDILI / STANDARD ---
+    is_edile = p.get("tipo_preventivo") == "edile"
+    righe_sorgente = p.get("righe_edili", []) if is_edile else p.get("righe", [])
     
-    stati_validi = ["Confermato", "In Lavorazione", "Chiuso"]
-    if p.get("stato") not in stati_validi:
-        flash("Questo preventivo non è ancora stato confermato.", "warning")
-        return redirect(url_for("dashboard_fatture"))
-        
-    # --- NUOVA LOGICA DI RAGGRUPPAMENTO ---
     dati_fattura = {}
     
-    # Helper per convertire stringhe di prezzo in numeri
     def _clean_num(val_str):
         try:
             return float(str(val_str).replace("€", "").replace(".", "").replace(",", ".").strip())
@@ -4216,40 +4846,49 @@ def editor_fattura(quote_id):
             return 0.0
 
     # 1. Raggruppa le righe per aliquota IVA
-    for riga in p.get("righe", []):
+    for riga in righe_sorgente:
         if not riga.get("articolo"): continue
         
-        # Pulisce la chiave IVA (es. "22 %" -> "22")
-        iva_key = riga.get("iva_pct", "22 %").replace("%", "").strip()
+        iva_key = str(riga.get("iva_pct", "22 %")).replace("%", "").strip()
         
         if iva_key not in dati_fattura:
-            # Prepara il contenitore per questa aliquota IVA
             dati_fattura[iva_key] = {
                 "righe": [],
-                "imponibile_str": p.get("imponibili_iva", {}).get(iva_key, "0,00"),
-                "iva_str": p.get("tot_iva_dettaglio", {}).get(iva_key, "0,00"),
-                # Usa il NUOVO modello dati p.fatture_per_iva
+                "imponibile_val": 0.0,
+                "iva_val": 0.0,
                 "fatture_allegate": p.get("fatture_per_iva", {}).get(iva_key, []),
-                # Aggiungiamo il flag per lo stato specifico di questa aliquota
                 "is_fatturato": p.get("stati_fattura_iva", {}).get(iva_key, False)
             }
         
-        dati_fattura[iva_key]["righe"].append(riga)
+        # Mapping campi per compatibilità template HTML
+        r_view = riga.copy()
+        if is_edile:
+            val_prezzo = _clean_num(riga.get("prezzo_vendita"))
+            r_view["tot_prezzo_unitario"] = riga.get("prezzo_vendita")
+            r_view["tot_prezzo"] = riga.get("prezzo_vendita")
+            r_view["qt"] = "1"
+            r_view["unt"] = "Lav."
+            dati_fattura[iva_key]["imponibile_val"] += val_prezzo
+            dati_fattura[iva_key]["iva_val"] += val_prezzo * (_clean_num(iva_key) / 100)
+        else:
+            dati_fattura[iva_key]["imponibile_val"] += _clean_num(riga.get("tot_prezzo"))
+            dati_fattura[iva_key]["iva_val"] += _clean_num(riga.get("tot_iva_riga"))
 
-    # 2. Calcola il totale per ogni gruppo
+        dati_fattura[iva_key]["righe"].append(r_view)
+
+    # 2. Finalizzazione stringhe per il template
     for key, data in dati_fattura.items():
-        imponibile = _clean_num(data["imponibile_str"])
-        iva = _clean_num(data["iva_str"])
-        data["totale"] = imponibile + iva
+        data["imponibile_str"] = f"{data['imponibile_val']:.2f}".replace(".", ",")
+        data["iva_str"] = f"{data['iva_val']:.2f}".replace(".", ",")
+        data["totale"] = data["imponibile_val"] + data["iva_val"]
+    # --- FINE LOGICA EDILI ---
 
-    # 3. Ordina i gruppi (es. 22% prima, poi 10%, ecc.)
     dati_fattura_ordinati = dict(sorted(dati_fattura.items(), key=lambda item: item[0], reverse=True))
-    # --- FINE NUOVA LOGICA ---
 
     return render_template("editor_fattura.html", 
         title=f"Dettaglio Fattura da Preventivo {quote_id}",
         p=p,
-        dati_fattura=dati_fattura_ordinati # Passiamo i dati raggruppati
+        dati_fattura=dati_fattura_ordinati
     )
 
 @app.route("/fattura/<quote_id>/allega", methods=["POST"])
@@ -4384,19 +5023,24 @@ def toggle_stato_fattura_iva(quote_id):
     flash(f"Stato fatturazione aggiornato.", "success")
     return redirect(url_for("editor_fattura", quote_id=quote_id))
 
+
 @app.route("/stampa-bolla-html/<quote_id>/<bolla_id>")
 @login_required
 def stampa_bolla_html(quote_id, bolla_id):
-    """Renderizza il template HTML per la stampa della bolla."""
+    """Renderizza il template HTML per la stampa della bolla o consegna lavori."""
     p = load_quote(quote_id)
     if not p: return "Preventivo non trovato", 404
     
     bolla = next((b for b in p.get("bolle", []) if b.get("id") == bolla_id), None)
     if not bolla: return "Bolla non trovata", 404
 
-    righe_bolla = [p["righe"][i] for i in bolla.get("indici_righe", []) if 0 <= i < len(p["righe"])]
+    # Determina sorgente righe e template in base al tipo
+    is_edile = p.get("tipo_preventivo") == "edile"
+    target_list = "righe_edili" if is_edile else "righe"
+    template_name = "stampa_consegna_lavori.html" if is_edile else "stampa_bolla.html"
 
-    # Logica per trovare l'indirizzo di consegna corretto
+    righe_bolla = [p[target_list][i] for i in bolla.get("indici_righe", []) if 0 <= i < len(p[target_list])]
+
     indirizzo_consegna = None
     indirizzo_id = bolla.get("indirizzo_cantiere_id")
     if indirizzo_id:
@@ -4404,7 +5048,7 @@ def stampa_bolla_html(quote_id, bolla_id):
         if client:
             indirizzo_consegna = next((addr for addr in client.get("indirizzi_cantiere", []) if addr.get("id") == indirizzo_id), None)
 
-    return render_template("stampa_bolla.html", p=p, bolla=bolla, righe_bolla=righe_bolla, indirizzo_consegna=indirizzo_consegna)
+    return render_template(template_name, p=p, bolla=bolla, righe_bolla=righe_bolla, indirizzo_consegna=indirizzo_consegna)
 @app.route("/stampa-html/<quote_id>")
 @login_required
 def stampa_html(quote_id):
@@ -4617,6 +5261,170 @@ def setup_and_run_tray_icon():
     menu = (item('Apri Gestionale', open_app, default=True), item('Esci', quit_app))
     icon = pystray.Icon("Gestionale", image, SERVER_ADDRESS_INFO, menu)
     icon.run()
+def load_messages():
+    if not MESSAGES_FILE.exists(): return []
+    try:
+        with MESSAGES_FILE.open("r", encoding="utf-8") as f: return json.load(f)
+    except: return []
+
+def save_messages(msgs):
+    with MESSAGES_FILE.open("w", encoding="utf-8") as f: json.dump(msgs, f, indent=2)
+
+@app.route("/api/messages/users")
+@login_required
+def api_get_chat_users():
+    all_users = load_users()
+    me = session["user_id"]
+    msgs = load_messages()
+    
+    users_with_stats = []
+    for u in all_users:
+        if u["username"] == me or u["role"] == 'amministratore': continue
+        
+        # 1. Conta non letti verso di me
+        unread = sum(1 for m in msgs if m["from"] == u["username"] and m["to"] == me and not m.get("read", False))
+        
+        # 2. Trova il timestamp dell'ultimo messaggio (inviato o ricevuto)
+        user_msgs = [m for m in msgs if (m["from"] == u["username"] and m["to"] == me) or (m["from"] == me and m["to"] == u["username"])]
+        last_ts = "0000-00-00 00:00:00"
+        if user_msgs:
+            last_ts = max(m["timestamp"] for m in user_msgs)
+        
+        users_with_stats.append({
+            "username": u["username"],
+            "full_name": u["full_name"],
+            "role": u["role"],
+            "unread_count": unread,
+            "last_message_timestamp": last_ts
+        })
+    
+    # 3. Ordinamento: Prima chi ha messaggi non letti (desc), poi per data ultimo messaggio (desc)
+    users_with_stats.sort(key=lambda x: (x["unread_count"] > 0, x["last_message_timestamp"]), reverse=True)
+        
+    return jsonify(users_with_stats)
+
+@app.route("/api/messages/history/<other_user>")
+@login_required
+def api_get_chat_history(other_user):
+    me = session["user_id"]
+    msgs = load_messages()
+    
+    # Marcatura come letti: se il messaggio è per me ed è dell'utente che sto aprendo
+    changed = False
+    for m in msgs:
+        if m["to"] == me and m["from"] == other_user and not m.get("read"):
+            m["read"] = True
+            changed = True
+    
+    if changed:
+        save_messages(msgs)
+
+    # Filtra messaggi tra ME e l'ALTRO UTENTE
+    history = [m for m in msgs if (m["from"] == me and m["to"] == other_user) or (m["from"] == other_user and m["to"] == me)]
+    return jsonify(history)
+
+@app.route("/api/messages/send", methods=["POST"])
+@login_required
+def api_send_message():
+    data = request.json
+    if not data.get("text") or not data.get("to"): return jsonify({"success": False}), 400
+    
+    msgs = load_messages()
+    nuovo_msg = {
+        "from": session["user_id"],
+        "from_name": session["user_name"],
+        "to": data["to"],
+        "text": data["text"],
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "read": False # Stato iniziale non letto
+    }
+    msgs.append(nuovo_msg)
+    save_messages(msgs)
+    return jsonify({"success": True, "msg": nuovo_msg})
+
+@app.route("/api/messages/unread_total")
+@login_required
+def api_unread_total():
+    me = session["user_id"]
+    msgs = load_messages()
+    count = sum(1 for m in msgs if m["to"] == me and not m.get("read", False))
+    return jsonify({"unread_count": count})
+
+def load_tagbox():
+    if not TAGBOX_FILE.exists(): return []
+    try:
+        with TAGBOX_FILE.open("r", encoding="utf-8") as f: return json.load(f)
+    except: return []
+
+def save_tagbox(shouts):
+    with TAGBOX_FILE.open("w", encoding="utf-8") as f: json.dump(shouts, f, indent=2)
+
+@app.route("/api/tagbox", methods=["GET", "POST"])
+@login_required
+def api_tagbox():
+    if request.method == "POST":
+        data = request.json
+        shouts = load_tagbox()
+        nuovo_shout = {
+            "id": uuid.uuid4().hex[:6],
+            "user": session["user_name"],
+            "user_id": session["user_id"],
+            "text": data.get("text"),
+            "timestamp": datetime.datetime.now().strftime("%H:%M"),
+            "pinned": False
+        }
+        shouts.insert(0, nuovo_shout) # I più nuovi in alto
+        save_tagbox(shouts[:50]) # Teniamo solo gli ultimi 50
+        return jsonify({"success": True})
+    
+    return jsonify(load_tagbox())
+
+@app.route("/api/tagbox/pin/<shout_id>", methods=["POST"])
+@login_required
+@role_required('amministratore', 'ceo', 'segreteria') # Solo ruoli gestionali possono pinnare
+def api_pin_shout(shout_id):
+    shouts = load_tagbox()
+    for s in shouts:
+        if s["id"] == shout_id:
+            s["pinned"] = not s["pinned"] # Toggle pin
+    save_tagbox(shouts)
+    return jsonify({"success": True})
+
+@app.route("/api/suggestions/links")
+@login_required
+def api_suggestions_links():
+    term = request.args.get("q", "").lower().strip()
+    quotes = get_all_quotes() # Recupera tutti i preventivi
+    
+    suggestions = []
+    
+    # 1. Ricerca Preventivi
+    for q in quotes:
+        # Se non c'è termine mostra i recenti, altrimenti cerca nel numero o nel cliente
+        if not term or term in q["numero"].lower() or term in q["cliente"].lower():
+            suggestions.append({"id": q["numero"], "label": f"Prev. {q['numero']} ({q['cliente']})", "type": "quote"})
+        if len(suggestions) >= 5: break # Limite per i preventivi
+
+    # 2. Ricerca Clienti (usando i dati dei preventivi per velocità)
+    recent_clients_seen = set()
+    count_clients = 0
+    for q in quotes:
+        client_name = q.get("cliente", "")
+        # Filtriamo per termine se presente
+        if (not term or term in client_name.lower()) and client_name not in recent_clients_seen:
+            # Recuperiamo l'ID reale dal file del preventivo
+            p_data = load_quote(q["numero"])
+            if p_data:
+                suggestions.append({
+                    "id": p_data["id_cliente"], 
+                    "label": f"Cartella: {client_name}", 
+                    "type": "client"
+                })
+                recent_clients_seen.add(client_name)
+                count_clients += 1
+        if count_clients >= 5: break # Limite per i clienti
+
+    return jsonify(suggestions)
 
 
 if __name__ == "__main__":

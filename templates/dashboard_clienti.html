@@ -8,6 +8,16 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 
 <div class="editor-container">
+    {% if session.user_role != 'segreteria' %}
+    <div class="filter-bar" style="margin-bottom: 15px; display: flex; justify-content: flex-start;">
+        <div class="multi-switch" id="ownership-filter-switch" style="width: 350px;">
+            <div class="switch-thumb" style="width: 50%;"></div>
+            <div class="switch-label active" data-ownership="tutti">Tutti i Preventivi</div>
+            <div class="switch-label" data-ownership="miei">I Miei Preventivi</div>
+        </div>
+        <input type="hidden" id="active-ownership-filter" value="tutti">
+    </div>
+    {% endif %}
 
     {% include '_form_light_search.html' %}
     <div class="filter-bar">
@@ -67,7 +77,7 @@
                 </thead>
                 <tbody>
                     {% for p in data_cliente.preventivi %}
-                    <tr class="main-row" data-target-row="details-{{ p.numero }}">
+                    <tr class="main-row" data-target-row="details-{{ p.numero }}" data-venditore="{{ p.venditore | lower }}">
                         <td class="center expand-cell">
                             <button type="button" class="btn icon-btn expand-btn"><i class="fas fa-chevron-down"></i></button>
                         </td>
@@ -84,11 +94,12 @@
                         
                         <td>
                             {# Controlla prima se il preventivo è in uno stato in cui gli ordini sono rilevanti #}
-                            {% if p.stato in ['Confermato', 'In Lavorazione', 'Chiuso'] %}
+                            {% if p.tipo_preventivo == 'edile' %}
+                                <span class="status-badge status-nd">N/D</span>
+                            {% elif p.stato in ['Confermato', 'In Lavorazione', 'Chiuso'] %}
                             
                                 {% if p.articoli_da_ordinare_count > 0 %}
-                                    
-                                    {# CASO 1: Ci sono articoli da ordinare #}
+                                {# CASO 1: Ci sono articoli da ordinare #}
                                     {% if p.articoli_da_ordinare_count == p.articoli_da_ordinare_totale and p.articoli_da_ordinare_totale > 0 %}
                                         {# Se NESSUN articolo è stato ordinato #}
                                         <span class="status-badge status-annullato">Da Ordinare</span>
@@ -159,8 +170,16 @@
                         </td>
 
                         <td class="row-actions">
-                            <a href="{{ url_for('editor_preventivo', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Preventivo"><i class="fas fa-edit"></i></a>
-                            <a href="{{ url_for('conferma_ordine', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Ordini"><i class="fas fa-box-open"></i></a>
+                            {% if p.tipo_preventivo == 'edile' %}
+                                <a href="{{ url_for('editor_preventivo_edile', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Preventivo Edile"><i class="fas fa-edit"></i></a>
+                            {% else %}
+                                <a href="{{ url_for('editor_preventivo', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Preventivo"><i class="fas fa-edit"></i></a>
+                            {% endif %}
+                            
+                            {% if p.tipo_preventivo != 'edile' %}
+                                <a href="{{ url_for('conferma_ordine', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Ordini"><i class="fas fa-box-open"></i></a>
+                            {% endif %}
+
                             <a href="{{ url_for('gestione_consegna', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Consegna"><i class="fas fa-truck"></i></a>
                             <a href="{{ url_for('gestione_pagamenti', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Saldo"><i class="fas fa-coins"></i></a>
                             <a href="{{ url_for('editor_fattura', quote_id=p.numero) }}" class="btn icon-btn" title="Vai a Fatture"><i class="fas fa-file-invoice"></i></a>
@@ -471,100 +490,101 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // 1. Riferimenti agli elementi UI
     const contentContainer = document.querySelector('.editor-container');
     const searchInput = document.getElementById('live-search-input');
     const clientCards = contentContainer.querySelectorAll('.card:has(.card-header)');
-
-    // Riferimenti per il filtro stato
+    
+    const ownershipSwitch = document.getElementById('ownership-filter-switch');
+    const ownershipThumb = ownershipSwitch?.querySelector('.switch-thumb');
+    const ownershipLabels = ownershipSwitch?.querySelectorAll('.switch-label');
+    const activeOwnershipInput = document.getElementById('active-ownership-filter');
+    
     const statusSwitch = document.getElementById('status-filter-switch');
-    const statusThumb = statusSwitch.querySelector('.switch-thumb');
-    const statusLabels = statusSwitch.querySelectorAll('.switch-label');
+    const statusThumb = statusSwitch?.querySelector('.switch-thumb');
+    const statusLabels = statusSwitch?.querySelectorAll('.switch-label');
     const activeStatusInput = document.getElementById('active-status-filter');
 
-    let currentSearchTerm = '';
-    let currentStatusFilter = 'Tutti';
+    const currentUser = "{{ session.user_name | lower }}"; 
 
-    // Funzione di filtraggio unificata (CORRETTA)
+    // 2. Funzione di filtraggio UNIFICATA
     function applyFilters() {
-        currentSearchTerm = searchInput.value.toLowerCase().trim();
-        currentStatusFilter = activeStatusInput.value;
+        const currentSearchTerm = searchInput.value.toLowerCase().trim();
+        const currentStatusFilter = activeStatusInput.value;
+        const currentOwnership = activeOwnershipInput?.value || 'tutti';
 
         clientCards.forEach(card => {
-            // 1. Controlla se la ricerca corrisponde all'intestazione della card (Nome Cliente)
             const cardHeaderText = card.querySelector('.card-header')?.textContent.toLowerCase() || '';
             const matchesClient = cardHeaderText.includes(currentSearchTerm);
-            
             let clientHasVisibleRows = false;
+            
             const quoteRows = card.querySelectorAll('tr.main-row');
 
             quoteRows.forEach(row => {
                 const detailsRow = document.getElementById(row.dataset.targetRow);
-                // 2. Controlla se la ricerca corrisponde ai dati della riga (inclusi i dettagli)
                 const searchableRowText = (row.textContent.toLowerCase() || '') + ' ' + (detailsRow?.textContent.toLowerCase() || '');
-                const matchesQuote = searchableRowText.includes(currentSearchTerm);
                 
-                // 3. Controlla lo stato
+                // A. Controllo Stato
                 const rowStatusBadge = row.querySelector('.status-badge.status-principale');
                 const rowStatus = rowStatusBadge ? rowStatusBadge.textContent.trim() : '';
-                const matchesStatus = (rowStatus.toLowerCase() === currentStatusFilter.toLowerCase() || currentStatusFilter === "Tutti");
+                const matchesStatus = (currentStatusFilter === "Tutti" || rowStatus.toLowerCase() === currentStatusFilter.toLowerCase());
 
-                // La riga è visibile SE:
-                // Lo stato corrisponde E (la ricerca è vuota OPPURE corrisponde al cliente OPPURE corrisponde alla riga)
-                if (matchesStatus && (currentSearchTerm === "" || matchesClient || matchesQuote)) {
+                // B. Controllo Proprietà (I Miei Preventivi)
+                const rowVenditore = row.dataset.venditore || '';
+                const matchesOwnership = (currentOwnership === 'tutti' || rowVenditore === currentUser);
+
+                // C. Controllo Ricerca
+                const matchesSearch = (currentSearchTerm === "" || matchesClient || searchableRowText.includes(currentSearchTerm));
+
+                // La riga è visibile solo se passa TUTTI i filtri attivi
+                if (matchesStatus && matchesOwnership && matchesSearch) {
                     row.style.display = 'table-row';
                     clientHasVisibleRows = true;
                 } else {
                     row.style.display = 'none';
+                    if (detailsRow) detailsRow.classList.remove('is-open');
                 }
             });
 
-            // 4. Mostra/nascondi l'intera card del cliente
-            if (clientHasVisibleRows) {
-                card.style.display = '';
-            } else {
-                card.style.display = 'none';
-            }
+            // Mostra la card del cliente solo se ha almeno un preventivo che passa i filtri
+            card.style.display = clientHasVisibleRows ? '' : 'none';
         });
     }
 
-    // --- 1. Logica di Ricerca ---
-    searchInput.addEventListener('input', () => {
-        applyFilters(); // Chiama la funzione unificata
-    });
+    // 3. Listeners per gli eventi
+    searchInput?.addEventListener('input', applyFilters);
 
-    // --- 2. Logica per Espandere la Riga (invariata) ---
-    contentContainer.addEventListener('click', (e) => {
-        // Impedisce all'accordion di chiudersi se si clicca sui pulsanti di azione
-        if (e.target.closest('.row-actions') || e.target.closest('.kpi-item a')) {
-            return; 
-        }
-        
-        const mainRow = e.target.closest('.main-row');
-        if (!mainRow) { return; }
-        
-        const targetId = mainRow.dataset.targetRow;
-        const detailsRow = document.getElementById(targetId);
-        
-        if (detailsRow) {
-            mainRow.classList.toggle('is-open');
-            detailsRow.classList.toggle('is-open');
-        }
-    });
-
-    // --- 3. Logica per il Filtro Stato ---
-    statusLabels.forEach((label, index) => {
+    ownershipLabels?.forEach((label, index) => {
         label.addEventListener('click', () => {
-            // Aggiorna UI dello switch
+            ownershipLabels.forEach(l => l.classList.remove('active'));
+            label.classList.add('active');
+            if (ownershipThumb) ownershipThumb.style.transform = `translateX(${index * 100}%)`;
+            activeOwnershipInput.value = label.dataset.ownership;
+            applyFilters();
+        });
+    });
+
+    statusLabels?.forEach((label, index) => {
+        label.addEventListener('click', () => {
             statusLabels.forEach(l => l.classList.remove('active'));
             label.classList.add('active');
-            statusThumb.style.transform = `translateX(${index * 100}%)`;
-            
-            // Salva il valore e applica il filtro
+            if (statusThumb) statusThumb.style.transform = `translateX(${index * 100}%)`;
             activeStatusInput.value = label.dataset.value;
             applyFilters();
         });
     });
 
+    // 4. Logica per espandere le righe
+    contentContainer?.addEventListener('click', (e) => {
+        if (e.target.closest('.row-actions') || e.target.closest('.kpi-item a')) return; 
+        const mainRow = e.target.closest('.main-row');
+        if (!mainRow) return;
+        const detailsRow = document.getElementById(mainRow.dataset.targetRow);
+        if (detailsRow) {
+            mainRow.classList.toggle('is-open');
+            detailsRow.classList.toggle('is-open');
+        }
+    });
 });
 </script>
 {% block footer_nav %}

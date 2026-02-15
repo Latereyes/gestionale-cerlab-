@@ -6,6 +6,209 @@
   <title>{{ title }}</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
 <style>
+    /* --- INTEGRAZIONI CHAT GLOBALE --- */
+    /* --- NUOVO STILE CARD UTENTI CHAT --- */
+/* Correzione visibilità link nei messaggi inviati (evita blu su blu) */
+.message-sent .shout-link {
+    color: #ffffff !important;
+    text-decoration: underline;
+    opacity: 0.9;
+}
+.message-sent .shout-link:hover {
+    opacity: 1;
+}
+.message-sent .shout-mention {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}    
+.chat-user-item {
+    padding: 12px;
+    margin-bottom: 8px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.chat-user-item:hover {
+    border-color: #0d6efd;
+    background-color: #f8faff;
+    transform: translateY(-1px);
+}
+
+.chat-user-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+}
+
+.chat-user-info strong {
+    font-size: 14px;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-user-info .role-line {
+    font-size: 11px;
+    color: #64748b;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.last-time-msg {
+    color: #94a3b8;
+    font-weight: 400;
+    text-transform: lowercase;
+}
+.chat-user-item .role { 
+    font-size: 10px; 
+    color: #64748b; 
+    text-transform: uppercase; 
+}
+.chat-user-info strong { 
+    font-size: 14px; 
+    color: #1e293b;
+}
+.user-unread-badge {
+    background: #ff4757;
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.shout-mention { 
+    background: #dbeafe; 
+    color: #1e40af; 
+    padding: 0 4px; 
+    border-radius: 4px; 
+    font-weight: 600; 
+}
+.shout-link { 
+    color: #0d6efd; 
+    font-weight: 600; 
+    text-decoration: underline; 
+    cursor: pointer; 
+}
+/* --- NUOVO STILE PULSANTI FLOTTANTI (FAB) --- */
+.floating-action-group {
+    position: fixed;
+    bottom: 500px;
+    right: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    z-index: 9999; /* Sempre sopra tutto */
+}
+
+.fab-btn {
+    width: 65px;
+    height: 65px;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    color: #fff;
+    font-size: 24px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    position: relative;
+    border: 2px solid rgba(255,255,255,0.2);
+}
+
+.fab-btn:hover {
+    transform: scale(1.1) translateX(-5px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+}
+
+.alert-fab {
+    background: #da0303; /* Rosso per attirare l'attenzione */
+}
+
+.message-fab {
+      background: #0d6efd; /* Blu per i messaggi */
+  }
+
+  .unread-badge {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      background: #ff4757;
+      color: white;
+      font-size: 11px;
+      font-weight: 800;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: none; /* Nascosto se zero */
+      align-items: center;
+      justify-content: center;
+      border: 2px solid white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      z-index: 10;
+  }
+
+  .fab-label {
+    font-size: 9px;
+    font-weight: 800;
+    margin-top: 2px;
+    text-transform: uppercase;
+}
+
+/* Tooltip laterale al passaggio del mouse */
+.fab-btn::after {
+    content: attr(title);
+    position: absolute;
+    right: 75px;
+    background: #334155;
+    color: white;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.fab-btn:hover::after {
+    opacity: 1;
+}
+/* --- STILI CHAT MODALE GLOBALE --- */
+.chat-modal {
+    position: fixed; bottom: 100px; right: 30px; width: 350px; height: 450px;
+    background: white; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    display: none; flex-direction: column; z-index: 10000; overflow: hidden; border: 1px solid #e2e8f0;
+}
+.chat-modal.active { display: flex; }
+.chat-header { background: #0d6efd; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.chat-body { flex: 1; overflow-y: auto; padding: 15px; background: #f8fafc; }
+.message-bubble { margin-bottom: 10px; padding: 8px 12px; border-radius: 12px; max-width: 80%; font-size: 13px; line-height: 1.4; }
+.message-sent { background: #0d6efd; color: white; align-self: flex-end; margin-left: auto; }
+.message-received { background: #e2e8f0; color: #1e293b; align-self: flex-start; }
+.chat-footer { padding: 10px; border-top: 1px solid #e2e8f0; display: none; gap: 8px; position: relative; }
+.chat-footer.active { display: flex; }
+.chat-input { flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 20px; outline: none; }
+.mention-list { position: absolute; bottom: 100%; left: 8px; right: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 -4px 12px rgba(0,0,0,0.1); display: none; max-height: 150px; overflow-y: auto; z-index: 10001; }
+.mention-item { padding: 8px 12px; cursor: pointer; font-size: 12px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; }
+.mention-item:hover { background: #f1f5f9; color: #0d6efd; }
     :root{
       --ink:#111; --muted:#666; --line:#ddd; --bg:#fafafa; --lock:#f2f2f2;
       --primary-color: #0d6efd;
@@ -325,20 +528,22 @@
 
 {% macro workflow_navbar(p, active_page) %}
 <div class="action-buttons-grid">
-    <a href="{{ url_for('editor_preventivo', quote_id=p.numero) }}" 
+    <a href="{{ url_for('editor_preventivo_edile' if p.tipo_preventivo == 'edile' else 'editor_preventivo', quote_id=p.numero) }}" 
        class="btn {{ 'disabled' if active_page == 'preventivo' else '' }}" 
        title="Modifica Preventivo">
        <i class="fas fa-edit"></i> Preventivo
     </a>
 
+    {% if p.tipo_preventivo != 'edile' %}
     <a href="{{ url_for('conferma_ordine', quote_id=p.numero) }}" 
        class="btn {{ 'disabled' if active_page == 'ordini' else '' }}" 
        title="Gestisci Ordini">
        <i class="fas fa-box-open"></i> Ordini
     </a>
+    {% endif %}
 
     <a href="{{ url_for('gestione_consegna', quote_id=p.numero) }}" 
-       class="btn {{ 'disabled' if active_page == 'consegna' else '' }}" 
+       class="btn {{ 'disabled' if active_page == 'consegna' else '' }}"
        title="Gestisci Consegna">
        <i class="fas fa-truck"></i> Consegna
     </a>
@@ -748,6 +953,217 @@
         </div>
     </div>
 </div>
+<div class="floating-action-group">
+    {% block extra_fab %}{% endblock %}
+    
+    <a href="#" class="fab-btn message-fab" title="Messaggi">
+        <div class="unread-badge" id="unreadBadge">0</div>
+        <i class="fas fa-comments"></i>
+        <span class="fab-label">MESSAGGI</span>
+    </a>
+</div>
+
+<div class="chat-modal" id="chatModal">
+    <div class="chat-header">
+        <span id="chatTitle">Messaggi Team</span>
+        <button class="btn icon-btn" id="closeChat" style="background:none; border:none; color:white; cursor:pointer;"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="chat-body" id="chatBody"></div>
+    <div class="chat-footer" id="chatFooter">
+        <div id="chatMentionList" class="mention-list"></div>
+        <input type="text" class="chat-input" id="chatInput" placeholder="Scrivi un messaggio...">
+        <button class="btn primary" id="sendMsgBtn" style="border-radius: 50%; width: 35px; height: 35px; padding: 0; display: flex; align-items: center; justify-content: center; border: none; flex-shrink: 0;">
+            <i class="fas fa-paper-plane" style="margin-right: 2px; margin-top: -1px; font-size: 14px;"></i>
+        </button>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- LOGICA MESSAGGISTICA GLOBALE ---
+    const chatFab = document.querySelector('.message-fab');
+    const chatModal = document.getElementById('chatModal');
+    const chatBody = document.getElementById('chatBody');
+    const chatFooter = document.getElementById('chatFooter');
+    const chatInput = document.getElementById('chatInput');
+    const chatBtn = document.getElementById('sendMsgBtn');
+    const chatTitle = document.getElementById('chatTitle');
+    const chatMentionList = document.getElementById('chatMentionList');
+    
+    let activeChatUser = null;
+    let chatRefreshInterval = null;
+    let teamUsers = []; 
+    let linkSuggestions = [];
+
+    // --- 1. FUNZIONE DI PARSING (VISUALIZZAZIONE) ---
+    window.parseMessage = function(text) {
+        if (!text) return "";
+        // Tag @Utente
+        text = text.replace(/@(\w+)/g, '<span class="shout-mention">@$1</span>');
+        
+        // Link #Preventivo (cerca #ID[Nome] o solo #ID)
+        text = text.replace(/#(PREV-[A-Z0-9-]+)(?:\[([^\]]+)\])?/g, (match, id, label) => {
+            const display = label || id; 
+            return `<a href="/preventivo/edit/${id}" class="shout-link"><i class="fas fa-file-invoice"></i> ${display}</a>`;
+        });
+        
+        // Link #Cliente (cerca #ID[Nome] o solo #ID)
+        text = text.replace(/#(CLT-[A-Z0-9]+)(?:\[([^\]]+)\])?/g, (match, id, label) => {
+            const display = label || id; 
+            return `<a href="/cliente/dettaglio/${id}" class="shout-link"><i class="fas fa-folder-open"></i> ${display}</a>`;
+        });
+        
+        return text;
+    };
+
+    // --- 2. FUNZIONE DI INSERIMENTO SUGGERIMENTO ---
+    function addSuggestionItem(inputEl, listEl, code, label, icon, triggerIdx) {
+        const item = document.createElement('div');
+        item.className = 'mention-item';
+        
+        // Puliamo la label dai prefissi tecnici per l'inserimento nel tag
+        const cleanLabel = label.replace(/^(Cartella:\s*|Prev\.\s*)/i, '');
+        
+        item.innerHTML = `<span><i class="fas ${icon}"></i> ${label}</span> <span class="tag-sigla">${code}</span>`;
+        item.onclick = () => {
+            const val = inputEl.value;
+            // Inseriamo il formato ricco: #ID[Nome Pulito] (es: #CLT-CF775F[Alba D'Antonio])
+            const tagToInsert = code.startsWith('#') ? `${code}[${cleanLabel}]` : code;
+            
+            const newVal = val.substring(0, triggerIdx) + tagToInsert + ' ' + val.substring(inputEl.selectionStart);
+            inputEl.value = newVal;
+            listEl.style.display = 'none';
+            inputEl.focus();
+            const newPos = triggerIdx + tagToInsert.length + 1;
+            inputEl.setSelectionRange(newPos, newPos);
+        };
+        listEl.appendChild(item);
+    }
+
+    window.handleAutocomplete = async function(inputEl, listEl) {
+        const val = inputEl.value;
+        const cursorIdx = inputEl.selectionStart;
+        const textBeforeCursor = val.substring(0, cursorIdx);
+        const lastAt = textBeforeCursor.lastIndexOf('@');
+        const lastHash = textBeforeCursor.lastIndexOf('#');
+        const lastTriggerIdx = Math.max(lastAt, lastHash);
+        
+        if (lastTriggerIdx === -1 || textBeforeCursor.substring(lastTriggerIdx).includes(' ')) {
+            listEl.style.display = 'none';
+            return;
+        }
+
+        const currentTrigger = textBeforeCursor.charAt(lastTriggerIdx);
+        const query = textBeforeCursor.substring(lastTriggerIdx + 1).toLowerCase();
+        listEl.innerHTML = '';
+        let hasResults = false;
+
+        if (currentTrigger === '@') {
+            if (teamUsers.length === 0) teamUsers = await (await fetch('/api/messages/users')).json();
+            teamUsers.filter(u => u.full_name.toLowerCase().includes(query)).forEach(u => {
+                addSuggestionItem(inputEl, listEl, `@${u.username}`, u.full_name, 'fa-user', lastTriggerIdx);
+                hasResults = true;
+            });
+        } else {
+            const res = await fetch(`/api/suggestions/links?q=${encodeURIComponent(query)}`);
+            const results = await res.json();
+            results.forEach(s => {
+                addSuggestionItem(inputEl, listEl, `#${s.id}`, s.label, s.type === 'quote' ? 'fa-file-invoice' : 'fa-folder-open', lastTriggerIdx);
+                hasResults = true;
+            });
+        }
+        listEl.style.display = hasResults ? 'block' : 'none';
+    };
+
+
+    window.loadChatUsers = async function() {
+        clearInterval(chatRefreshInterval);
+        activeChatUser = null; 
+        chatTitle.innerText = "Messaggi Team"; 
+        chatFooter.classList.remove('active');
+        
+        const res = await fetch('/api/messages/users');
+        const users = await res.json();
+        chatBody.innerHTML = '';
+        
+        users.forEach(u => {
+            const div = document.createElement('div');
+            div.className = 'chat-user-item';
+            
+            // Gestione badge notifiche
+            let badge = u.unread_count > 0 ? `<span class="user-unread-badge">${u.unread_count}</span>` : '';
+            
+            // Formattazione data ultimo messaggio
+            let displayTime = "";
+            if (u.last_message_timestamp && u.last_message_timestamp !== "0000-00-00 00:00:00") {
+                const parts = u.last_message_timestamp.split(' '); // Es: "2024-03-20 15:30"
+                displayTime = `<span class="last-time-msg"> - ${parts[1] || parts[0]}</span>`;
+            }
+
+            div.innerHTML = `
+                <div class="chat-user-info">
+                    <strong>${u.full_name}</strong>
+                    <div class="role-line">
+                        <span>${u.role}</span>
+                        ${displayTime}
+                    </div>
+                </div>
+                ${badge}
+            `;
+            
+            div.onclick = () => openConversation(u);
+            chatBody.appendChild(div);
+        });
+    };
+
+    async function openConversation(user) {
+        activeChatUser = user.username;
+        chatTitle.innerHTML = `<i class="fas fa-chevron-left" onclick="loadChatUsers()" style="cursor:pointer; margin-right:10px;"></i> ${user.full_name}`;
+        chatFooter.classList.add('active');
+        chatBody.innerHTML = '<p class="muted center" style="margin-top:20px;">Caricamento...</p>';
+        await renderMessages();
+        clearInterval(chatRefreshInterval);
+        chatRefreshInterval = setInterval(renderMessages, 3000);
+    }
+
+    async function renderMessages() {
+        if (!activeChatUser) return;
+        const res = await fetch(`/api/messages/history/${activeChatUser}`);
+        const msgs = await res.json();
+        if (msgs.length === 0) { chatBody.innerHTML = '<p class="muted center" style="margin-top:20px;">Invia un messaggio!</p>'; return; }
+        if (msgs.length !== chatBody.querySelectorAll('.message-bubble').length) {
+            chatBody.innerHTML = '';
+            msgs.forEach(m => {
+                const div = document.createElement('div');
+                div.className = `message-bubble ${m.from === "{{ session.user_id }}" ? 'message-sent' : 'message-received'}`;
+                div.innerHTML = window.parseMessage(m.text);
+                chatBody.appendChild(div);
+            });
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+    }
+
+    chatBtn.onclick = async () => {
+        const text = chatInput.value.trim();
+        if (!text || !activeChatUser) return;
+        await fetch('/api/messages/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: activeChatUser, text: text }) });
+        chatInput.value = ''; renderMessages();
+    };
+
+    chatFab.onclick = (e) => { e.preventDefault(); chatModal.classList.toggle('active'); if (chatModal.classList.contains('active')) loadChatUsers(); else clearInterval(chatRefreshInterval); };
+    document.getElementById('closeChat').onclick = () => { chatModal.classList.remove('active'); clearInterval(chatRefreshInterval); };
+    chatInput.addEventListener('input', () => window.handleAutocomplete(chatInput, chatMentionList));
+    chatInput.onkeypress = (e) => { if(e.key === 'Enter') chatBtn.click(); };
+
+    async function updateUnreadBadge() {
+        const res = await fetch('/api/messages/unread_total');
+        const data = await res.json();
+        const badge = document.getElementById('unreadBadge');
+        if (badge) { badge.innerText = data.unread_count; badge.style.display = data.unread_count > 0 ? 'flex' : 'none'; }
+    }
+    setInterval(updateUnreadBadge, 10000); updateUnreadBadge();
+});
+</script>
 
 
 

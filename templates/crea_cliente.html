@@ -5,8 +5,8 @@
 
 <div class="form-container">
   <form method="post" class="form-card">
+    <input type="hidden" name="action" value="{{ action }}">
     
-    <!-- Header della card -->
     <div class="form-header">
       <div class="form-icon-wrapper">
         <i class="fas fa-user-edit"></i>
@@ -39,8 +39,6 @@
             </div>
           </div>
         </div>
-      </div>
-
       <div class="form-section">
         <h3 class="section-title">Indirizzo</h3>
         <div class="form-grid">
@@ -100,6 +98,43 @@
 </div>
 
 <style>
+  .section-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 20px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* Aggiunge spazio tra label e input */
+  }
+  .form-group label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+  }
+  .form-group input, .form-group select {
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+  }
+  .form-group input:focus, .form-group select:focus {
+    outline: none;
+    border-color: var(--ink, #111);
+  }
+  .form-group.full-width {
+    grid-column: 1 / -1;
+  }
   .form-container {
     max-width: 900px;
     margin: 24px auto;
