@@ -5,7 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{ title }}</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 <style>
+    .notify-item { padding: 12px 15px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.2s; }
+    .notify-item:hover { background: #fffbeb; }
+    .notify-item.unread { border-left: 4px solid #f59e0b; background: #fffcf0; }
+    .notify-text { font-size: 13px; color: #1e293b; margin-bottom: 3px; line-height: 1.4; }
+    .notify-time { font-size: 10px; color: #94a3b8; }
     /* --- INTEGRAZIONI CHAT GLOBALE --- */
     /* --- NUOVO STILE CARD UTENTI CHAT --- */
 /* Correzione visibilità link nei messaggi inviati (evita blu su blu) */
@@ -956,6 +962,12 @@
 <div class="floating-action-group">
     {% block extra_fab %}{% endblock %}
     
+    <a href="#" class="fab-btn notify-fab" id="notifyFab" title="Notifiche" style="background: #f59e0b;">
+        <div class="unread-badge" id="notifyBadge">0</div>
+        <i class="fas fa-bell"></i>
+        <span class="fab-label">NOTIFICHE</span>
+    </a>
+
     <a href="#" class="fab-btn message-fab" title="Messaggi">
         <div class="unread-badge" id="unreadBadge">0</div>
         <i class="fas fa-comments"></i>
@@ -977,8 +989,61 @@
         </button>
     </div>
 </div>
+<div class="chat-modal" id="notifyModal">
+    <div class="chat-header" style="background: #f59e0b;">
+        <span>Centro Notifiche</span>
+        <button class="btn icon-btn" onclick="window.toggleNotify()" style="background:none; border:none; color:white; cursor:pointer;"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="chat-body" id="notifyBody" style="padding: 0;"></div>
+</div>
 
 <script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- LOGICA NOTIFICHE ---
+    const notifyFab = document.getElementById('notifyFab');
+    const notifyModal = document.getElementById('notifyModal');
+    const notifyBody = document.getElementById('notifyBody');
+    const notifyBadge = document.getElementById('notifyBadge');
+
+    window.toggleNotify = async () => {
+        const isActive = notifyModal.classList.toggle('active');
+        if (isActive) {
+            const res = await fetch('/api/notifications');
+            const data = await res.json();
+            renderNotifications(data.notifications);
+            // Segna come lette e resetta il badge
+            fetch('/api/notifications/read', { method: 'POST' });
+            notifyBadge.style.display = 'none';
+        }
+    };
+
+    function renderNotifications(notifs) {
+        if (notifs.length === 0) {
+            notifyBody.innerHTML = '<p class="muted center" style="margin-top:20px; text-align:center;">Nessuna notifica recente</p>';
+            return;
+        }
+        notifyBody.innerHTML = notifs.map(n => `
+            <div class="notify-item ${n.read ? '' : 'unread'}" onclick="location.href='${n.link}'">
+                <div class="notify-text">${n.text}</div>
+                <div class="notify-time">${n.timestamp}</div>
+            </div>
+        `).join('');
+    }
+
+    async function checkNotifs() {
+        const res = await fetch('/api/notifications');
+        const data = await res.json();
+        if (data.unread_count > 0) {
+            notifyBadge.innerText = data.unread_count;
+            notifyBadge.style.display = 'flex';
+        }
+    }
+
+    notifyFab.onclick = (e) => { e.preventDefault(); window.toggleNotify(); };
+    setInterval(checkNotifs, 15000); // Controlla ogni 15 secondi
+    checkNotifs();
+});
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- LOGICA MESSAGGISTICA GLOBALE ---
     const chatFab = document.querySelector('.message-fab');
@@ -998,22 +1063,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 1. FUNZIONE DI PARSING (VISUALIZZAZIONE) ---
     window.parseMessage = function(text) {
         if (!text) return "";
-        // Tag @Utente
-        text = text.replace(/@(\w+)/g, '<span class="shout-mention">@$1</span>');
-        
-        // Link #Preventivo (cerca #ID[Nome] o solo #ID)
-        text = text.replace(/#(PREV-[A-Z0-9-]+)(?:\[([^\]]+)\])?/g, (match, id, label) => {
-            const display = label || id; 
-            return `<a href="/preventivo/edit/${id}" class="shout-link"><i class="fas fa-file-invoice"></i> ${display}</a>`;
-        });
-        
-        // Link #Cliente (cerca #ID[Nome] o solo #ID)
-        text = text.replace(/#(CLT-[A-Z0-9]+)(?:\[([^\]]+)\])?/g, (match, id, label) => {
-            const display = label || id; 
-            return `<a href="/cliente/dettaglio/${id}" class="shout-link"><i class="fas fa-folder-open"></i> ${display}</a>`;
-        });
-        
-        return text;
+        let parsed = text
+            .replace(/@(\w+)/g, '<span class="shout-mention">@$1</span>')
+            .replace(/#(\d{2,5})/g, '<a href="/quote/edit/$1" class="shout-link">#$1</a>')
+            // Aggiungiamo il supporto per il link rapido alle task
+            .replace(/\[VEDI TASK #TASK-([\w-]+)\]/g, '<a href="/tasks" class="shout-link" style="font-weight:bold;"><i class="fas fa-external-link-alt"></i> VAI ALLA TASK</a>');
+        return parsed;
     };
 
     // --- 2. FUNZIONE DI INSERIMENTO SUGGERIMENTO ---
@@ -1060,6 +1115,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (currentTrigger === '@') {
             if (teamUsers.length === 0) teamUsers = await (await fetch('/api/messages/users')).json();
+            
+            // Definizione Gruppi Speciali
+            const gruppi = [
+                { code: '@tutti', label: 'Tutti (Team completo)', icon: 'fa-users' },
+                { code: '@venditori', label: 'Gruppo Venditori', icon: 'fa-users' },
+                { code: '@segreteria', label: 'Gruppo Segreteria', icon: 'fa-users' },
+                { code: `@{{ session.user_id }}`, label: 'Personale (Assegna a me)', icon: 'fa-user-tag', search: 'personale' }
+            ];
+
+            // Filtra e aggiungi gruppi
+            gruppi.filter(g => g.code.includes(query) || (g.search && g.search.includes(query))).forEach(g => {
+                addSuggestionItem(inputEl, listEl, g.code, g.label, g.icon, lastTriggerIdx);
+                hasResults = true;
+            });
+
+            // Filtra e aggiungi utenti singoli
             teamUsers.filter(u => u.full_name.toLowerCase().includes(query)).forEach(u => {
                 addSuggestionItem(inputEl, listEl, `@${u.username}`, u.full_name, 'fa-user', lastTriggerIdx);
                 hasResults = true;

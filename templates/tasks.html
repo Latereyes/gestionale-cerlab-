@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-tasks"></i> Task & Report Team</h1>
+{% endblock %}
+
+{% block body %}
+<main style="max-width: 700px; margin: 0 auto; padding-bottom: 100px;">
+    <div style="text-align: center; margin-bottom: 30px; padding-top: 30px;">
+        <div style="display: flex; justify-content: center;">
+            <button id="toggleCreateBtn" class="btn primary" onclick="window.toggleCreateArea()" title="Nuovo Task" style="border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.15); transition: 0.3s;">
+                <i class="fas fa-plus" id="plusIcon" style="font-size: 26px;"></i>
+            </button>
+        </div>
+    </div>
+
+    <div id="createTaskArea" class="task-card" style="display: none; margin-bottom: 30px; border-left: 6px solid #6366f1; background: #fdfdff;">
+        <div class="task-header" style="margin-bottom: 10px;">
+            <span><i class="fas fa-magic"></i> NUOVA AZIONE</span>
+            <span onclick="window.toggleCreateArea()" style="cursor:pointer;"><i class="fas fa-times"></i></span>
+        </div>
+        <div class="inline-comment-box" style="background: white; border-radius: 12px; padding: 10px;">
+             <div id="inlineMentionSuggestions" class="mention-list" style="bottom: 100%; top: auto;"></div>
+             <textarea id="taskInputInline" placeholder="Descrivi il problema... Usa @ per assegnare" 
+                       style="width: 100%; border: none; outline: none; resize: none; font-size: 15px; min-height: 60px; font-family: inherit;"
+                       oninput="window.handleAutocomplete(this, document.getElementById('inlineMentionSuggestions'))"></textarea>
+             <button onclick="window.saveInlineTask()" class="btn-send-inline" style="font-size: 22px; margin-left: 10px;">
+                 <i class="fas fa-paper-plane"></i>
+             </button>
+        </div>
+    </div>
+
+    <div id="tasksContainer" class="tasks-grid"></div>
+    
+
+    <div id="archiveSection" style="margin-top: 50px;">
+        <div onclick="toggleArchive()" style="display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; color: #94a3b8; transition: 0.2s;" id="archiveTrigger">
+            <span style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Visualizza Archiviati</span>
+            <i class="fas fa-chevron-down" id="archiveArrow" style="font-size: 14px;"></i>
+        </div>
+        <div id="archivedTasksContainer" class="tasks-grid" style="display: none; margin-top: 30px; opacity: 0.7;"></div>
+    </div>
+</main>
+
+<div id="taskCreateModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 550px;">
+        <h3><i class="fas fa-plus-circle"></i> Nuovo Task</h3>
+        <div class="tagbox-input-area" style="background: transparent; padding: 0; position: relative; margin-top: 15px;">
+            <textarea id="taskInput" placeholder="Descrivi il problema... @collega o #preventivo" autocomplete="off" style="min-height: 120px; padding: 15px;"></textarea>
+            <div id="taskMentionSuggestions" class="mention-list"></div>
+        </div>
+        <div class="modal-actions">
+            <button id="saveNewTaskBtn" class="btn primary">Crea Azione</button>
+            <button onclick="window.closeCreateModal()" class="btn">Annulla</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* tasks.html: Aggiungi nel blocco <style> */
+    #taskInputInline::placeholder { color: #94a3b8; opacity: 0.7; }
+    #toggleCreateBtn.active { transform: rotate(45deg); background: #ef4444; }
+    
+    /* Regola per posizionare i suggerimenti sopra la textarea di creazione */
+    #createTaskArea .mention-list {
+        bottom: 100%;
+        top: auto;
+        margin-bottom: 10px;
+    }
+    .tasks-grid { display: flex; flex-direction: column; gap: 25px; }
+    .task-card { background: white; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 15px; transition: 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
+    .task-card.status-open { border-left: 6px solid #6366f1; }
+    .task-card.status-resolved { border-left: 6px solid #10b981; }
+    .task-card.status-failed { border-left: 6px solid #ef4444; }
+    .task-card.status-support { border-left: 6px solid #f59e0b; }
+
+    .task-header { display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; font-weight: 600; }
+    .task-body { font-size: 15px; line-height: 1.6; color: #334155; padding: 0 5px; }
+    
+    .task-history-area { background: #f8fafc; border-radius: 14px; padding: 15px; border: 1px solid #f1f5f9; margin-top: 5px; }
+    .task-history { display: flex; flex-direction: column; gap: 12px; margin-bottom: 15px; max-height: 300px; overflow-y: auto; }
+    
+    .history-line { display: flex; gap: 12px; align-items: flex-start; font-size: 13px; color: #475569; }
+    .history-icon { width: 18px; flex-shrink: 0; text-align: center; margin-top: 2px; }
+    .history-meta { font-size: 9px; color: #cbd5e1; margin-top: 2px; }
+
+    /* --- Intorno alla riga 59 (Aggiornamento classe CSS) --- */
+    .inline-comment-box { 
+        display: flex; gap: 10px; background: white; border: 2px solid #e2e8f0; 
+        border-radius: 24px; padding: 6px 16px; align-items: center; transition: 0.2s;
+        position: relative; /* Indispensabile per posizionare i suggerimenti */
+    }
+    .inline-comment-box.pending-resolved { border-color: #10b981; background: #f0fdf4; }
+    .inline-comment-box.pending-failed { border-color: #ef4444; background: #fef2f2; }
+    .inline-comment-box.pending-support { border-color: #f59e0b; background: #fffbeb; }
+
+    .inline-comment-box input { border: none !important; background: transparent !important; height: 34px !important; font-size: 14px !important; box-shadow: none !important; }
+
+    .btn-action-min { background: none; border: none; cursor: pointer; font-size: 18px; color: #cbd5e1; transition: 0.2s; padding: 5px; }
+    .btn-action-min.active, .btn-action-min:hover { transform: scale(1.2); }
+    .btn-x-min.active, .btn-x-min:hover { color: #ef4444; }
+    .btn-warn-min.active, .btn-warn-min:hover { color: #f59e0b; }
+    .btn-check-min.active, .btn-check-min:hover { color: #10b981; }
+    
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const container = document.getElementById('tasksContainer');
+    const archiveContainer = document.getElementById('archivedTasksContainer');
+    let pendingStates = {};
+
+    // --- File: tasks.html (Sostituzione integrale funzione loadTasks) ---
+
+    // --- File: tasks.html (Intorno alla riga 80) ---
+
+    window.loadTasks = async function() {
+        const res = await fetch('/api/tasks');
+        let tasks = await res.json();
+        container.innerHTML = '';
+        archiveContainer.innerHTML = '';
+
+        // Helper per rendere sortabile la stringa "DD/MM HH:MM" -> "MMDDHHMM"
+        const toSortableTime = (str) => {
+            if (!str || !str.includes('/') || !str.includes(':')) return "00000000";
+            const [date, time] = str.split(' ');
+            const [d, m] = date.split('/');
+            const [h, min] = time.split(':');
+            return m + d + h + min;
+        };
+
+        // 1. Ordinamento: Bucket di stato e poi Cronologia reale (ultima attività)
+        tasks.sort((a, b) => {
+            const getPriority = (t) => {
+                if (t.status === 'support') return 0;
+                if (t.status === 'resolved' || t.status === 'failed') return 2;
+                return 1;
+            };
+
+            const prioA = getPriority(a);
+            const prioB = getPriority(b);
+
+            if (prioA !== prioB) return prioA - prioB;
+
+            // Prende l'ultimo timestamp disponibile (commento o creazione)
+            const timeA = a.comments && a.comments.length > 0 ? a.comments[a.comments.length - 1].timestamp : a.timestamp;
+            const timeB = b.comments && b.comments.length > 0 ? b.comments[b.comments.length - 1].timestamp : b.timestamp;
+
+            // Confronto numerico tra le stringhe riordinate (Decrescente)
+            return toSortableTime(timeB).localeCompare(toSortableTime(timeA));
+        });
+
+        const now = new Date();
+
+        const oneWeekAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+
+        // --- File: tasks.html (Intorno alla riga 114) ---
+
+        tasks.forEach(t => {
+            // Verifica se il task è concluso da più di una settimana
+            const concludedDate = t.concluded_at ? new Date(t.concluded_at) : null;
+            const isOld = concludedDate && concludedDate < oneWeekAgo;
+            const target = (isOld && (t.status === 'resolved' || t.status === 'failed')) ? archiveContainer : container;
+
+            const card = document.createElement('div');
+            card.className = `task-card status-${t.status}`;
+            card.id = t.id;
+            
+            let historyHtml = t.comments.map(c => {
+                let icon = '<i class="fas fa-comment-dots" style="color:#cbd5e1"></i>';
+                if(c.status_change === 'resolved') icon = '<i class="fas fa-check-circle" style="color:#10b981"></i>';
+                if(c.status_change === 'failed') icon = '<i class="fas fa-times-circle" style="color:#ef4444"></i>';
+                if(c.status_change === 'support') icon = '<i class="fas fa-exclamation-circle" style="color:#f59e0b"></i>';
+                
+                return `<div class="history-line"><div class="history-icon">${icon}</div><div class="history-content"><strong>${c.user}:</strong> ${window.parseMessage(c.text)}<div class="history-meta">${c.timestamp}</div></div></div>`;
+            }).join('');
+
+            card.innerHTML = `
+                <div class="task-header"><span><i class="fas fa-user-circle"></i> ${t.created_by_name}</span><span>${t.timestamp}</span></div>
+                <div class="task-body">${window.parseMessage(t.description)}</div>
+                
+                <div class="task-history-area">
+                    <div class="task-history" id="history-${t.id}">${historyHtml}</div>
+                    ${t.status !== 'resolved' && t.status !== 'failed' ? `
+                    <div class="inline-comment-box" id="box-${t.id}" style="position: relative;">
+                        <div id="mentions-${t.id}" class="mention-list"></div>
+                        <input type="text" id="input-${t.id}" placeholder="Scrivi un commento..." 
+                               oninput="window.handleAutocomplete(this, document.getElementById('mentions-${t.id}'))"
+                               onkeypress="if(event.key==='Enter') window.submitComment('${t.id}', '${t.status}')"
+                               autocomplete="off">
+                        <button onclick="window.submitComment('${t.id}', '${t.status}')" class="btn-send-inline"><i class="fas fa-paper-plane"></i></button>
+                    </div>` : ''}
+                </div>
+
+                <div class="task-footer">
+                    <div></div>
+                    <div class="footer-actions-right" style="display: flex; gap: 15px;">
+                        ${t.status !== 'resolved' && t.status !== 'failed' ? `
+                            <button class="btn-action-min btn-x-min" id="btn-failed-${t.id}" onclick="window.prepUpdate('${t.id}', 'failed')" title="Fallito"><i class="fas fa-times"></i></button>
+                            <button class="btn-action-min btn-warn-min" id="btn-support-${t.id}" onclick="window.prepUpdate('${t.id}', 'support')" title="Supporto"><i class="fas fa-exclamation"></i></button>
+                            <button class="btn-action-min btn-check-min" id="btn-resolved-${t.id}" onclick="window.prepUpdate('${t.id}', 'resolved')" title="Risolto"><i class="fas fa-check"></i></button>
+                        ` : `<span class="muted" style="font-size: 11px;"><i class="fas fa-archive"></i> Task Concluso</span>`}
+                    </div>
+                </div>
+            `;
+            target.appendChild(card);
+
+            // Auto-scroll della cronologia all'ultimo messaggio
+            setTimeout(() => {
+                const h = document.getElementById(`history-${t.id}`);
+                if (h) h.scrollTop = h.scrollHeight;
+            }, 50);
+        });
+
+        // Gestione scorrimento all'ancora dopo il caricamento
+        const hash = window.location.hash.replace('#', '');
+        if (hash) {
+            setTimeout(() => {
+                const targetCard = document.getElementById(hash);
+                if (targetCard) {
+                    targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    targetCard.style.boxShadow = "0 0 20px rgba(99, 102, 241, 0.4)";
+                    targetCard.style.borderColor = "#6366f1";
+                }
+            }, 300);
+        }
+    };
+
+    window.prepUpdate = (id, status) => {
+        const box = document.getElementById(`box-${id}`);
+        const input = document.getElementById(`input-${id}`);
+        if (pendingStates[id] === status) { delete pendingStates[id]; box.className = 'inline-comment-box'; input.placeholder = "Scrivi un commento..."; }
+        else { pendingStates[id] = status; box.className = `inline-comment-box pending-${status}`; input.placeholder = `Conferma stato ${status}...`; input.focus(); }
+        document.querySelectorAll(`[id^="btn-"][id$="-${id}"]`).forEach(b => b.classList.remove('active'));
+        if (pendingStates[id]) document.getElementById(`btn-${status}-${id}`).classList.add('active');
+    };
+
+    window.submitComment = async (id, current) => {
+        const input = document.getElementById(`input-${id}`);
+        const text = input.value.trim();
+        const nextStatus = pendingStates[id] || current;
+        if(!text && !pendingStates[id]) return;
+        await fetch('/api/tasks/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ id: id, status: nextStatus, comment: text || `Stato: ${nextStatus}`, status_change: pendingStates[id] || null })
+        });
+        delete pendingStates[id];
+        window.loadTasks();
+    };
+
+    window.toggleArchive = () => {
+        const container = document.getElementById('archivedTasksContainer');
+        const arrow = document.getElementById('archiveArrow');
+        const isHidden = container.style.display === 'none';
+        container.style.display = isHidden ? 'flex' : 'none';
+        arrow.className = isHidden ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+    };
+
+    // tasks.html: All'interno del blocco <script>, sostituisci openCreateModal, closeCreateModal e il click handler vecchio
+
+    window.toggleCreateArea = () => {
+        const area = document.getElementById('createTaskArea');
+        const btn = document.getElementById('toggleCreateBtn');
+        const input = document.getElementById('taskInputInline');
+        
+        if (area.style.display === 'none') {
+            area.style.display = 'block';
+            btn.classList.add('active');
+            input.focus();
+        } else {
+            area.style.display = 'none';
+            btn.classList.remove('active');
+            input.value = '';
+        }
+    };
+
+    window.saveInlineTask = async () => {
+        const input = document.getElementById('taskInputInline');
+        const txt = input.value.trim();
+        if(!txt) return;
+
+        // Recupera le menzioni con regex
+        const mentions = txt.match(/@(\w+)/g) || ["@tutti"];
+        
+        await fetch('/api/tasks', { 
+            method: 'POST', 
+            headers: {'Content-Type': 'application/json'}, 
+            body: JSON.stringify({ description: txt, assigned_to: mentions }) 
+        });
+
+        window.toggleCreateArea(); // Chiude e pulisce
+        window.loadTasks(); // Ricarica la lista
+    };
+
+    // Aggiungi supporto per l'invio con CTRL+INVIO nella textarea
+    document.getElementById('taskInputInline').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            window.saveInlineTask();
+        }
+    });
+
+    document.getElementById('taskInput').addEventListener('input', () => window.handleAutocomplete(document.getElementById('taskInput'), document.getElementById('taskMentionSuggestions')));
+    window.loadTasks();
+});
+</script>
+{% endblock %}

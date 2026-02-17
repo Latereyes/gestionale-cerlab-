@@ -1,11 +1,11 @@
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.1.0"
 ; Script Inno Setup per Gestionale Preventivi
 
 [Setup]
 AppName=Gestionale Preventivi
 AppVersion={#MyAppVersion}
 ; <-- CORREZIONE: La riga AppId era malformattata
-AppId={{59216117-3ae6-41af-9668-68e305915d5d}}
+AppId={{f5085ef9-7da4-49c2-923a-6c3812156386}}
 AppPublisher=Cerlab srls
 UninstallDisplayIcon={app}\Gestionale.exe
 DefaultDirName={autopf}\Gestionale Preventivi
@@ -35,7 +35,7 @@ Source: "modello cashflow.xlsx"; DestDir: "{userappdata}\gestionalepreventivi\te
 Source: "template_analisi.xlsx"; DestDir: "{userappdata}\gestionalepreventivi\templates"; Flags: ignoreversion
 
 ; La migrazione dei dati utente rimane identica, ed è corretta
-Source: "data\*"; DestDir: "{userappdata}\GestionalePreventivi"; Excludes: "users.json, comuni.json, preventivi, allegati, clienti, gh_token.txt"; Flags: recursesubdirs createallsubdirs uninsneveruninstall
+Source: "data\*"; DestDir: "{userappdata}\GestionalePreventivi"; Excludes: "users.json, comuni.json, preventivi, allegati, clienti, gh_token.txt,tagbox.json,notifications.json,messages.json,pdf_generation.log "; Flags: recursesubdirs createallsubdirs uninsneveruninstall
 
 [Icons]
 ; L'eseguibile ora si chiama 'Gestionale.exe'

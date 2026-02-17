@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.0.0"  
+APP_VERSION = "2.1.0"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -75,8 +75,10 @@ QUOTES_DIR = DATA_DIR / "preventivi"
 ALLEGATI_DIR = DATA_DIR / "allegati"
 USERS_FILE = DATA_DIR / "users.json"
 MESSAGES_FILE = DATA_DIR / "messages.json"
+TASKS_FILE = DATA_DIR / "tasks.json"
 PDF_LOG_FILE = DATA_DIR / "pdf_generation.log"
 TAGBOX_FILE = DATA_DIR / "tagbox.json"
+NOTIFICATIONS_FILE = DATA_DIR / "notifications.json"
 
 # Creiamo le sottocartelle se non esistono
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -937,7 +939,6 @@ def login():
         password = request.form.get("password")
         users = load_users()
         user_found = next((u for u in users if u["username"] == username), None)
-
         if user_found and check_password_hash(user_found["password_hash"], password):
             # Cancella la vecchia sessione, inclusi i nostri "segnali"
             session.clear() 
@@ -949,18 +950,11 @@ def login():
 
             flash(f"Benvenuto, {user_found['full_name']}!", "success")
             
-            # --- LOGICA CORRETTA: Controlla se ci sono novità reali nel JSON ---
-            last_seen_version = user_found.get("last_seen_version", "0.0")
-            nuove_voci = [entry for entry in CHANGELOG_DATA if parse_version(entry['version']) > parse_version(last_seen_version)]
-
-            if nuove_voci:
-                # Se ci sono voci nel JSON che l'utente non ha visto, vai al changelog
-                return redirect(url_for("changelog"))
-            else:
-                # Altrimenti, vai direttamente alla dashboard
-                return redirect(url_for("dashboard"))
+            # Vai direttamente alla dashboard senza controllare il changelog
+            return redirect(url_for("dashboard"))
         else:
             flash("Credenziali non valide. Riprova.", "error")
+# --------------------------------------------------
 
     return render_template("login.html", app_version=APP_VERSION)
 
@@ -1011,29 +1005,16 @@ def ack_changelog():
         return jsonify({'success': True})
     return jsonify({'success': False, 'error': 'Utente non trovato'})
 
+# --- File: gestionale.py (Intorno alla riga 515) ---
 @app.route("/changelog")
 @login_required
 def changelog():
-    """Mostra la pagina con le novità non ancora viste dall'utente."""
-    users = load_users()
-    user = next((u for u in users if u["username"] == session["user_id"]), None)
-    if not user:
-        return redirect(url_for("logout"))
-
-    last_seen_version = user.get("last_seen_version", "0.0")
-
-    # Filtra solo le novità effettive
-    updates_to_show = [
-        entry for entry in CHANGELOG_DATA
-        if parse_version(entry['version']) > parse_version(last_seen_version)
-    ]
-    updates_to_show.sort(key=lambda x: parse_version(x['version']), reverse=True)
-
-    # Se per qualche motivo l'utente arriva qui ma non ci sono novità, lo mandiamo alla dashboard
-    if not updates_to_show:
-        return redirect(url_for("dashboard"))
+    """Mostra la pagina con tutte le novità, senza filtri di lettura."""
+    # Ordiniamo tutto il changelog per versione decrescente
+    updates_to_show = sorted(CHANGELOG_DATA, key=lambda x: parse_version(x['version']), reverse=True)
         
     return render_template("changelog.html", title="Novità", changelog_updates=updates_to_show)
+# --------------------------------------------------
 
 @app.route("/mark-changelog-as-seen")
 @login_required
@@ -1067,21 +1048,6 @@ def make_session_permanent_and_timed():
     app.permanent_session_lifetime = timedelta(hours=1)
     # Questa riga resetta il timer ad ogni azione dell'utente
     session.modified = True
-    
-    # Lista di endpoint da escludere per evitare loop infiniti
-    excluded_endpoints = ['changelog', 'mark_changelog_as_seen', 'static', 'logout', 'login', 'ack_changelog']
-    
-    if 'user_id' in session and request.endpoint not in excluded_endpoints:
-        users = load_users()
-        user_data = next((u for u in users if u['username'] == session['user_id']), None)
-        
-        if user_data:
-            last_seen = user_data.get('last_seen_version', '0.0.0')
-            # Verifica se ci sono novità reali nel JSON rispetto all'ultima vista dell'utente
-            has_new_updates = any(parse_version(entry['version']) > parse_version(last_seen) for entry in CHANGELOG_DATA)
-            
-            if has_new_updates:
-                return redirect(url_for('changelog'))
 
 # ### NUOVE ROUTE PER GESTIONE PASSWORD ###
 @app.route("/cambia-password", methods=["GET", "POST"])
@@ -1390,6 +1356,7 @@ def allert_page():
         except: continue
 
     return render_template("allert.html", title="Centro Notifiche & Alert", alerts=alerts)
+
 
 @app.route("/admin/refresh-all-quotes")
 @login_required
@@ -5224,22 +5191,17 @@ DISPLAY_URL = f"http://{LAN_IP}:{PORT}/"
 APP_TITLE = f"Gestionale Preventivi v{APP_VERSION}"
 SERVER_ADDRESS_INFO = f"Server attivo su {DISPLAY_URL}"
 
-# --- Funzioni per l'icona e il Server ---
-# NUOVA VERSIONE CON AUTO-RELOAD
+# Modifica run_server per includere l'annuncio all'avvio
 def run_server():
-    """Funzione che avvia il server web."""
+    """Funzione che avvia il server web e controlla gli annunci."""
+    # Esegui l'annuncio prima di far partire il server
+    verifica_e_annuncia_aggiornamento()
+    
     print(SERVER_ADDRESS_INFO)
-
-    # Controlla se siamo in modalità debug (impostata all'avvio)
     is_debug_mode = "--debug" in sys.argv
-
     if is_debug_mode:
-        print(">>> INFO: Server avviato in modalità DEBUG con auto-reload.")
-        # Usa il server di sviluppo di Flask che ha l'auto-reloader
         app.run(host=HOST_BIND, port=PORT, debug=True)
     else:
-        # Altrimenti, usa il server di produzione Waitress per la versione normale
-        print(">>> INFO: Server avviato in modalità PRODUZIONE con Waitress.")
         serve(app, host=HOST_BIND, port=PORT)
 
 def open_app(icon, menu_item):
@@ -5375,6 +5337,13 @@ def api_tagbox():
         }
         shouts.insert(0, nuovo_shout) # I più nuovi in alto
         save_tagbox(shouts[:50]) # Teniamo solo gli ultimi 50
+        
+        # Notifica tutti gli altri utenti dell'attività sulla Tagbox
+        users = load_users()
+        for u in users:
+            if u["username"] != session["user_id"]:
+                add_notification(u["username"], f"{session['user_name']} ha scritto sulla Tag Board", link="/")
+                
         return jsonify({"success": True})
     
     return jsonify(load_tagbox())
@@ -5425,6 +5394,265 @@ def api_suggestions_links():
         if count_clients >= 5: break # Limite per i clienti
 
     return jsonify(suggestions)
+
+def load_tasks():
+    if not TASKS_FILE.exists(): return []
+    try:
+        with TASKS_FILE.open("r", encoding="utf-8") as f: return json.load(f)
+    except: return []
+
+def save_tasks(tasks):
+    with TASKS_FILE.open("w", encoding="utf-8") as f: json.dump(tasks, f, indent=2)
+
+@app.route("/tasks")
+@login_required
+def tasks_page():
+    return render_template("tasks.html", title="Task & Report Team")
+
+# --- File: gestionale.py (Sostituzione integrale API Task e Update) ---
+
+@app.route("/api/tasks", methods=["GET", "POST"])
+@login_required
+def api_tasks():
+    if request.method == "POST":
+        data = request.json
+        desc = data.get("description", "").strip()
+        if not desc:
+            return jsonify({"error": "Descrizione mancante"}), 400
+
+        tasks = load_tasks()
+        task_id = str(uuid.uuid4())[:8].upper()
+        mentions = re.findall(r"@(\w+)", desc)
+        
+        new_task = {
+            "id": task_id,
+            "created_by": session["user_id"],
+            "created_by_name": session["user_name"],
+            "description": desc,
+            "assigned_to": [f"@{m}" for m in mentions] if mentions else ["@tutti"],
+            "status": "open",
+            "timestamp": datetime.datetime.now().strftime("%d/%m %H:%M"),
+            "comments": []
+        }
+        tasks.insert(0, new_task)
+        save_tasks(tasks)
+
+        # --- LOGICA NOTIFICHE UNIFICATA ---
+        # ... (caricamento tasks e creazione new_task invariati) ...
+        save_tasks(tasks)
+
+        # --- LOGICA NOTIFICHE UNIFICATA (CORRETTA) ---
+        mittente = session["user_name"]
+        link_task = f"[VEDI TASK #TASK-{task_id}]"
+        
+        # Carichiamo gli utenti per risolvere i nomi reali (case-sensitive)
+        all_users = load_users()
+        user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+        unique_mentions = set(m.lower() for m in mentions)
+
+        # 1. Post su Tagbox (per i Gruppi)
+        for m_lower in unique_mentions:
+            if m_lower in ['tutti', 'venditori', 'segreteria', 'produzione']:
+                tagbox = load_tagbox()
+                tagbox.insert(0, {
+                    "id": uuid.uuid4().hex[:6],
+                    "user": f"{mittente} [TASK]",
+                    "user_id": session["user_id"],
+                    "text": f"@{m_lower} Nuova task creata: {link_task}",
+                    "timestamp": datetime.datetime.now().strftime("%H:%M"),
+                    "pinned": False
+                })
+                save_tagbox(tagbox[:50])
+                break
+
+        # 2. Notifiche Campanella (Per tutti i menzionati)
+        notified_ids = {session["user_id"]} # Non notificare se stessi
+        for m_lower in unique_mentions:
+            # Caso Gruppi
+            # --- File: gestionale.py (Intorno alla riga 1530) ---
+            if m_lower in ['tutti', 'venditori', 'segreteria', 'produzione']:
+                for u in all_users:
+                    u_real_id = u["username"]
+                    if u_real_id not in notified_ids:
+                        add_notification(u_real_id, f"{mittente} ha creato una task per @{m_lower}", link=f"/tasks#{task_id}")
+                        notified_ids.add(u_real_id)
+            
+            # Caso Utente Singolo (Risoluzione case-insensitive dello username)
+            elif m_lower in user_resolver:
+                u_real_id = user_resolver[m_lower]
+                if u_real_id not in notified_ids:
+                    add_notification(u_real_id, f"{mittente} ti ha assegnato una nuova task", link=f"/tasks#{task_id}")
+                    notified_ids.add(u_real_id)
+
+        return jsonify({"success": True})
+    
+    # GET: Visualizzazione filtrata
+    all_tasks = load_tasks()
+    me = session["user_id"]
+    my_role = session["user_role"]
+    filtered = [t for t in all_tasks if 
+        t.get("created_by") == me or 
+        f"@{me}" in t.get("assigned_to", []) or 
+        "@tutti" in t.get("assigned_to", []) or 
+        f"@{my_role}" in t.get("assigned_to", []) or
+        (my_role in ['amministratore', 'ceo'])
+    ]
+    return jsonify(filtered)
+
+@app.route("/api/tasks/update", methods=["POST"])
+@login_required
+def api_update_task():
+    data = request.json
+    task_id, new_status, comment_text = data.get("id"), data.get("status"), data.get("comment", "").strip()
+    status_change = data.get("status_change")
+    
+    # --- File: gestionale.py (Intorno alla riga 1554) ---
+    tasks = load_tasks()
+    notification_sent = False # <--- Flag per evitare notifiche doppie
+    for t in tasks:
+        if t["id"] == task_id:
+            t["status"] = new_status
+            if new_status in ['resolved', 'failed'] and status_change:
+                t["concluded_at"] = datetime.datetime.now().strftime("%Y-%m-%d")
+
+            # --- NOTIFICHE SPECIFICHE CAMBIO STATO ---
+            if status_change:
+                all_users = load_users()
+                user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+                mittente = session["user_name"]
+                
+                if status_change == 'support':
+                    for u in all_users:
+                        if u['role'] in ['amministratore', 'ceo'] or u['username'] == t.get('created_by'):
+                            if u['username'] != session['user_id']:
+                                add_notification(u['username'], f"⚠️ {mittente} richiede SUPPORTO per la task #{t['id']}", link=f"/tasks#{task_id}")
+                                notification_sent = True
+
+                if status_change in ['resolved', 'failed']:
+                    notified_assigned = {session['user_id']}
+                    assigned_list = t.get("assigned_to", [])
+                    label = "COMPLETATA" if status_change == 'resolved' else "FALLITA"
+                    emoji = "✅" if status_change == 'resolved' else "❌"
+                    
+                    for target in assigned_list:
+                        m_lower = target.replace("@", "").lower()
+                        if m_lower in ['tutti', 'venditori', 'segreteria', 'produzione']:
+                            for u in all_users:
+                                if (m_lower == 'tutti' or u['role'] == m_lower) and u['username'] not in notified_assigned:
+                                    add_notification(u['username'], f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}")
+                                    notified_assigned.add(u['username'])
+                                    notification_sent = True
+                        elif m_lower in user_resolver:
+                            u_real_id = user_resolver[m_lower]
+                            if u_real_id not in notified_assigned:
+                                add_notification(u_real_id, f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}")
+                                notified_assigned.add(u_real_id)
+                                notification_sent = True
+            
+            if comment_text:
+                if "comments" not in t: t["comments"] = []
+                t["comments"].append({
+                    "user": session["user_name"], "text": comment_text,
+                    "timestamp": datetime.datetime.now().strftime("%d/%m %H:%M"),
+                    "status_change": status_change
+                })
+                
+                # Invia notifica commento solo se non è già stato notificato un cambio stato
+                if not notification_sent:
+                    all_users = load_users()
+                    user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+                    notified = {session["user_id"]}
+                    if t.get("created_by") and t["created_by"] not in notified:
+                        add_notification(t["created_by"], f"{session['user_name']} ha commentato la task #{task_id}", link=f"/tasks#{task_id}")
+                        notified.add(t["created_by"])
+                    c_mentions = re.findall(r"@(\w+)", comment_text)
+                    for cm_lower in set(m.lower() for m in c_mentions):
+                        if cm_lower in user_resolver:
+                            u_real_id = user_resolver[cm_lower]
+                            if u_real_id not in notified:
+                                add_notification(u_real_id, f"{session['user_name']} ti ha menzionato nella task #{task_id}", link=f"/tasks#{task_id}")
+                                notified.add(u_real_id)
+            break
+    save_tasks(tasks)
+    return jsonify({"success": True})
+
+def load_notifications():
+    if not NOTIFICATIONS_FILE.exists(): return []
+    try:
+        with NOTIFICATIONS_FILE.open("r", encoding="utf-8") as f: return json.load(f)
+    except: return []
+
+def save_notifications(notifs):
+    with NOTIFICATIONS_FILE.open("w", encoding="utf-8") as f: json.dump(notifs, f, indent=2)
+
+def add_notification(user_id, text, link="/tasks"):
+    notifs = load_notifications()
+    notifs.insert(0, {
+        "id": uuid.uuid4().hex[:6],
+        "user_id": user_id,
+        "text": text,
+        "link": link,
+        "timestamp": datetime.datetime.now().strftime("%d/%m %H:%M"),
+        "read": False
+    })
+    save_notifications(notifs[:100]) # Teniamo le ultime 100
+
+# --- File: gestionale.py (Inserire dopo la riga 2630, vicino alle API notifiche) ---
+def verifica_e_annuncia_aggiornamento():
+    """Controlla se la versione attuale è stata già annunciata. Se no, avvisa tutti via Tagbox e Notifica."""
+    ANNOUNCED_FILE = DATA_DIR / "last_announced_version.txt"
+    last_announced = ""
+    
+    if ANNOUNCED_FILE.exists():
+        last_announced = ANNOUNCED_FILE.read_text().strip()
+    
+    if last_announced != APP_VERSION:
+        print(f"INFO: Annuncio nuova versione {APP_VERSION} in corso...")
+        
+        # 1. Post sulla Tagbox a nome ADMIN
+        shouts = load_tagbox()
+        nuovo_annuncio = {
+            "id": uuid.uuid4().hex[:6],
+            "user": "ADMIN",
+            "user_id": "system_admin",
+            "text": f"🚀 Rilasciata Versione {APP_VERSION}!",
+            "timestamp": datetime.datetime.now().strftime("%H:%M"),
+            "pinned": True
+        }
+        shouts.insert(0, nuovo_annuncio)
+        save_tagbox(shouts[:50])
+        
+        # 2. Notifica campanella a tutti gli utenti
+        all_users = load_users()
+        for u in all_users:
+            add_notification(
+                user_id=u["username"], 
+                text=f"ADMIN: È disponibile la nuova v{APP_VERSION}.", 
+                link="/changelog"
+            )
+        
+        # 3. Salva l'avvenuto annuncio
+        ANNOUNCED_FILE.write_text(APP_VERSION)
+
+
+@app.route("/api/notifications")
+@login_required
+def get_notifications():
+    all_n = load_notifications()
+    # Filtra per l'utente corrente
+    my_n = [n for n in all_n if n["user_id"] == session["user_id"]]
+    unread = sum(1 for n in my_n if not n["read"])
+    return jsonify({"notifications": my_n[:20], "unread_count": unread})
+
+@app.route("/api/notifications/read", methods=["POST"])
+@login_required
+def mark_notifications_read():
+    all_n = load_notifications()
+    for n in all_n:
+        if n["user_id"] == session["user_id"]:
+            n["read"] = True
+    save_notifications(all_n)
+    return jsonify({"success": True})    
 
 
 if __name__ == "__main__":
