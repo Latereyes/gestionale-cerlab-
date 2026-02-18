@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 
+{% block extra_fab %}
+    <a href="javascript:void(0)" class="fab-btn task-fab" onclick="window.openQuickTask('{{ p.numero }}', 'CONSEGNA', '{{ p.cliente }}')" title="Nuova Task Consegna">
+        <i class="fas fa-plus"></i>
+        <span class="fab-label">TASK</span>
+    </a>
+{% endblock %}
+
 {% block page_title %}
 <h1><i class="fas fa-dolly"></i> Gestione Consegna
     {% if p %}
@@ -126,17 +133,6 @@
 
         <div class="modal-actions">
             <button type="button" id="revert-modal-cancel" class="btn">Annulla</button>
-        </div>
-    </div>
-</div>
-
-<div id="notification-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-        <h3 id="modal-title"></h3>
-        <p id="modal-text"></p>
-        <div class="modal-actions">
-            <button type="button" id="modal-cancel" class="btn">Annulla</button>
-            <button type="button" id="modal-confirm" class="btn primary">Conferma</button>
         </div>
     </div>
 </div>
@@ -380,6 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Pulsanti (alcuni potrebbero essere null se l'utente è venditore)
     const btnCreaBolla = document.getElementById('btn-crea-bolla');
     const btnMarcaPronto = document.getElementById('btn-marca-pronto');
+    // ... (attorno alla riga 250)
     const btnMarcaConsegnato = document.getElementById('btn-marca-consegnato');
     const btnAnnullaStato = document.getElementById('btn-annulla-stato');
 
@@ -391,11 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const keepBollaCheckbox = document.getElementById('keep-bolla-checkbox');
     const revertModalCancel = document.getElementById('revert-modal-cancel');
     
-    const modal = document.getElementById('notification-modal');
-    const modalTitle = document.getElementById('modal-title');
-    const modalText = document.getElementById('modal-text');
-    const modalConfirm = document.getElementById('modal-confirm');
-    const modalCancel = document.getElementById('modal-cancel');
+    // Rimosse variabili modal locali (usiamo quelle globali)
     const addressConfirmModal = document.getElementById('address-confirm-modal');
     const cantiereAddressModal = document.getElementById('cantiere-address-modal');
     const cantiereForm = document.getElementById('cantiere-form');
@@ -409,33 +402,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return [...checkboxes].filter(cb => cb.checked);
     }
 
-    function showModal({ title, text, confirmText = 'Conferma', cancelText = 'Annulla', onConfirm, isAlert = false }) {
-        modalTitle.textContent = title;
-        modalText.textContent = text;
-        modalConfirm.textContent = confirmText;
-        modalCancel.textContent = cancelText;
-        modalConfirm.style.display = isAlert ? 'none' : 'inline-flex';
-        modalCancel.style.display = isAlert ? 'none' : 'inline-flex';
+    function showModal({ title, text, onConfirm, isAlert = false }) {
         if (isAlert) {
-            modalConfirm.style.display = 'none';
-            modalCancel.textContent = 'OK';
-            modalCancel.style.display = 'inline-flex';
+            window.showNotification(title, text);
+            return Promise.resolve(true);
+        } else {
+            return new Promise((resolve) => {
+                window.showConfirmation(title, text, () => {
+                    if (onConfirm) onConfirm();
+                    resolve(true);
+                });
+            });
         }
-        modal.style.display = 'flex';
-        return new Promise((resolve) => {
-            modalConfirm.onclick = () => {
-                modal.style.display = 'none';
-                if (onConfirm) onConfirm();
-                resolve(true);
-            };
-            modalCancel.onclick = () => {
-                modal.style.display = 'none';
-                resolve(false);
-            };
-        });
     }
 
     // --- LOGICA PRINCIPALE ---
+
 
     function updateButtonState() {
         const checkedBoxes = getSelectedItemsData();
@@ -534,12 +516,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     newTab.location.href = data.next_url;
                 } else {
                     newTab.close();
-                    showModal({ title: 'Errore', text: data.error, isAlert: true });
+                    window.showNotification('Errore', data.error);
                     needsRefresh = false;
                 }
             }).catch(err => {
                  newTab.close();
-                 showModal({ title: 'Errore', text: 'Errore di connessione con il server.', isAlert: true });
+                 window.showNotification('Errore', 'Errore di connessione con il server.');
                  needsRefresh = false;
             });
     }
@@ -573,22 +555,22 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch(`/consegna/${quoteId}/marca-pronto`, { method: 'POST', body: formData })
                 .then(res => res.json()).then(data => {
                     if (data.success) window.location.reload();
-                    else showModal({ title: 'Errore', text: data.error, isAlert: true });
+                    else window.showNotification('Errore', data.error);
                 });
         });
     }
 
     if (btnMarcaConsegnato) {
         btnMarcaConsegnato.addEventListener('click', async () => {
-            const confirmed = await showModal({ title: 'Conferma Azione', text: "Sei sicuro di voler marcare gli articoli come 'Consegnato'? L'azione è definitiva." });
-            if (!confirmed) return;
-            const formData = new FormData();
-            getSelectedItemsData().forEach(cb => formData.append('selected_items[]', cb.value));
-            fetch(`/consegna/${quoteId}/marca-consegnato`, { method: 'POST', body: formData })
-                .then(res => res.json()).then(data => {
-                    if (data.success) window.location.reload();
-                    else showModal({ title: 'Errore', text: data.error, isAlert: true });
-                });
+            window.showConfirmation('Conferma Azione', "Sei sicuro di voler marcare gli articoli come 'Consegnato'? L'azione è definitiva.", () => {
+                const formData = new FormData();
+                getSelectedItemsData().forEach(cb => formData.append('selected_items[]', cb.value));
+                fetch(`/consegna/${quoteId}/marca-consegnato`, { method: 'POST', body: formData })
+                    .then(res => res.json()).then(data => {
+                        if (data.success) window.location.reload();
+                        else window.showNotification('Errore', data.error);
+                    });
+            });
         });
     }
 
@@ -663,13 +645,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (data.success) {
                             cantiereAddressModal.style.display = 'none';
                             proceedWithBollaCreation(data.new_address_id);
-                        } else { showModal({ title: 'Errore', text: data.error, isAlert: true }); }
+                        } else { window.showNotification('Errore', data.error); }
                     });
             } else if (selectedAddressId) {
                 cantiereAddressModal.style.display = 'none';
                 proceedWithBollaCreation(selectedAddressId);
             } else {
-                showModal({ title: 'Attenzione', text: 'Seleziona un indirizzo o compila i campi per crearne uno nuovo.', isAlert: true });
+                window.showNotification('Attenzione', 'Seleziona un indirizzo o compila i campi per crearne uno nuovo.');
             }
         });
     }

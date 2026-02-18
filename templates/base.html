@@ -7,6 +7,10 @@
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 <style>
+    .task-fab {
+    background: #6366f1; /* Colore Indigo delle Task */
+}
+#quickTaskInput::placeholder { color: #94a3b8; }
     .notify-item { padding: 12px 15px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.2s; }
     .notify-item:hover { background: #fffbeb; }
     .notify-item.unread { border-left: 4px solid #f59e0b; background: #fffcf0; }
@@ -529,7 +533,26 @@
         justify-content: flex-end; gap: 8px; 
     }
     #unlock-password-input { margin-top: 4px; }
+    .mention-item:hover { background: #f1f5f9; color: #0d6efd; }
+  .mention-item.current-context { background: #fff9c4; border-left: 4px solid #f59e0b; }
+  .mention-item .tag-sigla { font-size: 9px; opacity: 0.6; }
   </style>
+
+<div id="quickTaskModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+        <h3><i class="fas fa-bolt"></i> Task Rapida</h3>
+        <p class="muted" style="font-size: 12px; margin-bottom: 10px;">Stai creando una nota collegata a questo preventivo.</p>
+        <div style="position: relative;">
+            <div id="quickTaskMentions" class="mention-list" style="bottom: 100%; top: auto;"></div>
+            <textarea id="quickTaskInput" placeholder="Cosa c'è da fare? Usa @ per assegnare..." 
+                      style="min-height: 100px; padding: 12px;"></textarea>
+        </div>
+        <div class="modal-actions">
+            <button id="saveQuickTaskBtn" class="btn primary">Crea Task</button>
+            <button onclick="document.getElementById('quickTaskModal').style.display='none'" class="btn">Annulla</button>
+        </div>
+    </div>
+</div>
 </head>
 
 {% macro workflow_navbar(p, active_page) %}
@@ -654,6 +677,73 @@
     </main>
   {% endblock %}
   <script>
+    // Identifica il contesto attuale della pagina per i suggerimenti intelligenti
+    window.currentContextId = "{{ p.numero if p else (cliente.id_cliente if cliente else '') }}";
+    window.currentContextLabel = "{{ p.cliente if p else (cliente.cliente if cliente else '') }}";
+    window.currentContextType = "{{ 'quote' if p else ('client' if cliente else '') }}";
+// Funzione globale per aprire la modale task da qualsiasi pagina
+window.openQuickTask = function(quoteId, contextLabel, subjectName) {
+    const modal = document.getElementById('quickTaskModal');
+    const input = document.getElementById('quickTaskInput');
+    const saveBtn = document.getElementById('saveQuickTaskBtn');
+    
+    // Rimuove eventuali cancelletti doppi
+    const cleanId = quoteId.toString().replace('#', '');
+    let tagValue = "";
+
+    // Applichiamo la formattazione richiesta per i preventivi e per i clienti
+    if (contextLabel.toUpperCase() === 'CLIENTE') {
+        // Formato Cliente: basta il Nome (es. #CLT-XYZ[Mario Rossi] -> Mario Rossi)
+        tagValue = `#${cleanId}[${subjectName}]`;
+    } else {
+        // Formato Preventivo: ID (Nome) (es. #ID[#ID (Mario Rossi)] -> #ID (Mario Rossi))
+        tagValue = `#${cleanId}[#${cleanId} (${subjectName})]`;
+    }
+    
+    // Inseriamo il tag nel campo di testo
+    input.value = tagValue + " ";
+    
+    modal.style.display = 'flex';
+    input.focus();
+    
+    input.oninput = () => window.handleAutocomplete(input, document.getElementById('quickTaskMentions'));
+
+    saveBtn.onclick = async () => {
+        const text = input.value.trim();
+        if(!text) return;
+        
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Inviando...';
+        
+        try {
+            const response = await fetch('/api/tasks', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ description: text })
+            });
+            
+            if(response.ok) {
+                const result = await response.json();
+                if(result.success) {
+                    modal.style.display = 'none';
+                    showNotification("Task Creata", "L'azione è stata registrata con successo.");
+                    // Opzionale: se sei nella pagina tasks, ricarica la lista
+                    if(typeof window.loadTasks === 'function') window.loadTasks();
+                } else {
+                    alert("Il server ha segnalato un problema: " + (result.error || "Errore sconosciuto"));
+                }
+            } else {
+                alert("Errore del server: " + response.status);
+            }
+        } catch(e) {
+            console.error("Errore invio task:", e);
+            alert("Errore di connessione durante il salvataggio.");
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = 'Crea Task';
+        }
+    };
+};
     // ========== Funzioni Helper Globali ==========
     function normalizeNumberString(raw) { if (raw == null) return ""; let s = String(raw).trim().replace(/[ €%]/g, ""); const lastDot = s.lastIndexOf("."); const lastComma = s.lastIndexOf(","); if (lastDot !== -1 && lastComma !== -1) { if (lastComma > lastDot) { s = s.replace(/\./g, "").replace(/,/g, "."); } else { s = s.replace(/,/g, ""); } } else if (lastComma !== -1) { s = s.replace(/,/g, "."); } return s; }
     function parseNum(str) { const s = normalizeNumberString(str); const n = parseFloat(s); return isNaN(n) ? 0 : n; }
@@ -726,29 +816,34 @@
                 document.body.removeAttribute('data-copy-html');
                 document.body.removeAttribute('data-copy-text');
             }
-        });
+});
 
-        function showNotification(title, message, onOk) {
+
+        window.showNotification = function(title, message, onOk) {
             const modal = document.getElementById('notification-modal');
             if (!modal) return;
+            
             modal.querySelector('#notification-modal-title').textContent = title;
             modal.querySelector('#notification-modal-text').textContent = message;
             modal.style.display = 'flex';
+            
             const okBtn = modal.querySelector('#notification-modal-ok');
-            const newOkBtn = okBtn.cloneNode(true); // Ricrea il bottone per evitare listener multipli
+            // Pulizia dei vecchi eventi per evitare doppie chiamate
+            const newOkBtn = okBtn.cloneNode(true); 
             okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+            
             newOkBtn.addEventListener('click', () => {
                 modal.style.display = 'none';
                 if (onOk) onOk();
             }, { once: true });
-        }
+        };
 
-        // --- NUOVA FUNZIONE PER LA MODALE DI CONFERMA ---
-        function showConfirmation(title, message, onConfirm) {
+        // Fai lo stesso per showConfirmation se presente:
+        window.showConfirmation = function(title, message, onConfirm) {
             const modal = document.getElementById('confirm-modal');
             if (!modal) return;
             modal.querySelector('#confirm-modal-title').textContent = title;
-            modal.querySelector('#confirm-modal-text').innerHTML = message; // Usa innerHTML per il grassetto
+            modal.querySelector('#confirm-modal-text').innerHTML = message;
             modal.style.display = 'flex';
             const okBtn = modal.querySelector('#confirm-modal-ok');
             const cancelBtn = modal.querySelector('#confirm-modal-cancel');
@@ -1061,20 +1156,48 @@ document.addEventListener('DOMContentLoaded', () => {
     let linkSuggestions = [];
 
     // --- 1. FUNZIONE DI PARSING (VISUALIZZAZIONE) ---
-    window.parseMessage = function(text) {
-        if (!text) return "";
-        let parsed = text
-            .replace(/@(\w+)/g, '<span class="shout-mention">@$1</span>')
-            .replace(/#(\d{2,5})/g, '<a href="/quote/edit/$1" class="shout-link">#$1</a>')
-            // Aggiungiamo il supporto per il link rapido alle task
-            .replace(/\[VEDI TASK #TASK-([\w-]+)\]/g, '<a href="/tasks" class="shout-link" style="font-weight:bold;"><i class="fas fa-external-link-alt"></i> VAI ALLA TASK</a>');
-        return parsed;
+window.parseMessage = function(text) {
+    if (!text) return "";
+    
+    const routeMap = {
+        'ORDINE': 'conferma-ordine',
+        'SALDO': 'gestione_pagamenti',
+        'CONSEGNA': 'consegna',
+        'FATTURE': 'fattura',
+        'CLIENTE': 'dettaglio_cliente' // Aggiunto supporto link cliente
     };
 
-    // --- 2. FUNZIONE DI INSERIMENTO SUGGERIMENTO ---
-    function addSuggestionItem(inputEl, listEl, code, label, icon, triggerIdx) {
+    return text
+        .replace(/\[VEDI TASK #TASK-([\w-]+)\]/g, '<a href="/tasks#$1" class="shout-link" style="font-weight:bold;"><i class="fas fa-external-link-alt"></i> VAI ALLA TASK</a>')
+        .replace(/@(\w+)/g, '<span class="shout-mention">@$1</span>')
+        // Regex aggiornata: cattura ID e opzionalmente tutto ciò che è dentro []
+        .replace(/(^|\s)#([A-Z0-9-]+)(?:\s*\[([^\]]+)\])?/g, (match, space, id, tag) => {
+            const context = tag ? tag.toUpperCase() : null;
+            let url = "";
+
+            // Se il tag è un contesto conosciuto (es. [ORDINE]), usiamo la rotta specifica
+            if (context && routeMap[context] && context !== 'CLIENTE') {
+                if (context === 'ORDINE') url = `/preventivo/${id}/conferma-ordine`;
+                else if (context === 'SALDO') url = `/pagamenti/${id}`;
+                else if (context === 'CONSEGNA') url = `/consegna/${id}`;
+                else if (context === 'FATTURE') url = `/fattura/${id}`;
+            } else if (id.startsWith('CLT-')) {
+                url = `/cliente/dettaglio/${id}`;
+            } else {
+                const folder = id.startsWith('EDIL-') ? 'preventivo-edile' : 'preventivo';
+                url = `/${folder}/edit/${id}`;
+            }
+
+            // SE ESISTE IL TAG (NOME), MOSTRIAMO SOLO QUELLO. ALTRIMENTI L'ID.
+            const label = tag ? tag : `#${id}`;
+            return `${space}<a href="${url}" class="shout-link">${label}</a>`;
+        });
+};
+
+   // --- 2. FUNZIONE DI INSERIMENTO SUGGERIMENTO ---
+    function addSuggestionItem(inputEl, listEl, code, label, icon, triggerIdx, isCurrent = false) {
         const item = document.createElement('div');
-        item.className = 'mention-item';
+        item.className = 'mention-item' + (isCurrent ? ' current-context' : '');
         
         // Puliamo la label dai prefissi tecnici per l'inserimento nel tag
         const cleanLabel = label.replace(/^(Cartella:\s*|Prev\.\s*)/i, '');
@@ -1082,7 +1205,7 @@ document.addEventListener('DOMContentLoaded', () => {
         item.innerHTML = `<span><i class="fas ${icon}"></i> ${label}</span> <span class="tag-sigla">${code}</span>`;
         item.onclick = () => {
             const val = inputEl.value;
-            // Inseriamo il formato ricco: #ID[Nome Pulito] (es: #CLT-CF775F[Alba D'Antonio])
+            // Puliamo la label e creiamo il tag nel formato #ID[Nome]
             const tagToInsert = code.startsWith('#') ? `${code}[${cleanLabel}]` : code;
             
             const newVal = val.substring(0, triggerIdx) + tagToInsert + ' ' + val.substring(inputEl.selectionStart);
@@ -1137,9 +1260,43 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         } else {
             const res = await fetch(`/api/suggestions/links?q=${encodeURIComponent(query)}`);
-            const results = await res.json();
+            let results = await res.json();
+
+            // LOGICA DI PRIORITÀ: Se siamo in una pagina specifica, mettiamo quel preventivo/cliente in cima
+            if (window.currentContextId) {
+                const cleanCurrentId = window.currentContextId.replace('#', '');
+                const currentIndex = results.findIndex(s => s.id === cleanCurrentId);
+                
+                let currentItem = null;
+                if (currentIndex !== -1) {
+                    // Se è già nei risultati, lo estraiamo
+                    currentItem = results.splice(currentIndex, 1)[0];
+                } else if (cleanCurrentId.toLowerCase().includes(query) || window.currentContextLabel.toLowerCase().includes(query) || query === "") {
+                    // Se non è nei risultati ma corrisponde alla ricerca (o ricerca vuota), lo creiamo al volo
+                    currentItem = {
+                        id: cleanCurrentId,
+                        label: window.currentContextLabel,
+                        type: window.currentContextType
+                    };
+                }
+
+                if (currentItem) {
+                    // Lo aggiungiamo in prima posizione
+                    results.unshift(currentItem);
+                }
+            }
+
             results.forEach(s => {
-                addSuggestionItem(inputEl, listEl, `#${s.id}`, s.label, s.type === 'quote' ? 'fa-file-invoice' : 'fa-folder-open', lastTriggerIdx);
+                const isCurrent = s.id === window.currentContextId.replace('#', '');
+                addSuggestionItem(
+                    inputEl, 
+                    listEl, 
+                    `#${s.id}`, 
+                    s.label, 
+                    s.type === 'quote' ? 'fa-file-invoice' : 'fa-folder-open', 
+                    lastTriggerIdx,
+                    isCurrent
+                );
                 hasResults = true;
             });
         }
