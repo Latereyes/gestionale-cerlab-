@@ -1,7 +1,9 @@
 {% extends "base.html" %}    
 
 {% block extra_fab %}
-    <a href="javascript:void(0)" class="fab-btn task-fab" onclick="window.openQuickTask('{{ cliente.id_cliente }}', 'CLIENTE', '{{ cliente.cliente }}')" title="Nuova Task Cliente">
+    <a href="javascript:void(0)" class="fab-btn task-fab" 
+       onclick="window.openQuickTask('{{ cliente.id_cliente }}', 'CLIENTE', '{{ cliente.cliente | replace("'", "\\'") }}')" 
+       title="Nuova Task Cliente">
         <i class="fas fa-plus"></i>
         <span class="fab-label">TASK</span>
     </a>
