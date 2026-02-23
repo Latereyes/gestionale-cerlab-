@@ -1,11 +1,11 @@
-#define MyAppVersion "2.2.1"
+#define MyAppVersion "2.2.2"
 ; Script Inno Setup per Gestionale Preventivi
 
 [Setup]
 AppName=Gestionale Preventivi
 AppVersion={#MyAppVersion}
 ; <-- CORREZIONE: La riga AppId era malformattata
-AppId={{83aa0d2e-e942-471e-a9be-4123405787db}}
+AppId={{153f81d3-cf41-4819-9bc4-b1290d9eb87f}}
 AppPublisher=Cerlab srls
 UninstallDisplayIcon={app}\Gestionale.exe
 DefaultDirName={autopf}\Gestionale Preventivi

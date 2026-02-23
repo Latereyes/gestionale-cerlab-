@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.2.1"  
+APP_VERSION = "2.2.2"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -5191,7 +5191,6 @@ DISPLAY_URL = f"http://{LAN_IP}:{PORT}/"
 APP_TITLE = f"Gestionale Preventivi v{APP_VERSION}"
 SERVER_ADDRESS_INFO = f"Server attivo su {DISPLAY_URL}"
 
-# Modifica run_server per includere l'annuncio all'avvio
 def run_server():
     """Funzione che avvia il server web e controlla gli annunci."""
     # Esegui l'annuncio prima di far partire il server
@@ -5202,7 +5201,15 @@ def run_server():
     if is_debug_mode:
         app.run(host=HOST_BIND, port=PORT, debug=True)
     else:
-        serve(app, host=HOST_BIND, port=PORT)
+        # Avvia Waitress con configurazione ottimizzata (12 thread)
+        serve(
+            app, 
+            host=HOST_BIND, 
+            port=PORT, 
+            threads=12, 
+            connection_limit=200, 
+            channel_timeout=60
+        )
 
 def open_app(icon, menu_item):
     """Apre il gestionale nel browser."""
