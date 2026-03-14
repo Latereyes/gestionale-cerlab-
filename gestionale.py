@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.2.2"  
+APP_VERSION = "2.2.3"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -1238,7 +1238,7 @@ def allert_page():
     active_client_ids = set()
 
     # 1. Scansione Preventivi per Pagamenti Scaduti, Merce e Identificazione Clienti Attivi
-    for quote_file in QUOTES_DIR.glob("P*.json"):
+    for quote_file in QUOTES_DIR.glob("*.json"):
         try:
             with quote_file.open("r", encoding="utf-8") as f:
                 p = json.load(f)
@@ -1247,6 +1247,7 @@ def allert_page():
                 if p.get("stato") in active_statuses:
                     active_client_ids.add(p.get("id_cliente"))
                 
+                # Esclude esplicitamente Annullati e Chiusi dagli alert merce/pagamenti
                 if p.get("stato") in ["Annullato", "Chiuso"]: 
                     continue
                 
@@ -1367,7 +1368,7 @@ def refresh_all_quotes():
     Questo corregge i dati "stale" (non aggiornati) nei vecchi file JSON.
     """
     print("--- INIZIO: Aggiornamento stati globali di tutti i preventivi ---")
-    all_quote_files = list(QUOTES_DIR.glob("P*.json"))
+    all_quote_files = list(QUOTES_DIR.glob("*.json"))
     processed_count = 0
     updated_count = 0
     
@@ -1455,11 +1456,12 @@ def archivio_globale():
         if not p:
             continue
 
-        # --- INIZIO BLOCCO MODIFICATO ---
-        # Filtra solo i preventivi che sono in uno stato "finale"
-        if p.get("stato") in ["Chiuso", "Annullato"]:
+        # --- FIX: Controllo Stato Finale Archivio ---
+        # Accetta sia 'status' che 'stato' per retrocompatibilità
+        stato_p = str(p.get("status", p.get("stato", ""))).strip().capitalize()
+        if stato_p in ["Chiuso", "Annullato"]:
             all_quotes_full.append(p)
-        # --- FINE BLOCCO MODIFICATO ---
+        # --------------------------------------------
 
     # Ordina i preventivi per numero (più recente prima)
     all_quotes_full.sort(key=lambda x: x.get("numero", ""), reverse=True)
@@ -1475,11 +1477,11 @@ def archivio_globale():
 def anagrafica_clienti():
     """Mostra l'elenco completo dei dati anagrafici con flag per preventivi attivi."""
     clients = []
-    active_statuses = ["Bozza", "Inviato", "In Lavorazione"]
+    active_statuses = ["Bozza", "Inviato", "In Lavorazione", "Confermato"]
     active_client_ids = set()
 
     # 1. Scansiona i preventivi per trovare i clienti con pratiche attive
-    for quote_file in QUOTES_DIR.glob("P*.json"):
+    for quote_file in QUOTES_DIR.glob("*.json"):
         try:
             with quote_file.open("r", encoding="utf-8") as f:
                 q_data = json.load(f)
@@ -1538,12 +1540,12 @@ def dashboard_clienti():
             p["articoli_da_ordinare_totale"] = 0
             p["articoli_in_attesa_conferma"] = 0
         
-        # Se l'utente è segreteria, salta anche le bozze
+       # Se l'utente è segreteria, salta anche le bozze
         if session.get("user_role") == 'segreteria' and p.get("stato") == "Bozza":
             continue
         
-        is_attivo = p.get("stato") not in ["Chiuso", "Annullato"]
-        if not is_attivo:
+        stato_p = str(p.get("stato", "")).strip().capitalize()
+        if stato_p in ["Chiuso", "Annullato"]:
             continue
         
         # Individua la sorgente delle righe in base al tipo
@@ -3160,30 +3162,33 @@ def dashboard_ceo():
         except: 
             continue
 
+        # --- INIZIO FIX: Normalizzazione Stato CEO ---
+        stato_p = str(p.get("stato", "")).strip().capitalize()
         imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
         tot_lordo = _to_float(p.get("totale", 0))
-        fee_pct = _to_float(p.get("fee_pct", 0))
+        # --- FINE FIX ---
 
+        fee_pct = _to_float(p.get("fee_pct", 0))
         raw_no_iva = p.get("no_iva")
         is_no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
         
         ratio_netto = 1.0
         if tot_lordo > 0: ratio_netto = imponibile / tot_lordo
 
-        # === 1. LOGICA COMPETENZA (FILTRO DATA PREVENTIVO) ===
+    # === 1. LOGICA COMPETENZA (FILTRO DATA PREVENTIVO) ===
         if start_date <= p_date <= end_date:
-            st = p.get("stato")
             funnel["creati"] += 1
-            if st == "Bozza": funnel["valore_in_trattativa"] += imponibile
-            elif st == "Inviato": 
+            if stato_p == "Bozza": funnel["valore_in_trattativa"] += imponibile
+            elif stato_p == "Inviato": 
                 funnel["inviati"] += 1
                 funnel["valore_in_trattativa"] += imponibile
-            elif st in ["Confermato", "In Lavorazione", "Chiuso"]:
+            elif stato_p in ["Confermato", "In Lavorazione", "Chiuso"]:
                 funnel["inviati"] += 1
                 funnel["confermati"] += 1
-            elif st == "Annullato": funnel["annullati"] += 1
+            elif stato_p == "Annullato": funnel["annullati"] += 1
 
-            if st in ["Confermato", "In Lavorazione", "Chiuso"]:
+            # I KPI economici vengono calcolati SOLO per i preventivi attivi o chiusi correttamente
+            if stato_p in ["Confermato", "In Lavorazione", "Chiuso"]:
                 # Costi Presunti (Negozio)
                 c_presunto = _to_float(p.get("tot_imponibile_negozio", 0))
 
@@ -3999,10 +4004,10 @@ def dashboard_ordini():
         p = load_quote(prev_summary["numero"])
         if not p: continue
 
-        if p.get("stato") in ["Bozza", "Inviato", "Chiuso", "Annullato"]:
+        # --- FIX: Filtro Stato Robusto per Ordini ---
+        stato_p = str(p.get("stato", "")).strip().capitalize()
+        if stato_p in ["Bozza", "Inviato", "Chiuso", "Annullato"]:
             continue
-            
-        # --- INIZIO NUOVA LOGICA ---
 
         # 1. Troviamo tutti gli indici delle righe valide (con un articolo)
         indici_righe_valide = {
@@ -4037,7 +4042,6 @@ def dashboard_ordini():
         title="Dashboard Ordini Fornitore",
         preventivi=preventivi_con_ordini
     )
-# --- File: gestionale.py (intorno alla riga 1970) ---
 
 @app.route("/consegne")
 @login_required
@@ -4050,6 +4054,12 @@ def dashboard_consegne():
     for prev_summary in tutti_i_preventivi:
         p = load_quote(prev_summary["numero"])
         if not p: continue
+
+        # --- FIX: Filtro Stato Robusto per Consegne ---
+        stato_p = str(p.get("stato", "")).strip().capitalize()
+        if stato_p in ["Bozza", "Inviato", "Annullato", "Chiuso"]:
+            continue
+        # ----------------------------------------------
 
         # Gestione Preventivi Edili
         if p.get("tipo_preventivo") == "edile":
@@ -4327,8 +4337,11 @@ def dashboard_pagamenti():
     for prev_summary in tutti_i_preventivi:
         p = load_quote(prev_summary["numero"])
         
-        if not p or p.get("stato") not in ["Confermato", "In Lavorazione", "Chiuso"]:
+        # --- FIX: Filtro Stato Robusto per Pagamenti ---
+        stato_p = str(p.get("stato", "")).strip().capitalize()
+        if not p or stato_p not in ["Confermato", "In Lavorazione", "Chiuso"]:
             continue
+        # -----------------------------------------------
 
         pagamenti = p.get("pagamenti", [])
         totale_preventivo = round(_str_to_float(p.get("totale", "0")), 2)
