@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-box-open"></i> Dashboard Conferme Ordine</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+    {% include '_form_light_search.html' %}
+    
+    <div class="filter-bar" style="margin-bottom: 15px; display: flex; justify-content: flex-start;">
+        <div class="multi-switch" id="type-filter-switch" style="width: 450px;">
+            <div class="switch-thumb" style="width: 33.33%;"></div>
+            <div class="switch-label active" data-type="tutti">Tutti i Tipi</div>
+            <div class="switch-label" data-type="commerciale">Commerciali</div>
+            <div class="switch-label" data-type="edile">Edili</div>
+        </div>
+        <input type="hidden" id="active-type-filter" value="tutti">
+    </div>
+
+    {% set grouped_preventivi = preventivi | groupby('cliente') %}
+    
+    {% if not grouped_preventivi %}
+    <div class="card">
+        <div class="empty-state">
+            <i class="fas fa-check-circle"></i>
+            <h4>Nessun ordine da gestire</h4>
+            <p>Non ci sono preventivi attivi con ordini fornitore da creare o confermare.</p>
+        </div>
+    </div>
+    {% endif %}
+
+    {% for cliente, items in grouped_preventivi %}
+    <div class="card">
+        <div class="card-header">
+            <h3><strong>{{ cliente }}</strong></h3>
+        </div>
+        <div class="table-wrap">
+            <table class="styled-table">
+                <thead>
+                    <tr>
+                        <th>Numero Preventivo</th>
+                        <th>Data</th>
+                        <th>Stato Ordini</th>
+                        <th class="actions-column"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in items %}
+                    <tr class="main-row" data-tipo="{{ p.tipo_preventivo | default('commerciale') }}">
+                        <td><strong>{{ p.numero }}</strong></td>
+                        <td>{{ p.data }}</td>
+                        <td>
+                            {% if p.articoli_da_ordinare_count > 0 %}
+                                <div style="margin-bottom: 5px;">
+                                    <strong style="color: #dc3545;">{{ p.articoli_da_ordinare_count }} articoli da ordinare</strong>
+                                </div>
+                            {% endif %}
+
+                            {% if p.ordini_fornitore %}
+                                <div class="muted">
+                                    {% if p.articoli_in_attesa_conferma > 0 %}
+                                        <strong style="color: #ff9800;">{{ p.articoli_in_attesa_conferma }}</strong> art. in attesa di N. Conferma
+                                    {% elif p.articoli_da_ordinare_count == 0 %}
+                                        <span style="color: #198754;">Tutti gli articoli sono ordinati</span>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </td>
+                        <td class="row-actions">
+                            <a href="{{ url_for('conferma_ordine', quote_id=p.numero) }}" class="btn primary">
+                                <i class="fas fa-tasks"></i> Gestisci Ordini
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<style>
+/* Stili presi da altre pagine per coerenza */
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.table-wrap { overflow-x: auto; }
+.styled-table { width: 100%; border-collapse: collapse; }
+.styled-table th, .styled-table td { padding: 16px 24px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); }
+.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table tbody tr:last-child td { border-bottom: none; }
+.actions-column { text-align: right; }
+.row-actions { text-align: right; }
+.empty-state { text-align: center; padding: 40px; color: var(--muted); }
+.empty-state i { font-size: 32px; color: #198754; margin-bottom: 12px; }
+.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; color: var(--text-primary); }
+.empty-state p { margin: 0; font-size: 14px; }
+.btn.primary { display: inline-flex; align-items: center; gap: 8px; }
+/* --- STILI PER FILTRO STATO --- */
+.filter-bar { margin-bottom: 24px; display: flex; justify-content: flex-start; }
+.multi-switch { position: relative; display: flex; background-color: #e9ecef; border-radius: 8px; padding: 3px; height: 36px; cursor: pointer; user-select: none; }
+.switch-thumb { position: absolute; top: 3px; bottom: 3px; width: 33.33%; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.25s ease-out; z-index: 1; }
+.switch-label { flex: 1; text-align: center; font-size: 12px; font-weight: 600; color: #495057; line-height: 30px; position: relative; z-index: 2; }
+.switch-label.active { color: #000; }
+@media (max-width: 768px) { .multi-switch { width: 100% !important; } }
+/* --- FINE STILI FILTRO --- */
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('live-search-input');
+    const contentContainer = document.querySelector('.editor-container');
+    
+    // Seleziona tutte le card cliente che contengono una tabella
+    const clientCards = contentContainer.querySelectorAll('.card:has(.card-header)');
+    
+    const typeSwitch = document.getElementById('type-filter-switch');
+    const typeThumb = typeSwitch?.querySelector('.switch-thumb');
+    const typeLabels = typeSwitch?.querySelectorAll('.switch-label');
+    const activeTypeInput = document.getElementById('active-type-filter');
+
+    function applyFilters() {
+        const currentSearchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+        const currentType = activeTypeInput ? activeTypeInput.value : 'tutti';
+
+        clientCards.forEach(card => {
+            const cardHeaderText = card.querySelector('.card-header')?.textContent.toLowerCase() || '';
+            const matchesClient = cardHeaderText.includes(currentSearchTerm);
+            let clientHasVisibleRows = false;
+            
+            const quoteRows = card.querySelectorAll('tr.main-row');
+
+            quoteRows.forEach(row => {
+                const searchableRowText = row.textContent.toLowerCase();
+                const matchesSearch = (currentSearchTerm === "" || matchesClient || searchableRowText.includes(currentSearchTerm));
+                
+                const rowTipo = row.dataset.tipo || 'commerciale';
+                const matchesType = (currentType === 'tutti' || rowTipo === currentType);
+
+                if (matchesType && matchesSearch) {
+                    row.style.display = 'table-row';
+                    clientHasVisibleRows = true;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+
+            // Mostra o nasconde l'intera card del cliente a seconda che contenga almeno un preventivo filtrato visibile
+            card.style.display = clientHasVisibleRows ? '' : 'none';
+        });
+    }
+
+    // Listener per la barra di ricerca testuale
+    searchInput?.addEventListener('input', applyFilters);
+
+    // Listener per lo switch della tipologia
+    typeLabels?.forEach((label, index) => {
+        label.addEventListener('click', () => {
+            typeLabels.forEach(l => l.classList.remove('active'));
+            label.classList.add('active');
+            if (typeThumb) typeThumb.style.transform = `translateX(${index * 100}%)`;
+            if (activeTypeInput) activeTypeInput.value = label.dataset.type;
+            applyFilters();
+        });
+    });
+});
+</script>
+{% block footer_nav %}
+<div class="dashboard-footer-nav">
+    {{ dashboard_navbar('ordini') }}
+</div>
+{% endblock %}
+
+{% endblock %}

@@ -1,0 +1,1648 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1>Preventivo <span class="quote-number">#{{ p.numero }}</span>
+    <div class="header-client-info">
+        <i class="fas fa-user"></i>
+        <span>{{ p.cliente }}</span>
+    </div>
+</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<form id="grid-form" method="post" action="{{ url_for('salva_righe', quote_id=p.numero) }}" data-quote-id="{{ p.numero }}">
+  
+  <div class="editor-container">
+    
+    <details class="details-card">
+        <summary class="details-summary">
+            <i class="fas fa-chevron-down"></i>
+            <div class="summary-text">
+             <div class="summary-text">Cliente: <strong>{{ p.cliente }}</strong>, Venditore: <strong>{{ p.venditore }}</strong>, Data: <strong>{{ p.data }}</strong></div>
+            </div>
+        </summary>
+        <div class="details-content">
+            <div class="form-grid">
+               <div class="form-group"><label>Numero preventivo</label><input name="numero" value="{{ p.numero }}" readonly /></div>
+                <div class="form-group"><label>Venditore</label><input name="venditore" value="{{ p.venditore }}" readonly /></div>
+                
+                <div class="form-group"><label>Data</label><input name="data" value="{{ p.data }}" /></div>
+                <div class="form-group"><label>Cliente</label><input name="cliente" value="{{ p.cliente }}" /></div>
+                <div class="form-group"><label>Ragione sociale</label><input name="rag_sociale" value="{{ p.rag_sociale }}" /></div>
+                <div class="form-group"><label>P.IVA</label><input name="p_iva" value="{{ p.p_iva }}" /></div>
+                <div class="form-group"><label>C. UNIVOCO</label><input name="codice_univoco" value="{{ p.codice_univoco }}" /></div>
+                <div class="form-group"><label>Email</label><input name="email" value="{{ p.email }}" /></div>
+                <div class="form-group"><label>Telefono</label><input name="telefono" value="{{ p.telefono }}" /></div>
+                <div class="form-group full-width"><label>Indirizzo</label><input name="indirizzo" value="{{ p.indirizzo }}" /></div>
+                <div class="form-group"><label>Regione</label><select id="select-regione" name="regione"><option value="">Seleziona...</option></select><input type="hidden" id="regione_nome" name="regione_nome" value="{{ p.regione_nome }}"></div>
+                <div class="form-group"><label>Provincia</label><select id="select-provincia" name="provincia"><option value="">...</option></select></div>
+                <div class="form-group"><label>Comune</label><select id="select-comune" name="comune"><option value="">...</option></select></div>
+                <div class="form-group"><label>CAP</label><input name="cap" value="{{ p.cap }}" /></div>
+            </div>
+        </div>
+    </details>
+
+    <div class="card" id="tabella-righe">
+        <div class="card-header">
+            <h3>Contenuto del Preventivo</h3>
+            <div class="form-grid">
+            <div class="form-group"><label>Referente</label><input name="referente" value="{{ p.referente }}" /></div>
+            <div class="form-group"><label>FEE %</label><input class="input-fee" name="fee_pct" data-type="percent" value="{{ p.fee_pct }}" /></div>
+            <div class="form-group">
+                    <label for="default-iva-switch">IVA %</label>
+                        {% set iva_salvata = p.default_iva_switch | default("22", true) %}
+                        <div class="multi-switch" id="iva-switch-component">
+                    <div class="switch-thumb"></div>
+                    <div class="switch-label" data-value="0">0%</div>
+                    <div class="switch-label" data-value="4">4%</div>
+                    <div class="switch-label" data-value="10">10%</div>
+                    <div class="switch-label" data-value="22">22%</div>
+                </div>
+                
+                <input type="hidden" 
+                       name="default-iva-switch" 
+                       id="default-iva-switch-input" 
+                       value="{{ iva_salvata }}">
+            </div>
+            </div>
+        </div>
+        <div class="table-wrap-vertical">
+            <div class="responsive-table">
+                <div class="rt-header">
+                    <div class="rt-col col-main">Articolo</div>
+                    <div class="rt-col col-totals">Totali</div>
+                    <div class="rt-col col-actions"></div>
+                </div>
+                    <div class="rt-body" id="sortable-rows">
+                    {% for i, r in enumerate(p.righe) %}
+                    <div class="rt-row">
+                        <input type="hidden" name="r[{{i}}][stato_consegna]" value="{{ r.stato_consegna | default('', true) }}" />
+                        <input type="hidden" name="r[{{i}}][bolla_id]" value="{{ r.bolla_id | default('', true) }}" />
+                        
+                        <div class="rt-col col-main">
+                            <div class="article-cell-wrapper">
+                                <div class="drag-handle" title="Trascina per riordinare"><i class="fas fa-grip-vertical"></i></div>
+                                <input class="cell-input main-article-input" name="r[{{i}}][articolo]" value="{{ r.articolo }}" placeholder="Nome articolo o descrizione" />
+                                <button type="button" class="edit-icon" title="Modifica descrizione lunga"><i class="fas fa-pencil-alt"></i></button>
+                            </div>
+                            <div class="calculation-grid">
+                                <div class="input-group"><label>QT</label><input class="cell-input right" name="r[{{i}}][qt]" value="{{ r.qt }}" /></div>
+                                <div class="input-group"><label>UNT</label><select class="cell-input select-unt" name="r[{{i}}][unt]"><option value="  " {% if r.unt=='  ' %}selected{% endif %}>  </option><option value="MQ" {% if r.unt=='MQ' %}selected{% endif %}>MQ</option><option value="PZ" {% if r.unt=='PZ' %}selected{% endif %}>PZ</option><option value="ML" {% if r.unt=='ML' %}selected{% endif %}>ML</option><option value="S" {% if r.unt=='S' %}selected{% endif %}>S</option></select></div>
+                                <div class="input-group"><label>P. Catalogo</label><input class="cell-input right" name="r[{{i}}][prezzo_catalogo]" value="{{ r.prezzo_catalogo }}" /></div>
+                                <div class="input-group"><label>Trasporto</label><input class="cell-input right" name="r[{{i}}][costo_trasporto]" value="{{ r.costo_trasporto }}" /></div>
+                                <div class="input-group"><label>EXTRA</label><input class="cell-input right" name="r[{{i}}][extra]" value="{{ r.extra or r.spese_incasso }}" /></div>
+                                <div class="input-group"><label>S1 %</label><input class="cell-input right" data-type="percent" name="r[{{i}}][s1]" value="{{ r.s1 }}" /></div>
+                                <div class="input-group"><label>S2 %</label><input class="cell-input right" data-type="percent" name="r[{{i}}][s2]" value="{{ r.s2 }}" /></div>
+                                <div class="input-group"><label>S3 %</label><input class="cell-input right" data-type="percent" name="r[{{i}}][s3]" value="{{ r.s3 }}" /></div>
+                                <div class="input-group"><label>IVA %</label><input class="cell-input right" data-type="percent" name="r[{{i}}][iva_pct]" value="{{ r.iva_pct | default('22 %', true) }}" /></div>
+                                <div class="input-group grid-span-2">
+                                    <label>Ric. %</label>
+                                    <div class="input-with-actions">
+                                        <input class="cell-input right" data-type="percent" name="r[{{i}}][ricarico_pct]" value="{{ r.ricarico_pct }}" />
+                                        <div class="markup-dots">
+                                            <button type="button" class="markup-step-btn step-down" title="Diminuisci del 5%">-</button>
+                                            <button type="button" class="markup-dot dot-danger" title="Imposta ricarico base"></button>
+                                            <button type="button" class="markup-dot dot-warning" title="Imposta ricarico discreto"></button>
+                                            <button type="button" class="markup-dot dot-optimal" title="Imposta ricarico ottimale"></button>
+                                            <button type="button" class="markup-step-btn step-up" title="Aumenta del 5%">+</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rt-col col-totals">
+                            <div class="total-group total-prezzo-negozio"><label>Prezzo Negozio</label><span class="lock">{{ money_ui(r.prezzo) }}</span></div>
+                            <div class="total-group total-unitario"><label>Tot. Unitario</label><span class="lock">{{ money_ui(r.tot_prezzo_unitario) }}</span></div>
+                            <div class="total-group total-imponibile-riga total-final"><label>Imponibile TOT</label><span class="lock">{{ money_ui(r.tot_prezzo) }}</span></div>
+                        </div>
+                        <div class="rt-col col-actions">
+                             <button class="btn icon-btn delete-row-btn" type="button" 
+                                    data-delete-url="{{ url_for('salva_righe', quote_id=p.numero, delete_row=i) }}" 
+                                    title="Elimina Riga">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    <div id="ancora-fine-righe"></div>
+                </div>
+            </div>
+        </div>
+        <div class="card-footer" id="fine-tabella">
+     <button class="btn btn-outline" type="submit" formaction="{{ url_for('salva_righe', quote_id=p.numero, add_row=1) }}" formnovalidate>
+        <i class="fas fa-plus"></i> Aggiungi Riga
+    </button>
+</div>
+    </div>
+    
+    <div class="card">
+        <div class="card-header">
+            <h3>Documenti e Azioni</h3>
+        </div>
+        <div class="card-body spaced">
+             <div>
+                <h4>PDF Ufficiale Attivo</h4>
+                {% if p.pdf_attivo %}
+                    <p class="muted">Questa è la versione del preventivo attualmente valida.</p>
+                    <a href="{{ url_for('pdf_inline', filename=p.pdf_attivo) }}" target="_blank" class="btn primary success">
+                      <i class="fas fa-file-pdf"></i> Visualizza PDF Attivo
+                    </a>
+                {% else %}
+                    <p class="muted">Nessun PDF ufficiale generato. Salva e imposta lo stato su "Inviato" o "Confermato" per crearne uno.</p>
+                {% endif %}
+            </div>
+            
+            <div class="actions-group">
+                <h4>Azioni Rapide</h4>
+                <a class="btn" href="#" onclick="handlePreview(event)"><i class="fas fa-eye"></i> Anteprima</a>
+                <button type="button" id="clona-btn" class="btn action">
+                    <i class="fas fa-copy"></i> Clona Preventivo
+                </button>
+
+                 {% if p.stato not in ['Bozza', 'Annullato'] %}
+                    
+                    
+                    {# --- MODIFICA #3: Nasconde il pulsante se un PDF è già attivo --- #}
+                    {% if not p.pdf_attivo %}
+                      <a class="btn primary" href="#" onclick="handlePdf(event)"><i class="fas fa-file-signature"></i> Crea PDF Ufficiale</a>
+                      
+                    {% endif %}
+                
+                {% endif %}
+                {% if p.stato not in ['Annullato', 'Chiuso'] %}
+                    <button type="button" id="annulla-btn" class="btn danger" formaction="{{ url_for('annulla_preventivo', quote_id=p.numero) }}"><i class="fas fa-times"></i> Annulla Preventivo</button>
+                {% endif %}
+            </div>
+        </div>
+        
+        {% if p.storico_pdf %}
+        <div class="card-footer">
+            <h4>Archivio Revisioni Precedenti</h4>
+            <div class="table-wrap" style="max-height: 200px;">
+                <table class="minimal-table">
+                  <thead><tr><th>Rev.</th><th>Data</th><th class="right">Importo</th><th></th></tr></thead>
+                  <tbody>
+                    {% for rev in p.storico_pdf | reverse %}
+                    <tr>
+                      <td><strong>{{ rev.id }}</strong></td>
+                      <td>{{ rev.data }}</td>
+                      <td class="right">{{ money_ui(rev.totale) }}</td>
+                      <td class="row-actions">
+                        <a href="{{ url_for('pdf_inline', filename=rev.filename) }}" target="_blank" class="btn icon-btn"><i class="fas fa-print"></i></a>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+  </div>
+
+  <div class="sticky-footer">
+      <input type="hidden" name="is_locked" value="{{ 'true' if p.is_locked else 'false' }}">
+      <div class="footer-status-controls">
+          <div class="status-display">
+            <label>Stato Attuale</label>
+            <div class="status-badge status-{{ p.stato | lower | replace(' ', '-') }}">{{ p.stato }}</div>
+          </div>
+          
+          <div class="status-actions">
+              {# --- MODIFICA #1: Aggiunto onclick e cambiato type in "button" --- #}
+              {% if p.stato == 'Bozza' %}
+                <div>
+                  <label>&nbsp;</label>
+                  <button type="button" class="btn" onclick="handleStateChangeAndSave(event, 'invia_preventivo')">
+                      <i class="fas fa-paper-plane"></i> Imposta come Inviato
+                  </button>
+                </div>
+              {% elif p.stato == 'Inviato' %}
+                <div>
+                  <label>&nbsp;</label>
+                  <button type="button" class="btn success" onclick="handleStateChangeAndSave(event, 'conferma_preventivo')">
+                      <i class="fas fa-check"></i> Imposta come Confermato
+                  </button>
+                </div>
+           {% elif p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
+
+              <div>
+                <label>Azioni Rapide</label>
+                <div class="action-buttons-grid">
+                    {{ workflow_navbar(p, 'preventivo') }}
+                </div>
+            </div>
+            {% endif %}
+          </div>
+      </div>
+      
+            <div class="totals">
+            <div>
+                <span class="muted">Imponibile Negozio</span>
+                <strong id="tot-imponibile-negozio">{{ money_ui(p.tot_imponibile_negozio) }}</strong>
+            </div>
+            <div>
+                <span class="muted">Imponibile Cliente</span>
+                <strong id="tot-imponibile-cliente">{{ money_ui(p.tot_imponibile_cliente) }}</strong>
+            </div>
+            <div>
+                <span class="muted">IVA</span>
+                <strong id="tot-iva">{{ money_ui(p.tot_iva) }}</strong>
+            </div>
+            <div class="grand-total">
+                <span class="muted">Totale Preventivo</span>
+                <strong id="tot-preventivo">{{ money_ui(p.totale) }}</strong>
+            </div>
+            <div class="ricarico-total">
+                <span class="muted">Ricarico Medio</span>
+                <strong id="ricarico-medio-totale" class="ricarco-badge">
+                    {{ p.ricarico_medio_pct | default('0,00 %', true) }}
+                </strong>
+            </div>
+        </div>
+
+      <div class="main-actions">
+          <button type="button" id="lock-btn" class="btn icon-btn large-icon" title="Blocca/Sblocca modifiche">
+              {% if p.is_locked %}
+                <i class="fas fa-lock"></i>
+              {% else %}
+                <i class="fas fa-unlock-alt"></i>
+              {% endif %}
+          </button>
+          
+          {# --- MODIFICA #4: Aggiunto wrapper e label per abbassare il pulsante --- #}
+          <div class="status-actions">
+              <div>
+                  <label>&nbsp;</label>
+                  <button id="save-quote-btn" class="btn primary btn-large" type="submit" name="save" value="1">
+                    <i class="fas fa-save"></i> Salva Modifiche
+                  </button>
+              </div>
+          </div>
+      </div>
+  </div>
+</form>
+
+<div id="modal-delete-row" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 450px; text-align: center;">
+        <h3>Conferma Eliminazione</h3>
+        <p style="line-height: 1.6;">Sei sicuro di voler eliminare definitivamente questa riga dal preventivo?</p>
+        <div class="modal-actions" style="justify-content: center;">
+            <button type="button" id="modal-delete-row-cancel" class="btn">Annulla</button>
+            <button type="button" id="modal-delete-row-confirm" class="btn danger">Sì, Elimina</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-longtext" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Modifica Descrizione Articolo</h3>
+        <textarea id="modal-textarea"></textarea>
+        <div class="modal-actions">
+            <button type="button" id="modal-save" class="btn primary">Salva</button>
+            <button type="button" id="modal-close" class="btn">Chiudi</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-pdf-choice" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 450px; text-align: center;">
+        <h3>Generazione PDF</h3>
+        <p style="line-height: 1.6;">Vuoi mostrare i totali (prezzo, imponibile, IVA) per ogni singola riga nel PDF?</p>
+        <div class="modal-actions" style="justify-content: center;">
+            <button type="button" id="modal-pdf-choice-annulla" class="btn">Annulla</button>
+            <button type="button" id="modal-pdf-choice-no" class="btn btn-outline">No, Nascondili</button>
+            <button type="button" id="modal-pdf-choice-si" class="btn primary">Sì, Mostra Totali</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-iva-warning" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 450px; text-align: center;">
+        <h3>Attenzione: IVA Multipla</h3>
+        <p style="line-height: 1.6;">
+            Impossibile creare un preventivo senza totali di riga perché gli articoli hanno aliquote IVA diverse.
+            <br><br>
+            Si consiglia di creare un preventivo separato per ogni aliquota IVA.
+        </p>
+        <div class="modal-actions" style="justify-content: center;">
+            <button type="button" id="modal-iva-warning-annulla" class="btn">Annulla</button>
+            <button type="button" id="modal-iva-warning-procedi" class="btn primary">Procedi (Mostra Totali)</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* --- LAYOUT GENERALE EDITOR --- */
+body {
+    padding-bottom: 90px; /* Spazio per il footer fisso */
+}
+.editor-container {
+    max-width: 1400px;
+    margin: 24px auto;
+    padding: 0 24px;
+}
+
+/* --- CARD DETTAGLI COLLASSABILE --- */
+.details-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background-color: #fff;
+    margin-bottom: 24px;
+    overflow: hidden;
+}
+.details-summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 24px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none; /* Rimuove la freccia di default */
+}
+.summary-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.details-summary::-webkit-details-marker { display: none; }
+.details-summary .fa-chevron-down { transition: transform 0.2s; }
+.details-card[open] > .details-summary .fa-chevron-down { transform: rotate(180deg); }
+.details-content {
+    padding: 24px;
+    border-top: 1px solid #e2e8f0;
+}
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+}
+.form-group { display: flex; flex-direction: column; }
+.form-group.full-width { grid-column: span 2; }
+.form-group input[readonly] { background-color: #f1f5f9; cursor: not-allowed; }
+
+/* --- STILI CARD E TABELLE GENERICI --- */
+.card {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    margin-bottom: 24px;
+    overflow: hidden;
+}
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.card-body.spaced { display: flex; justify-content: space-between; align-items: flex-start; gap: 32px; flex-wrap: wrap; }
+.card-footer { padding: 16px 24px; background-color: #f8f9fa; border-top: 1px solid #e2e8f0; }
+.card-footer h4 { margin: 0 0 12px 0; font-size: 16px; }
+.actions-group h4 { margin: 0 0 12px 0; }
+.actions-group { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+
+/* NUOVA STRUTTURA TABELLA VERTICALE */
+.responsive-table {
+    display: flex;
+    flex-direction: column;
+}
+.rt-header, .rt-row {
+    display: flex;
+    align-items: stretch;
+}
+.rt-header {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #64748b;
+    font-weight: 600;
+    padding: 8px 24px;
+    background-color: #f8f9fa;
+}
+.rt-row {
+    border-bottom: 1px solid #e2e8f0;
+}
+.rt-col {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+.col-main { flex: 1; min-width: 50%; padding-left: 24px; }
+.col-totals { flex: 0 0 220px; text-align: right; background-color: #f8f9fa; padding-right: 24px; }
+.col-actions { flex: 0 0 60px; align-items: center; }
+
+.article-cell-wrapper {
+    position: relative;
+}
+.main-article-input {
+    font-size: 16px;
+    font-weight: 500;
+    padding: 8px;
+    border: 1px solid transparent;
+    width: 100%;
+    padding-right: 40px !important;
+}
+.main-article-input:focus {
+    border-color: #cbd5e1;
+}
+.edit-icon {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    height: 28px;
+    width: 28px;
+    padding: 0;
+    border-radius: 50%;
+    background: #e9ecef;
+    border: none;
+    cursor: pointer;
+    color: #495057;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+.edit-icon:hover { background-color: #ced4da; }
+
+.calculation-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #f1f5f9;
+}
+.input-group {
+    display: flex;
+    flex-direction: column;
+}
+.input-group label {
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+}
+.cell-input {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 8px;
+    width: 100%;
+    font-size: 14px;
+    transition: border-left-color 0.3s;
+}
+.cell-input.right { text-align: right; }
+
+/* NUOVI STILI INDICATORE RICARICO */
+.input-group .cell-input.is-optimal { border-left: 4px solid #198754; }
+.input-group .cell-input.is-warning { border-left: 4px solid #ffc107; }
+.input-group .cell-input.is-danger { border-left: 4px solid #dc3545; }
+
+
+.total-group { margin-bottom: 8px; }
+.total-group:last-child { margin-bottom: 0; }
+.total-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.total-group span.lock { font-size: 15px; font-weight: 500; }
+.total-final span.lock { font-size: 18px; font-weight: 700; color: var(--ink); }
+
+.minimal-table { width: 100%; }
+.minimal-table th, .minimal-table td { padding: 8px; border-bottom: 1px solid #e2e8f0; }
+.minimal-table th { font-size: 12px; background: none; }
+
+.footer-status-controls { display: flex; align-items: center; gap: 16px; }
+.status-display { text-align: center; }
+.status-display label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
+.status-actions .btn { display: flex; align-items: center; gap: 8px; }
+.status-actions > div { display: flex; flex-direction: column; } /* Per allineare label e bottone */
+.status-actions > div > label { font-size: 12px; color: transparent; margin-bottom: 4px; } /* Label vuota */
+.footer-totals-actions { display: flex; align-items: center; gap: 24px; }
+.totals { display: flex; align-items: center; gap: 24px; text-align: right; }
+.totals .ricarico-total {
+    text-align: center; /* Centra il badge del ricarico */
+}
+.totals span { display: block; font-size: 12px; color: var(--muted); }
+.totals strong {
+    display: block;
+    font-size: 16px;
+    font-weight: 700;
+    color: #1a202c;
+    white-space: nowrap; /* Impedisce al testo di andare a capo */
+}
+.grand-total strong { font-size: 22px; color: var(--ink); }
+.main-actions { display: flex; gap: 12px; align-items: flex-end; } /* Aggiunto align-items per allineare il lucchetto */
+.btn-large { padding: 12px 20px; font-size: 16px; }
+.icon-btn.large-icon { font-size: 20px; padding: 10px; width: 48px; height: 48px; }
+
+/* --- STILI PULSANTI E BADGE --- */
+.btn.success { background-color: #198754; color: #fff; }
+.btn.danger { background-color: #dc3545; color: #fff; }
+.btn.action { background-color: #6f42c1; color: #fff; }
+.btn.icon-btn { background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; }
+.status-badge{ font-size: 14px; font-weight: 600; color: #fff; text-transform: capitalize; min-width: 120px; padding: 0 14px; border-radius: 10px; height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+.status-bozza{background-color:#6c757d;} 
+.status-inviato{background-color:#0d6efd;} 
+.status-confermato, .status-chiuso {background-color:#198754;}
+.status-in-lavorazione{background-color:#ffc107;color:#000;} 
+.status-annullato{background-color:#dc3545;}
+
+/* --- RESPONSIVE --- */
+@media (max-width: 1200px) {
+    .footer-status-controls { display: none; }
+}
+@media (max-width: 992px) {
+    .rt-row { flex-direction: column; }
+    .col-totals { text-align: left; background: #f8f9fa; display: flex; gap: 24px; padding: 16px 24px; border-top: 1px solid #e2e8f0;}
+    .col-actions { position: absolute; top: 16px; right: 16px; }
+    .rt-row { position: relative; }
+    .rt-header { display: none; }
+    .total-group label { display: inline-block; margin-right: 8px; }
+}
+@media (max-width: 768px) {
+    .editor-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+    .form-grid { grid-template-columns: 1fr; }
+    .form-group.full-width { grid-column: 1; }
+    .footer-totals-actions { justify-content: space-between; }
+    .totals { gap: 16px; }
+    .totals strong { font-size: 14px; }
+    .grand-total strong { font-size: 18px; }
+    body { padding-bottom: 150px; }
+}
+
+/* Aggiungi queste regole alla fine del blocco <style> */
+.ricarco-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    text-align: center;
+    min-width: 70px;
+}
+.ricarco-badge.is-optimal { background-color: #198754; }
+.ricarco-badge.is-warning { background-color: #ffc107; color: #000; }
+.ricarco-badge.is-danger { background-color: #dc3545; }
+/* Stili per i pallini del ricarico rapido */
+.input-with-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.input-with-actions .cell-input {
+    flex-grow: 1;
+    min-width: 50px;
+}
+.markup-dots {
+    display: flex;
+    gap: 4px;
+}
+.markup-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.1);
+    padding: 0;
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+.markup-dot:hover {
+    transform: scale(1.2);
+}
+.markup-dot.dot-optimal { background-color: #198754; }
+.markup-dot.dot-warning { background-color: #ffc107; }
+.markup-dot.dot-danger { background-color: #dc3545; }
+/* Aggiungi alla fine dello <style> */
+.calculation-grid .grid-span-2 {
+    min-width: 170px;
+}
+/* Stili per i pulsanti + e - del ricarico */
+.markup-dots {
+    align-items: center; /* Allinea verticalmente pallini e pulsanti */
+}
+.markup-step-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background-color: #f8f9fa;
+    color: #495057;
+    font-weight: 700;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.1s;
+    align-self: center;
+}
+.markup-step-btn:hover {
+    background-color: #e9ecef;
+    border-color: #adb5bd;
+}
+/* Stile per il nuovo pulsante "action" */
+.btn.action { 
+    background-color: #6f42c1; 
+    color: #fff;
+}
+.btn.action:hover {
+    background-color: #5a379b;
+}
+/* Stili per il maniglione di trascinamento */
+.drag-handle {
+    cursor: grab;
+    color: #94a3b8;      /* Un grigio neutro */
+    font-size: 20px;     /* Dimensione più adatta per un'icona */
+    padding: 0 12px;     /* Un po' di spazio ai lati */
+    align-self: stretch; /* Fa sì che l'area cliccabile sia alta come tutta la riga */
+    display: flex;       /* Per centrare l'icona... */
+    align-items: center; /* ...verticalmente */
+}
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.article-cell-wrapper {
+    display: flex;
+    align-items: center;
+}
+
+/* Stile per la riga mentre viene trascinata */
+.sortable-ghost {
+    opacity: 0.4;
+    background-color: #e0f2fe;
+}
+#tabella-righe {
+    overflow: visible;
+}
+.table-wrap-vertical {
+    max-height: calc(100vh - 320px); 
+    overflow-y: auto;
+}
+.multi-switch {
+    position: relative;
+    display: flex;
+    background-color: #e9ecef; /* Sfondo grigio */
+    border-radius: 8px;
+    padding: 3px;
+    height: 36px; /* Altezza fissa */
+    width: 180px; /* Larghezza fissa */
+    cursor: pointer;
+    user-select: none;
+}
+.multi-switch.disabled {
+    opacity: 0.6;
+    pointer-events: none; /* Blocca i click */
+    background-color: #f1f5f9;
+}
+.switch-thumb {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    width: 25%; /* 1/4 della larghezza */
+    background-color: #ffffff; /* Cursore bianco */
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    transition: transform 0.25s ease-out; /* Animazione fluida */
+    z-index: 1;
+}
+.switch-label {
+    flex: 1; /* Occupa 1/4 dello spazio */
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #495057;
+    line-height: 30px; /* Allineamento verticale */
+    position: relative;
+    z-index: 2; /* Sta sopra il cursore */
+}
+/* Stile per l'opzione attiva (testo più scuro) */
+.switch-label.active {
+    color: #000;
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Configurazione Margini da Jinja2
+    const marginiConfig = JSON.parse('{{ margini_config|tojson|safe }}');
+    let sortableInstance = null;
+
+    // --- NUOVA MODIFICA ---
+    // Sovrascriviamo la funzione handlePdf di base.html per aggiungere la nostra azione di refresh.
+    window.handlePdf = function(ev) {
+
+        // Chiamiamo la funzione GENERICA che si trova in base.html
+        // e le passiamo la nostra AZIONE SPECIFICA (callback) da eseguire solo al completamento.
+        window.handlePdfGeneration(ev, 'generate_pdf_task', () => {
+
+            // Questa è l'azione specifica per la pagina editor: 
+            // ricarica la pagina dopo un ritardo di 1 secondo.
+            setTimeout(() => { window.location.reload(); }, 1000);
+        });
+    };    
+
+    // ========== Funzioni Helper Globali ==========
+    function normalizeNumberString(raw) { if (raw == null) return ""; let s = String(raw).trim().replace(/[ €%]/g, ""); const lastDot = s.lastIndexOf("."); const lastComma = s.lastIndexOf(","); if (lastDot !== -1 && lastComma !== -1) { if (lastComma > lastDot) { s = s.replace(/\./g, "").replace(/,/g, "."); } else { s = s.replace(/,/g, ""); } } else if (lastComma !== -1) { s = s.replace(/,/g, "."); } return s; }
+    function parseNum(str) { const s = normalizeNumberString(str); const n = parseFloat(s); return isNaN(n) ? 0 : n; }
+    function fmtMoney(n) { return Number(n).toFixed(2).replace(".", ",") + " €"; }
+    function prezzoMatrioska(pc, s1, s2, s3) { let res = parseNum(pc);[s1, s2, s3].forEach(d => { res *= (1 - parseNum(d) / 100); }); return Math.max(0, res); }
+    function hasValue(str) { return str != null && String(str).trim() !== ""; }
+
+    // ========== NUOVA FUNZIONE PER SALVARE PRIMA DI CAMBIARE STATO ==========
+    function handleStateChangeAndSave(event, targetActionUrlName) {
+        event.preventDefault();
+        const form = document.getElementById('grid-form');
+        if (!form) return;
+
+        const stateChangeButton = event.currentTarget;
+        const originalButtonHtml = stateChangeButton.innerHTML;
+        stateChangeButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvo...';
+        stateChangeButton.disabled = true;
+
+        const formData = new FormData(form);
+        formData.append('is_ajax', '1');
+        const quoteId = form.dataset.quoteId;
+
+        // --- NUOVA LOGICA A CASCATA ---
+
+        // 1. Salva i dati correnti
+        fetch("{{ url_for('salva_righe', quote_id=p.numero) }}", { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(saveData => {
+            if (!saveData.success) throw new Error('Salvataggio fallito');
+
+            stateChangeButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cambio stato...';
+            const targetUrl = "{{ url_for('dashboard') }}" + `preventivo/${quoteId}/${targetActionUrlName.replace('_preventivo', '')}`;
+
+            // 2. Se il salvataggio va a buon fine, cambia lo stato con una richiesta POST
+            return fetch(targetUrl, { method: 'POST' });
+        })
+        .then(response => {
+            if (!response.ok) throw new Error('Cambio di stato fallito');
+
+            if (targetActionUrlName === 'invia_preventivo') {
+                // STATO CAMBIATO. ORA CHIEDIAMO QUALE PDF GENERARE.
+                stateChangeButton.innerHTML = '<i class="fas fa-check"></i> Scegli PDF...';
+
+                // 1. Riferimenti alle modali
+                const modalChoice = document.getElementById('modal-pdf-choice');
+                const modalWarning = document.getElementById('modal-iva-warning');
+
+                // 2. Funzione helper che lancia la generazione del PDF (invariata)
+                const handlePdfChoice = (templateType) => {
+                    modalChoice.style.display = 'none'; // Nasconde la modale di scelta
+                    modalWarning.style.display = 'none'; // Nasconde la modale di warning
+
+                    stateChangeButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Genero PDF...'; // Mostra spinner
+                    const newTab = window.open("{{ url_for('loading_static') }}", "_blank");
+
+                    // Fetch con il parametro ?template=...
+                    fetch(`/generate-pdf-task/${quoteId}?template=${templateType}`)
+                        .then(res => res.json())
+                        .then(pdfData => {
+                            if (newTab) {
+                                if (pdfData.pdf_url) {
+                                    newTab.location.href = pdfData.pdf_url;
+                                } else {
+                                    newTab.close();
+                                    throw new Error(pdfData.error || 'Errore generazione PDF');
+                                }
+                            }
+                            // Ricarica la pagina dopo la generazione
+                            setTimeout(() => { window.location.reload(); }, 1500);
+                        })
+                        .catch(err => {
+                            // Gestisce l'errore della generazione PDF
+                            alert("Si è verificato un errore durante la generazione del PDF: " + err.message);
+                            if(newTab) newTab.close();
+                            stateChangeButton.innerHTML = originalButtonHtml; // Resetta il bottone originale
+                            stateChangeButton.disabled = false;
+                        });
+                };
+
+                // 3. Pulisce e assegna i listener per la MODALE DI SCELTA (modal-pdf-choice)
+                const btnSi = document.getElementById('modal-pdf-choice-si');
+                const btnNo = document.getElementById('modal-pdf-choice-no');
+                const btnAnnulla = document.getElementById('modal-pdf-choice-annulla');
+
+                const newBtnSi = btnSi.cloneNode(true);
+                btnSi.parentNode.replaceChild(newBtnSi, btnSi);
+                newBtnSi.addEventListener('click', () => handlePdfChoice('standard'), { once: true });
+
+                const newBtnAnnulla = btnAnnulla.cloneNode(true);
+                btnAnnulla.parentNode.replaceChild(newBtnAnnulla, btnAnnulla);
+                newBtnAnnulla.addEventListener('click', () => window.location.reload(), { once: true }); // Ricarica
+
+                // --- Logica Modificata per il bottone "NO" ---
+                const newBtnNo = btnNo.cloneNode(true);
+                btnNo.parentNode.replaceChild(newBtnNo, btnNo);
+                newBtnNo.addEventListener('click', () => {
+                    const isMonoIva = checkIfMonoIva();
+
+                    if (isMonoIva) {
+                        // Caso 1: È mono-IVA, procedi con il PDF semplice
+                        handlePdfChoice('semplice');
+                    } else {
+                        // Caso 2: È multi-IVA, mostra la modale di warning
+                        modalChoice.style.display = 'none';
+                        modalWarning.style.display = 'flex';
+                    }
+                }, { once: true });
+                // --- Fine Logica Modificata ---
+
+                // 4. Pulisce e assegna i listener per la MODALE DI WARNING (modal-iva-warning)
+                const btnWarningAnnulla = document.getElementById('modal-iva-warning-annulla');
+                const btnWarningProcedi = document.getElementById('modal-iva-warning-procedi');
+
+                const newBtnWarningAnnulla = btnWarningAnnulla.cloneNode(true);
+                btnWarningAnnulla.parentNode.replaceChild(newBtnWarningAnnulla, btnWarningAnnulla);
+                newBtnWarningAnnulla.addEventListener('click', () => window.location.reload(), { once: true }); // Ricarica
+
+                const newBtnWarningProcedi = btnWarningProcedi.cloneNode(true);
+                btnWarningProcedi.parentNode.replaceChild(newBtnWarningProcedi, btnWarningProcedi);
+                // "Procedi (Mostra Totali)" genera il PDF STANDARD
+                newBtnWarningProcedi.addEventListener('click', () => handlePdfChoice('standard'), { once: true });
+
+                // 5. Mostra la prima modale (quella di scelta)
+                modalChoice.style.display = 'flex';
+
+            } else {
+                // Per altre azioni (es. "Confermato"), ricarica semplicemente la pagina
+                window.location.reload();
+            }
+        })
+        .catch(err => {
+            alert("Si è verificato un errore: " + err.message);
+            stateChangeButton.innerHTML = originalButtonHtml;
+            stateChangeButton.disabled = false;
+        });
+    }
+
+    /**
+     * Controlla se tutte le righe del preventivo hanno la stessa aliquota IVA.
+     * @returns {boolean} - true se è mono-IVA, false se le aliquote sono miste.
+     */
+    function checkIfMonoIva() {
+        const ivaInputs = document.querySelectorAll('.rt-row input[name$="[iva_pct]"]');
+        if (ivaInputs.length === 0) {
+            return true; // Nessuna riga, quindi è "mono-IVA"
+        }
+
+        // Usiamo Set per collezionare i valori unici
+        const ivaValues = new Set();
+
+        ivaInputs.forEach(input => {
+            // Normalizziamo il valore (es. "22 %" -> "22")
+            const iva = (input.value || "22 %").replace(/[% ]/g, '');
+            ivaValues.add(iva);
+        });
+
+        // Se c'è più di un valore unico, non è mono-IVA
+        return ivaValues.size <= 1;
+    }
+
+    // Rendi la funzione accessibile globalmente per l'attributo onclick
+    window.handleStateChangeAndSave = handleStateChangeAndSave;
+
+    // ========== NUOVA FUNZIONE PER MODALITÀ SERVIZIO ==========
+    /**
+     * Abilita o disabilita i campi di una riga in base al "Service Mode" (UNT == 'S').
+     * @param {HTMLElement} rowElement - L'elemento .rt-row da modificare
+     * @param {boolean} isService - true se la riga è un servizio, false altrimenti
+     */
+    // In editor.html, SOSTITUISCI la vecchia funzione con questa:
+
+    /**
+     * Gestisce lo stato (attivo/bloccato) dei campi di una riga
+     * in base all'Unità di Misura (UNT) selezionata.
+     */
+    function toggleServiceMode(rowElement) {
+        
+        // 1. Leggi il valore UNT direttamente
+        const untValue = (rowElement.querySelector('select[name$="[unt]"]')?.value || "").trim().toUpperCase();
+        
+        // 2. Trova TUTTI i campi di calcolo
+        const qtInput = rowElement.querySelector('input[name$="[qt]"]');
+        const pcInput = rowElement.querySelector('input[name$="[prezzo_catalogo]"]');
+        const traspInput = rowElement.querySelector('input[name$="[costo_trasporto]"]');
+        const extraInput = rowElement.querySelector('input[name$="[extra]"]');
+        const s1Input = rowElement.querySelector('input[name$="[s1]"]');
+        const s2Input = rowElement.querySelector('input[name$="[s2]"]');
+        const s3Input = rowElement.querySelector('input[name$="[s3]"]');
+        const ivaInput = rowElement.querySelector('input[name$="[iva_pct]"]');
+        const ricInput = rowElement.querySelector('input[name$="[ricarico_pct]"]');
+        const markupDots = rowElement.querySelectorAll('.markup-dot');
+        const markupStepBtns = rowElement.querySelectorAll('.markup-step-btn');
+        
+        // 3. Logica a 3 stati
+        
+        if (untValue === "") {
+            // STATO 1: UNT è VUOTO. Blocca tutto (tranne QT).
+            if (qtInput) { qtInput.disabled = false; } // QT rimane sbloccato
+            if (pcInput) { pcInput.disabled = true; pcInput.value = ''; }
+            if (traspInput) { traspInput.disabled = true; traspInput.value = ''; }
+            if (extraInput) { extraInput.disabled = true; extraInput.value = ''; }
+            if (s1Input) { s1Input.disabled = true; s1Input.value = ''; }
+            if (s2Input) { s2Input.disabled = true; s2Input.value = ''; }
+            if (s3Input) { s3Input.disabled = true; s3Input.value = ''; }
+            if (ivaInput) { ivaInput.disabled = true; }
+            if (ricInput) { ricInput.disabled = true; ricInput.value = ''; }
+            markupDots.forEach(btn => btn.disabled = true);
+            markupStepBtns.forEach(btn => btn.disabled = true);
+        
+        } else if (untValue === "S") {
+            // STATO 2: UNT è "Servizio". Blocca campi specifici.
+            if (qtInput) { qtInput.value = '1'; qtInput.disabled = true; }
+            if (pcInput) { pcInput.disabled = false; }
+            if (traspInput) { traspInput.value = '0'; traspInput.disabled = true; }
+            if (extraInput) { extraInput.value = '0'; extraInput.disabled = true; }
+            if (s1Input) { s1Input.value = '0'; s1Input.disabled = true; }
+            if (s2Input) { s2Input.value = '0'; s2Input.disabled = true; }
+            if (s3Input) { s3Input.value = '0'; s3Input.disabled = true; }
+            if (ivaInput) { ivaInput.disabled = false; }
+            if (ricInput) { ricInput.disabled = false; }
+            markupDots.forEach(btn => btn.disabled = false);
+            markupStepBtns.forEach(btn => btn.disabled = false);
+
+        } else {
+            // STATO 3: UNT è MQ, PZ, ML. Sblocca tutto.
+            if (qtInput) { qtInput.disabled = false; }
+            if (pcInput) { pcInput.disabled = false; }
+            if (traspInput) { traspInput.disabled = false; }
+            if (extraInput) { extraInput.disabled = false; }
+            if (s1Input) { s1Input.disabled = false; }
+            if (s2Input) { s2Input.disabled = false; }
+            if (s3Input) { s3Input.disabled = false; }
+            if (ivaInput) { ivaInput.disabled = false; }
+            if (ricInput) { ricInput.disabled = false; }
+            markupDots.forEach(btn => btn.disabled = false);
+            markupStepBtns.forEach(btn => btn.disabled = false);
+        }
+    }
+
+    // ========== Funzioni di Calcolo Principali ==========
+
+    function updateTotals() {
+        let totImponibileNegozio = 0;
+        let totImponibileCliente = 0;
+        let totIva = 0;
+
+        document.querySelectorAll('.rt-row').forEach(rowElement => {
+            // LEGGE i totali di riga salvati precedentemente da updateRow
+            const imponibileRigaNegozio = parseFloat(rowElement.dataset.imponibileNegozio || 0);
+            const imponibileRigaCliente = parseFloat(rowElement.dataset.imponibileCliente || 0);
+
+            totImponibileNegozio += imponibileRigaNegozio;
+            totImponibileCliente += imponibileRigaCliente;
+
+            const ivaPct = parseNum(rowElement.querySelector('input[name$="[iva_pct]"]')?.value ?? 0);
+            // L'IVA si calcola sull'imponibile del cliente
+            totIva += imponibileRigaCliente * (ivaPct / 100);
+        });
+
+        // Aggiorna gli elementi nel footer con i nuovi ID
+        document.getElementById("tot-imponibile-negozio").textContent = fmtMoney(totImponibileNegozio);
+        document.getElementById("tot-imponibile-cliente").textContent = fmtMoney(totImponibileCliente);
+        document.getElementById("tot-iva").textContent = fmtMoney(totIva);
+        document.getElementById("tot-preventivo").textContent = fmtMoney(totImponibileCliente + totIva);
+
+        // Calcola e aggiorna il ricarico medio
+        const ricaricoBadge = document.getElementById('ricarico-medio-totale');
+        let ricaricoMedio = 0;
+        if (totImponibileNegozio > 0) {
+            // La formula corretta per il ricarico medio
+            ricaricoMedio = ((totImponibileCliente - totImponibileNegozio) / totImponibileNegozio) * 100;
+        }
+        ricaricoBadge.textContent = ricaricoMedio.toFixed(2).replace('.', ',') + ' %';
+
+       // Nuova logica di colorazione ricarico (basata su Margine ~40%)
+        ricaricoBadge.classList.remove('is-optimal', 'is-warning', 'is-danger');
+        if (ricaricoMedio >= 62 && ricaricoMedio <= 72) { // Ricarico per Margine ~38-42%
+            ricaricoBadge.classList.add('is-optimal'); // VERDE
+        } else if ((ricaricoMedio >= 55 && ricaricoMedio <= 61) || (ricaricoMedio >= 73 && ricaricoMedio <= 80)) { // Ricarico per Margine ~35-38% o ~42-44%
+            ricaricoBadge.classList.add('is-warning'); // ARANCIONE/GIALLO
+        } else { // Ricarico < 55% o > 80% (Margine <35% o >44%)
+            ricaricoBadge.classList.add('is-danger');   // ROSSO
+        }
+    }
+
+    function updateRow(rowElement) {
+        // 1. Recupero input
+        const pcInput = rowElement.querySelector('input[name$="[prezzo_catalogo]"]');
+        if (!hasValue(pcInput?.value)) return;
+
+        const ricInput = rowElement.querySelector('input[name$="[ricarico_pct]"]');
+        const ricVal = parseNum(ricInput.value);
+
+        // --- INIZIO BLOCCO MODIFICATO ---
+
+        // 2. Lettura di tutti i valori
+        const pc = pcInput.value;
+        const s1 = rowElement.querySelector('input[name$="[s1]"]')?.value ?? "";
+        const s2 = rowElement.querySelector('input[name$="[s2]"]')?.value ?? "";
+        const s3 = rowElement.querySelector('input[name$="[s3]"]')?.value ?? "";
+        const qt = parseNum(rowElement.querySelector('input[name$="[qt]"]')?.value ?? "");
+        const trasp = parseNum(rowElement.querySelector('input[name$="[costo_trasporto]"]')?.value ?? "");
+        const unt = (rowElement.querySelector('select[name$="[unt]"]')?.value || "").trim().toUpperCase();
+        const extra = parseNum(rowElement.querySelector('input[name$="[extra]"]')?.value ?? "0");
+
+        // Variabili da popolare
+        let prezzoBaseScontato, costoTotaleArticolo, costoTotaleTrasporto, baseCostoPesata;
+        let prezzo_con_margini, trasp_con_margini, extra_con_margini, subtotale_unitario, extra_per_unita_con_margini;
+        let costoUnitarioNegozio, totRigaNegozio;
+
+        const fee = parseNum(document.querySelector('input[name="fee_pct"]')?.value ?? "") / 100;
+        const ric = ricVal / 100;
+        const feeEff = fee > 0 ? fee * 1.166 : fee;
+
+        if (unt === 'S') {
+            prezzoBaseScontato = parseNum(pc); // P.Catalogo
+            
+            // Controlla se c'è un ricarico
+            if (ric > 0) {
+                // CASO 1: Ricarico PRESENTE (P.Catalogo è un COSTO)
+                costoUnitarioNegozio = prezzoBaseScontato;
+                totRigaNegozio = costoUnitarioNegozio * qt; // qt è 1
+                
+                // Calcola prezzo vendita (come Prodotto)
+                prezzo_con_margini = prezzoBaseScontato * (1 + feeEff) * (1 + ric);
+                
+                // Attiva la logica di colorazione
+                baseCostoPesata = costoUnitarioNegozio * qt; // Calcola base costo
+                ricInput.classList.remove('is-optimal', 'is-warning', 'is-danger');
+                let fasciaTrovata = false;
+                for (const fascia of marginiConfig.fasce) {
+                    if (baseCostoPesata <= fascia.max_costo) {
+                        const regole = fascia.regole_colore;
+                        if (ricVal >= regole.verde_min && ricVal <= regole.verde_max) ricInput.classList.add('is-optimal');
+                        else if ((ricVal >= regole.arancione_min1 && ricVal <= regole.arancione_max1) || (ricVal >= regole.arancione_min2 && ricVal <= regole.arancione_max2)) ricInput.classList.add('is-warning');
+                        else ricInput.classList.add('is-danger');
+                        fasciaTrovata = true;
+                        break;
+                    }
+                }
+                if (!fasciaTrovata) ricInput.classList.add('is-danger');
+
+            } else {
+                // CASO 2: Ricarico ASSENTE (P.Catalogo è GUADAGNO PURO)
+                costoUnitarioNegozio = 0;
+                totRigaNegozio = 0;
+                
+                // Calcola prezzo vendita (solo fee)
+                prezzo_con_margini = prezzoBaseScontato * (1 + feeEff);
+                
+                // Disattiva colorazione
+                ricInput.classList.remove('is-optimal', 'is-warning', 'is-danger');
+            }
+
+            // Calcoli comuni per SERVIZIO
+            trasp_con_margini = 0;
+            extra_con_margini = 0;
+            subtotale_unitario = prezzo_con_margini;
+            extra_per_unita_con_margini = 0;
+
+        } else {
+            // CASO 2: È UN PRODOTTO (Logica esistente)
+            prezzoBaseScontato = prezzoMatrioska(pc, s1, s2, s3);
+
+            // Logica di colorazione del ricarico (ora corretta)
+            costoTotaleArticolo = prezzoBaseScontato * qt;
+            costoTotaleTrasporto = 0;
+            if (unt === 'MQ') { costoTotaleTrasporto = trasp * qt; }
+            else if (unt === 'PZ' || unt === 'ML') { costoTotaleTrasporto = trasp; }
+            baseCostoPesata = costoTotaleArticolo + costoTotaleTrasporto + extra;
+
+            ricInput.classList.remove('is-optimal', 'is-warning', 'is-danger');
+
+            let fasciaTrovata = false;
+            for (const fascia of marginiConfig.fasce) {
+                if (baseCostoPesata <= fascia.max_costo) {
+                    const regole = fascia.regole_colore;
+                    if (ricVal >= regole.verde_min && ricVal <= regole.verde_max) ricInput.classList.add('is-optimal');
+                    else if ((ricVal >= regole.arancione_min1 && ricVal <= regole.arancione_max1) || (ricVal >= regole.arancione_min2 && ricVal <= regole.arancione_max2)) ricInput.classList.add('is-warning');
+                    else ricInput.classList.add('is-danger');
+                    fasciaTrovata = true;
+                    break;
+                }
+            }
+            if (!fasciaTrovata) ricInput.classList.add('is-danger'); // Fallback
+
+            // Calcoli finali (ora allineati al backend)
+            prezzo_con_margini = prezzoBaseScontato * (1 + feeEff) * (1 + ric);
+            trasp_con_margini = trasp * (1 + feeEff) * (1 + ric);
+            extra_con_margini = extra * (1 + feeEff) * (1 + ric);
+
+            subtotale_unitario = 0;
+            if (unt === "MQ") {
+                subtotale_unitario = prezzo_con_margini + trasp_con_margini;
+            } else if (unt === "PZ" || unt === "ML") {
+                subtotale_unitario = prezzo_con_margini + (qt > 0 ? trasp_con_margini / qt : 0);
+            } else {
+                subtotale_unitario = prezzo_con_margini;
+            }
+
+            extra_per_unita_con_margini = qt > 0 ? extra_con_margini / qt : 0;
+
+            // Costi per il negozio (netti)
+            costoUnitarioNegozio = prezzoBaseScontato;
+            if (unt === "MQ") {
+                costoUnitarioNegozio += trasp;
+            } else if (unt === "PZ" || unt === "ML") {
+                costoUnitarioNegozio += (qt > 0 ? trasp / qt : 0);
+            }
+            costoUnitarioNegozio += (qt > 0 ? extra / qt : 0);
+            costoUnitarioNegozio = Math.round(costoUnitarioNegozio * 100) / 100;
+            totRigaNegozio = costoUnitarioNegozio * qt;
+        }
+
+        // 5. Aggiornamento interfaccia (Logica comune)
+        const totUnitImponibile = Math.round((subtotale_unitario + extra_per_unita_con_margini) * 100) / 100;
+        const totRigaImponibile = totUnitImponibile * qt;
+
+        rowElement.querySelector('.total-prezzo-negozio span.lock').textContent = fmtMoney(costoUnitarioNegozio);
+        rowElement.querySelector('.total-unitario span.lock').textContent = fmtMoney(totUnitImponibile);
+        rowElement.querySelector('.total-imponibile-riga span.lock').textContent = fmtMoney(totRigaImponibile);
+        rowElement.dataset.imponibileNegozio = totRigaNegozio;
+        rowElement.dataset.imponibileCliente = totRigaImponibile;
+
+        // Aggiorna i totali globali
+        updateTotals();
+
+        // --- FINE BLOCCO MODIFICATO ---
+    }
+
+    // --- LOGICA PALLINI E +/- (ora usa la configurazione DINAMICA) ---
+    const tabellaRighe = document.getElementById('tabella-righe');
+
+    tabellaRighe.addEventListener('click', (e) => {
+        const dot = e.target.closest('.markup-dot');
+        const stepBtn = e.target.closest('.markup-step-btn');
+
+        // Se non è stato cliccato un pulsante di controllo, esci
+        if (!dot && !stepBtn) return;
+
+        const rowElement = (dot || stepBtn).closest('.rt-row');
+        const ricInput = rowElement.querySelector('input[name$="[ricarico_pct]"]');
+
+        // CASO 1: È stato cliccato un pallino colorato
+        if (dot) {
+            // Calcolo della base di costo (invariato)
+            const pc = rowElement.querySelector('input[name$="[prezzo_catalogo]"]')?.value ?? "";
+            const s1 = rowElement.querySelector('input[name$="[s1]"]')?.value ?? "";
+            const s2 = rowElement.querySelector('input[name$="[s2]"]')?.value ?? "";
+            const s3 = rowElement.querySelector('input[name$="[s3]"]')?.value ?? "";
+            const qtValue = rowElement.querySelector('input[name$="[qt]"]')?.value ?? "0";
+            const trspValue = rowElement.querySelector('input[name$="[costo_trasporto]"]')?.value ?? "0";
+            const untValue = rowElement.querySelector('select[name$="[unt]"]')?.value ?? "";
+            const extraValue = rowElement.querySelector('input[name$="[extra]"]')?.value ?? "0";
+
+            const prezzoBaseScontato = prezzoMatrioska(pc, s1, s2, s3);
+            const costoTotaleArticolo = prezzoBaseScontato * parseNum(qtValue);
+            let costoTotaleTrasporto = 0;
+            if (untValue.toUpperCase() === 'MQ') { costoTotaleTrasporto = parseNum(trspValue) * parseNum(qtValue); }
+            else if (untValue.toUpperCase() === 'PZ' || untValue.toUpperCase() === 'ML') { costoTotaleTrasporto = parseNum(trspValue); }
+            const baseCostoPesata = costoTotaleArticolo + costoTotaleTrasporto + parseNum(extraValue);
+
+            let targetPercentage = 0;
+            let fasciaConfig = null;
+
+            // Determina la fascia di costo usando i limiti dalla configurazione
+            for (const fascia of marginiConfig.fasce) {
+                if (baseCostoPesata <= fascia.max_costo) {
+                    fasciaConfig = fascia;
+                    break;
+                }
+            }
+            // Se non trova una fascia (es. costo > 999999), usa l'ultima
+            if (!fasciaConfig) fasciaConfig = marginiConfig.fasce[marginiConfig.fasce.length - 1]; 
+
+            // Imposta il valore percentuale leggendolo dalla configurazione
+            if (dot.classList.contains('dot-optimal')) { targetPercentage = fasciaConfig.pallini.verde; }
+            else if (dot.classList.contains('dot-warning')) { targetPercentage = fasciaConfig.pallini.arancione; }
+            else if (dot.classList.contains('dot-danger')) { targetPercentage = fasciaConfig.pallini.rosso; }
+
+            ricInput.value = targetPercentage + ' %';
+        }
+        // CASO 2: È stato cliccato un pulsante +/-
+        else if (stepBtn) {
+            // Logica per +/- (invariata)
+            const currentValue = parseNum(ricInput.value);
+            let newValue = currentValue;
+            if (stepBtn.classList.contains('step-up')) {
+                newValue += 5;
+            } else if (stepBtn.classList.contains('step-down')) {
+                newValue = Math.max(0, currentValue - 5);
+            }
+            ricInput.value = newValue + ' %';
+        }
+
+        // Alla fine, in entrambi i casi, scatena l'aggiornamento
+        ricInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }); 
+
+
+    // ========== Inizializzazione al caricamento della pagina ==========
+    document.querySelectorAll('.rt-row').forEach(rowElement => {
+
+        // --- BLOCCO AGGIUNTO ---
+        // Al caricamento, controlla l'UNT e applica il Service Mode se necessario
+        const untSelect = rowElement.querySelector('select[name$="[unt]"]');
+        if (untSelect) {
+            const isService = (untSelect.value || "").trim().toUpperCase() === 'S';
+            toggleServiceMode(rowElement, isService);
+
+            // Aggiungi l'ascoltatore per il CAMBIO di UNT
+            untSelect.addEventListener('change', (e) => {
+                toggleServiceMode(rowElement);
+                // Dopo aver bloccato/sbloccato, ricalcola subito la riga
+                updateRow(rowElement);
+            });
+        }
+        // --- FINE BLOCCO AGGIUNTO ---
+
+        updateRow(rowElement); // La chiamata originale
+
+        const inputs = rowElement.querySelectorAll('input, select');
+        inputs.forEach(el => {
+            el.addEventListener('input', () => updateRow(rowElement));
+            el.addEventListener('change', () => updateRow(rowElement));
+        });
+    });
+
+    const feeHeader = document.querySelector('input[name="fee_pct"]');
+    if (feeHeader) {
+        feeHeader.addEventListener('input', () => {
+             document.querySelectorAll('.rt-row').forEach(updateRow);
+        });
+    }
+
+    const referenteInput = document.querySelector('input[name="referente"]');
+    const feeInput = document.querySelector('input[name="fee_pct"]');
+
+    if (referenteInput && feeInput) {
+        const updateFeeBasedOnReferente = () => {
+            const feeValueRaw = (feeInput.value || "").trim();
+            const feeValueNum = parseNum(feeValueRaw);
+
+            if (referenteInput.value.trim()) {
+                if (feeValueRaw === '' || feeValueNum === 0) {
+                    feeInput.value = '6 %';
+                    feeInput.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            } else {
+                feeInput.value = '';
+                feeInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        };
+        referenteInput.addEventListener('input', updateFeeBasedOnReferente);
+        updateFeeBasedOnReferente();
+    }
+
+    // =======================================================
+    // --- LOGICA BLOCCO (CORRETTA) ---
+    // =======================================================
+    const lockBtn = document.getElementById('lock-btn');
+    const isLockedHiddenInput = document.querySelector('input[name="is_locked"]');
+    const ivaSwitchComponent = document.getElementById('iva-switch-component'); 
+
+// In editor.html, SOSTITUISCI la funzione 'toggleEditorLock'
+
+    const toggleEditorLock = (shouldBeLocked) => {
+
+        if (sortableInstance) {
+            sortableInstance.option('disabled', shouldBeLocked);
+        }
+        
+        document.querySelectorAll('.markup-step-btn').forEach(button => {
+            button.disabled = shouldBeLocked;
+        });
+        
+        document.querySelectorAll('.markup-dot').forEach(button => {
+            button.disabled = shouldBeLocked;
+        });
+        
+        if (ivaSwitchComponent) {
+            ivaSwitchComponent.classList.toggle('disabled', shouldBeLocked);
+        }
+        
+        // Aggiungi blocco per tutti gli input e select nelle righe
+        document.querySelectorAll('.rt-row input, .rt-row select').forEach(input => {
+            // Non bloccare gli input nascosti
+            if (input.type !== 'hidden') {
+                input.disabled = shouldBeLocked;
+            }
+        });
+        
+        // Aggiungi blocco per gli input nell'header della card
+         document.querySelectorAll('#tabella-righe .card-header input').forEach(input => {
+             input.disabled = shouldBeLocked;
+        });
+         
+        // Sblocca specificamente gli input per la modalità "Servizio"
+        if (!shouldBeLocked) {
+             document.querySelectorAll('.rt-row').forEach(rowElement => {
+                const untSelect = rowElement.querySelector('select[name$="[unt]"]');
+                if (untSelect) {
+                    // --- BLOCCO MODIFICATO ---
+                    // Richiama la funzione per ri-applicare il blocco/sblocco corretto
+                    // in base a "S" o a "vuoto"
+                    toggleServiceMode(rowElement);
+                    // --- FINE BLOCCO MODIFICATO ---
+                }
+             });
+        }
+    };
+
+    if (lockBtn && isLockedHiddenInput) {
+        lockBtn.addEventListener('click', () => {
+            const isCurrentlyLocked = isLockedHiddenInput.value === 'true';
+            const newLockState = !isCurrentlyLocked;
+
+            isLockedHiddenInput.value = newLockState ? 'true' : 'false';
+            lockBtn.innerHTML = newLockState ? '<i class="fas fa-lock"></i>' : '<i class="fas fa-unlock-alt"></i>';
+
+            toggleEditorLock(newLockState);
+        });
+    }
+
+    // =======================================================
+    // --- LOGICA MODALE CANCELLAZIONE RIGA ---
+    // =======================================================
+    const deleteModal = document.getElementById('modal-delete-row');
+    if (deleteModal) {
+        const confirmBtn = document.getElementById('modal-delete-row-confirm');
+        const cancelBtn = document.getElementById('modal-delete-row-cancel');
+        let urlToDelete = null;
+
+        const closeModal = () => {
+            deleteModal.style.display = 'none';
+            urlToDelete = null;
+        };
+
+        document.getElementById('tabella-righe').addEventListener('click', (event) => {
+            const deleteButton = event.target.closest('.delete-row-btn');
+            if (deleteButton) {
+                urlToDelete = deleteButton.dataset.deleteUrl;
+                deleteModal.style.display = 'flex';
+            }
+        });
+
+        confirmBtn.addEventListener('click', () => {
+            if (urlToDelete) {
+                const form = document.getElementById('grid-form');
+                form.action = urlToDelete;
+                form.noValidate = true;
+                form.submit();
+            }
+        });
+
+        cancelBtn.addEventListener('click', closeModal);
+        deleteModal.addEventListener('click', (event) => {
+            if (event.target === deleteModal) {
+                closeModal();
+            }
+        });
+    }
+
+    // =======================================================
+    // --- LOGICA DRAG & DROP (SORTABLEJS) ---
+    // =======================================================
+    const sortableContainer = document.getElementById('sortable-rows');
+    const scrollableContainer = document.querySelector('.table-wrap-vertical'); 
+
+    const handleWheelScroll = (event) => {
+        event.preventDefault(); 
+        scrollableContainer.scrollTop += event.deltaY;
+    };
+
+    if (sortableContainer && scrollableContainer) {
+        sortableInstance = new Sortable(sortableContainer, {
+            animation: 150,
+            handle: '.drag-handle',
+            ghostClass: 'sortable-ghost',
+
+            scroll: scrollableContainer,
+            scrollSensitivity: 145,
+            scrollSpeed: 18,
+            forceFallback: true,
+
+            onStart: function () {
+                window.addEventListener('wheel', handleWheelScroll, { passive: false });
+            },
+
+            onEnd: function () {
+                window.removeEventListener('wheel', handleWheelScroll);
+
+                const rows = sortableContainer.querySelectorAll('.rt-row');
+                rows.forEach((row, newIndex) => {
+                    const inputs = row.querySelectorAll('input, select');
+                    inputs.forEach(input => {
+                        const name = input.getAttribute('name');
+                        if (name) {
+                            const newName = name.replace(/r\[\d+\]/, `r[${newIndex}]`);
+                            input.setAttribute('name', newName);
+                        }
+                    }); 
+                    // Aggiorna anche l'URL del pulsante di cancellazione
+                    const deleteButton = row.querySelector('.delete-row-btn');
+                    if (deleteButton) {
+                        const oldUrl = deleteButton.dataset.deleteUrl;
+                        const newUrl = oldUrl.replace(/delete_row=\d+/, `delete_row=${newIndex}`);
+                        deleteButton.dataset.deleteUrl = newUrl;
+                    }
+                }); 
+            } 
+        }); 
+    }
+    
+        if (isLockedHiddenInput) {
+        // Determina se l'editor DEVE essere bloccato
+        // È bloccato se il lucchetto manuale è attivo OPPURE se lo stato non è 'Bozza'
+        const isEffectivelyLocked = (isLockedHiddenInput.value === 'true') || ("{{ p.stato }}" !== 'Bozza');
+        
+        // Applica il blocco
+        toggleEditorLock(isEffectivelyLocked);
+
+        // Se è bloccato per motivi di stato (es. 'Inviato'), aggiorniamo
+        // anche l'icona del pulsante per mostrare il lucchetto chiuso.
+        if (isEffectivelyLocked && isLockedHiddenInput.value !== 'true') {
+             lockBtn.innerHTML = '<i class="fas fa-lock"></i>';
+        }
+    }
+
+    // =================================================================
+    // --- FUNZIONI MODALI (COPIATE DA BASE.HTML) ---
+    // =================================================================
+
+    function showNotification(title, message, onOk) {
+        const modal = document.getElementById('notification-modal');
+        if (!modal) {
+            alert(title + "\n" + message.replace(/<br>/g, "\n").replace(/<strong>/g, "").replace(/<\/strong>/g, ""));
+            if(onOk) onOk();
+            return;
+        }
+        modal.querySelector('#notification-modal-title').textContent = title;
+        modal.querySelector('#notification-modal-text').innerHTML = message; 
+        modal.style.display = 'flex';
+        const okBtn = modal.querySelector('#notification-modal-ok');
+        const newOkBtn = okBtn.cloneNode(true); 
+        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+        newOkBtn.addEventListener('click', () => {
+            modal.style.display = 'none';
+            if (onOk) onOk();
+        }, { once: true });
+    }
+
+    function showConfirmation(title, message, onConfirm) {
+        const modal = document.getElementById('confirm-modal');
+         if (!modal) {
+            if (confirm(title + "\n" + message.replace(/<br>/g, "\n").replace(/<strong>/g, "").replace(/<\/strong>/g, ""))) {
+                if (onConfirm) onConfirm();
+            }
+            return;
+        }
+        modal.querySelector('#confirm-modal-title').textContent = title;
+        modal.querySelector('#confirm-modal-text').innerHTML = message;
+        modal.style.display = 'flex';
+        const okBtn = modal.querySelector('#confirm-modal-ok');
+        const cancelBtn = modal.querySelector('#confirm-modal-cancel');
+
+        const newOkBtn = okBtn.cloneNode(true);
+        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+        const newCancelBtn = cancelBtn.cloneNode(true);
+        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+        const closeModal = () => { modal.style.display = 'none'; };
+
+        newOkBtn.addEventListener('click', () => {
+            closeModal();
+            if (onConfirm) onConfirm();
+        }, { once: true });
+        newCancelBtn.addEventListener('click', closeModal, { once: true });
+    }
+
+    // =======================================================
+    // --- LOGICA MODALE ANNULLA PREVENTIVO ---
+    // =======================================================
+    const annullaBtn = document.getElementById('annulla-btn');
+    if (annullaBtn) {
+        annullaBtn.addEventListener('click', (event) => {
+            event.preventDefault(); 
+
+            const form = document.getElementById('grid-form');
+            const actionUrl = annullaBtn.getAttribute('formaction');
+            const quoteStato = "{{ p.stato }}"; 
+
+            const submitAnnulla = () => {
+                form.action = actionUrl;
+                form.submit();
+            };
+
+            const showFinalConfirmation = () => {
+                showConfirmation(
+                    'Conferma Annullamento Definitivo', 
+                    'Sei sicuro di voler annullare questo preventivo? L\'azione è irreversibile e bloccherà il documento.',
+                    submitAnnulla 
+                );
+            };
+
+            if (quoteStato === 'In Lavorazione') {
+                showConfirmation(
+                    'Attenzione: Preventivo in Lavorazione',
+                    'Questo preventivo risulta <strong>In Lavorazione</strong>. Ciò significa che potrebbero esserci pagamenti o consegne già registrati.<br><br>Annullarlo non è consigliato. Vuoi procedere comunque?',
+                    () => {
+                        showFinalConfirmation();
+                    }
+                );
+            } else {
+                showFinalConfirmation();
+            }
+        });
+    }
+
+    // =======================================================
+    // --- LOGICA MODALE CLONA PREVENTIVO ---
+    // =======================================================
+    const clonaBtn = document.getElementById('clona-btn');
+    if (clonaBtn) {
+        clonaBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            const originalQuoteId = "{{ p.numero }}"; 
+
+            showConfirmation(
+                'Conferma Clonazione',
+                `Sei sicuro di voler clonare il preventivo <strong>${originalQuoteId}</strong>?<br>Verrà creata una nuova bozza.`,
+                () => {
+                    const originalButtonHtml = clonaBtn.innerHTML;
+                    clonaBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clonazione...';
+                    clonaBtn.disabled = true;
+
+                    fetch("{{ url_for('clona_preventivo', quote_id=p.numero) }}")
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                showNotification(
+                                    'Clonazione Riuscita!',
+                                    `Preventivo clonato con successo.<br>Originale: <strong>${data.vecchio_id}</strong><br>Nuova Bozza: <strong>${data.nuovo_id}</strong>`,
+                                    () => {
+                                        window.location.href = data.new_url;
+                                    }
+                                );
+                            } else {
+                                throw new Error(data.error || 'Errore sconosciuto');
+                            }
+                        })
+                        .catch(err => {
+                            clonaBtn.innerHTML = originalButtonHtml;
+                            clonaBtn.disabled = false;
+                            showNotification('Errore', 'Impossibile clonare il preventivo: ' + err.message, null);
+                        });
+                }
+            );
+        });
+    }
+
+    // =======================================================
+    // --- LOGICA NUOVO SWITCH IVA ---
+    // =======================================================
+    if (ivaSwitchComponent) {
+        const hiddenInput = document.getElementById('default-iva-switch-input');
+        const thumb = ivaSwitchComponent.querySelector('.switch-thumb');
+        const labels = ivaSwitchComponent.querySelectorAll('.switch-label');
+        const values = ['0', '4', '10', '22'];
+
+        function updateIvaSwitch(value, animate = true) {
+            const index = values.indexOf(String(value));
+            if (index === -1) return; 
+
+            if (!animate) thumb.style.transition = 'none';
+            thumb.style.transform = `translateX(${index * 100}%)`;
+            if (!animate) setTimeout(() => { thumb.style.transition = 'transform 0.25s ease-out'; }, 0);
+
+            hiddenInput.value = value;
+
+            labels.forEach((label, i) => {
+                label.classList.toggle('active', i === index);
+            });
+        }
+
+        labels.forEach(label => {
+            label.addEventListener('click', () => {
+                if (ivaSwitchComponent.classList.contains('disabled')) return; // Non fare nulla se bloccato
+                updateIvaSwitch(label.dataset.value);
+            });
+        });
+
+        updateIvaSwitch(hiddenInput.value, false);
+    }
+
+    // Chiamata finale ai totali
+    updateTotals();
+
+}); // <-- CHIUSURA 'DOMContentLoaded'
+</script>
+
+{% endblock %}
+
+

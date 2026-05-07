@@ -1,0 +1,85 @@
+Guida all'Installazione del Gestionale (Server)
+Questa guida spiega come installare e configurare l'applicazione gestionale su un computer Windows che fungerà da server per la rete locale.
+
+Requisiti
+Un computer Windows connesso alla rete locale.
+
+I file del progetto (la cartella contenente gestionale.py, templates, ecc.).
+
+Passaggio 1: Installazione di Python
+Il gestionale è scritto in Python, quindi per prima cosa dobbiamo installare l'interprete.
+
+Scarica Python: Vai sul sito ufficiale di Python e scarica l'installer per Windows (solitamente la versione più recente va bene).
+
+Link: https://www.python.org/downloads/windows/
+
+Esegui l'Installer: Avvia il file .exe scaricato.
+
+IMPORTANTE: Nella prima schermata dell'installazione, assicurati di spuntare la casella in basso che dice "Add Python to PATH". Questo è un passaggio fondamentale.
+
+Completa l'Installazione: Clicca su "Install Now" e attendi il completamento.
+
+Passaggio 2: Configurazione del Progetto
+Ora prepariamo i file del gestionale e installiamo le sue dipendenze.
+
+Copia la Cartella: Copia l'intera cartella del progetto in una posizione stabile sul PC server (es. sul Desktop o in C:\Gestionale).
+
+Apri il Terminale:
+
+Vai nella cartella del progetto.
+
+Tieni premuto il tasto Shift sulla tastiera e fai click con il tasto destro su uno spazio vuoto all'interno della cartella.
+
+Seleziona "Apri nel Terminale" o "Apri finestra PowerShell qui".
+
+Installa le Librerie Python: Nel terminale che si è appena aperto, digita il seguente comando e premi Invio. Questo installerà automaticamente Flask e WeasyPrint.
+
+Shell
+
+pip install -r requirements.txt
+Passaggio 3: Installazione di GTK (per la Generazione dei PDF)
+Questo passaggio è obbligatorio per permettere a WeasyPrint di creare i file PDF.
+
+Scarica GTK: Vai al seguente link e scarica l'ultima versione dell'installer .exe per Windows a 64-bit.
+
+Link: https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases
+
+Installa GTK: Esegui il file .exe e segui le istruzioni, lasciando le impostazioni predefinite. L'installazione avverrà in C:\Program Files\GTK3-Runtime Win64.
+
+Aggiungi GTK al PATH di Sistema:
+
+Premi il tasto Windows, scrivi "variabili d'ambiente" e clicca su "Modifica le variabili d'ambiente per l'account".
+
+Clicca sul pulsante "Variabili d'ambiente...".
+
+Nella sezione in basso ("Variabili di sistema"), trova e seleziona la variabile Path, poi clicca su "Modifica...".
+
+Clicca su "Nuovo" e incolla questa riga esatta:
+
+C:\Program Files\GTK3-Runtime Win64\bin
+Clicca OK su tutte le finestre per salvare.
+
+RIAVVIA IL COMPUTER: Questo è il passaggio più importante. Riavvia il computer per assicurarti che Windows registri le nuove impostazioni del PATH.
+
+Passaggio 4: Avvio del Gestionale
+Dopo il riavvio, torna nella cartella del progetto e apri di nuovo il terminale (come al Passaggio 2, punto 2).
+
+Digita il seguente comando per avviare il server del gestionale:
+
+Shell
+
+python gestionale.py
+Vedrai delle scritte apparire nel terminale. Non chiudere questa finestra: finché rimane aperta, il tuo gestionale è in funzione.
+
+Passaggio 5: Accesso all'Applicazione
+Dal PC Server: Apri il browser e vai a http://127.0.0.1:5001.
+
+Dagli Altri PC nella Rete: Per permettere agli altri di connettersi, devi trovare l'indirizzo IP del PC server.
+
+Sul server, nel terminale, digita ipconfig e premi Invio.
+
+Cerca la riga "Indirizzo IPv4" (sarà un numero tipo 192.168.1.105).
+
+Gli altri PC potranno accedere al gestionale digitando quell'indirizzo nel loro browser, seguito dalla porta: http://192.168.1.105:5001.
+
+L'installazione è completa.

@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block body %}
+<!-- Aggiungo Font Awesome per le icone -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="form-container">
+  <form method="post" class="form-card">
+    <input type="hidden" name="action" value="{{ action }}">
+    
+    <div class="form-header">
+      <div class="form-icon-wrapper">
+        <i class="fas fa-user-edit"></i>
+      </div>
+      <h2>Anagrafica Cliente</h2>
+      <p>Compila i campi sottostanti per creare o modificare un cliente. I campi con * sono obbligatori.</p>
+    </div>
+
+    <!-- Corpo del form con i campi -->
+    <div class="form-body">
+      
+      <div class="form-section">
+        <h3 class="section-title">Dati Anagrafici</h3>
+        <div class="form-grid">
+          <div class="form-group full-width">
+            <label for="cliente">Cliente (Nome e Cognome / Nome Azienda)*</label>
+            <input id="cliente" name="cliente" value="{{ p.cliente if p else '' }}" required />
+          </div>
+          <div class="form-group">
+            <label for="rag_sociale">Ragione Sociale (se diversa)</label>
+            <input id="rag_sociale" name="rag_sociale" value="{{ p.rag_sociale if p else '' }}" />
+          </div>
+          <div class="form-group">
+            <label for="p_iva">Partita IVA / Codice Fiscale</label>
+            <input id="p_iva" name="p_iva" value="{{ p.p_iva if p else '' }}" />
+          </div>
+          <div class="form-group">
+              <label for="codice_univoco">Codice Univoco</label>
+              <input id="codice_univoco" name="codice_univoco" value="{{ p.codice_univoco if p else '' }}" />
+            </div>
+          </div>
+        </div>
+      <div class="form-section">
+        <h3 class="section-title">Indirizzo</h3>
+        <div class="form-grid">
+          <div class="form-group full-width">
+            <label for="indirizzo">Indirizzo (Via, Piazza, ...)</label>
+            <input id="indirizzo" name="indirizzo" value="{{ p.indirizzo if p else '' }}" />
+          </div>
+          <div class="form-group">
+            <label for="select-regione">Regione</label>
+            <select id="select-regione" name="regione"><option value="">Seleziona...</option></select>
+            <input type="hidden" id="regione_nome" name="regione_nome">
+          </div>
+          <div class="form-group">
+            <label for="select-provincia">Provincia</label>
+            <select id="select-provincia" name="provincia"><option value="">...</option></select>
+          </div>
+          <div class="form-group">
+            <label for="select-comune">Comune</label>
+            <select id="select-comune" name="comune"><option value="">...</option></select>
+          </div>
+          <div class="form-group">
+            <label for="cap">CAP</label>
+            <input id="cap" name="cap" value="{{ p.cap if p else '' }}" />
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3 class="section-title">Contatti</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="email">Email</label>
+            <input id="email" type="email" name="email" value="{{ p.email if p else '' }}" />
+          </div>
+          <div class="form-group">
+            <label for="telefono">Telefono</label>
+            <input id="telefono" type="tel" name="telefono" value="{{ p.telefono if p else '' }}" />
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Footer con i pulsanti di azione -->
+    <div class="form-actions">
+        <a href="{{ url_for('cerca_cliente') }}" class="btn btn-outline">Annulla</a>
+        <button type="submit" class="btn primary">
+          {% if p and p.id %}
+            <i class="fas fa-save"></i> Salva Modifiche
+          {% else %}
+            <i class="fas fa-plus"></i> Salva e Crea Preventivo
+          {% endif %}
+        </button>
+    </div>
+
+  </form>
+</div>
+
+<style>
+  .section-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 20px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* Aggiunge spazio tra label e input */
+  }
+  .form-group label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+  }
+  .form-group input, .form-group select {
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+  }
+  .form-group input:focus, .form-group select:focus {
+    outline: none;
+    border-color: var(--ink, #111);
+  }
+  .form-group.full-width {
+    grid-column: 1 / -1;
+  }
+  .form-container {
+    max-width: 900px;
+    margin: 24px auto;
+    padding: 24px;
+  }
+  .form-card {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.07);
+    overflow: hidden;
+  }
+  .form-header {
+    text-align: center;
+    padding: 32px 24px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .form-icon-wrapper {
+    width: 60px;
+    height: 60px;
+    margin: 0 auto 16px;
+    background-color: var(--ink, #111);
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+  }
+  .form-header h2 {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0 0 8px 0;
+  }
+  .form-header p {
+    font-size: 15px;
+    color: var(--muted, #666);
+    margin: 0;
+  }
+
+  .form-body {
+    padding: 32px;
+  }
+
+  .form-section {
+    margin-bottom: 32px;
+  }
+  .form-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 20px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+  }
+  .form-group.full-width {
+    grid-column: 1 / -1;
+  }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 24px 32px;
+    background-color: #f8f9fa;
+    border-top: 1px solid #e2e8f0;
+  }
+  .form-actions .btn {
+      min-width: 120px;
+  }
+  .btn.primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  /* Responsive */
+  @media (max-width: 768px) {
+    .form-grid {
+      grid-template-columns: 1fr;
+    }
+    .form-body {
+      padding: 24px;
+    }
+    .form-actions {
+      padding: 16px 24px;
+    }
+  }
+
+</style>
+{% endblock %}

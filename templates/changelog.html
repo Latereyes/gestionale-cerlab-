@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+    .changelog-container {
+        max-width: 800px;
+        margin: 40px auto;
+        padding: 40px;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.07);
+        text-align: center;
+    }
+    .changelog-container h1 {
+        font-size: 32px;
+        margin-bottom: 12px;
+    }
+    .changelog-container .subtitle {
+        color: #64748b;
+        margin-top: 0;
+        margin-bottom: 40px;
+    }
+    .update-entry {
+        border-top: 1px solid #f1f5f9;
+        padding-top: 24px;
+        margin-top: 24px;
+        text-align: left;
+    }
+    .update-entry h2 {
+        font-size: 22px;
+        margin-bottom: 4px;
+    }
+    .update-entry .version-date {
+        font-size: 16px;
+        color: #94a3b8;
+        font-weight: 400;
+    }
+    .update-entry ul {
+        padding-left: 20px;
+        margin: 16px 0 0;
+        list-style-type: '✓  '; /* Stile carino per i punti elenco */
+        line-height: 1.6;
+    }
+    .continue-btn-container {
+        margin-top: 40px;
+    }
+    .btn-large {
+        padding: 14px 28px;
+        font-size: 16px;
+        font-weight: 600;
+    }
+</style>
+
+<div class="changelog-container">
+    <h1>✨ Novità del Gestionale</h1>
+    <p class="subtitle">Ecco cosa è cambiato dall'ultima volta che hai effettuato l'accesso.</p>
+
+    {% for update in changelog_updates %}
+    <div class="update-entry">
+        <h2>
+            Versione {{ update.version }}
+            <span class="version-date">({{ update.date }})</span>
+        </h2>
+        <p><strong>{{ update.title }}</strong></p>
+        <ul>
+            {% for change in (update.features or update.changes) %}
+            <li>{{ change }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endfor %}
+
+    <div class="continue-btn-container">
+        <a href="{{ url_for('dashboard') }}" class="brand-link">
+            <button class="btn btn-primary btn-large">Vai alla dashboard</button>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-address-card"></i> Anagrafica Clienti</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+    
+    <div class="card" style="padding: 16px; margin-bottom: 24px;">
+        <div class="input-group" style="position: relative;">
+            <span class="input-icon" style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: #9ca3af;">
+                <i class="fas fa-search"></i>
+            </span>
+            <input type="text" id="live-search-anagrafica" class="form-control" placeholder="Cerca per nome, P.IVA o comune..." style="padding-left: 40px; width: 100%;">
+        </div>
+    </div>
+
+    <div class="filter-switch-container">
+        <input type="checkbox" id="active-filter-toggle" checked>
+        <label for="active-filter-toggle">Mostra solo clienti con preventivi attivi</label>
+    </div>
+
+    <div class="card">
+        <div class="table-wrap">
+            <table class="styled-table" id="table-anagrafica">
+                <thead>
+                    <tr>
+                        <th>Cliente / Rag. Sociale</th>
+                        <th>P.IVA / Cod. Univoco</th>
+                        <th>Sede Legale</th>
+                        <th>Contatti</th>
+                        <th class="left">C.I.</th>
+                        <th class="left">PRVC</th>
+                        <th class="left">CONTR</th>
+                        <th class="right">Cartella</th>
+                    </tr>
+                </thead>
+                </thead>
+                <tbody>
+                    {% for c in clients %}
+                    <tr class="client-row" data-active="{{ 'true' if c.has_active_quote else 'false' }}">
+                        <td>
+                            <strong>{{ c.cliente }}</strong>
+                            <br>
+                            <small class="muted">{{ c.rag_sociale }}</small>
+                        </td>
+                        <td>
+                            <span class="badge-info">P.IVA: {{ c.p_iva }}</span><br>
+                            <small class="muted">SDI: {{ c.codice_univoco or 'N/D' }}</small>
+                        </td>
+                        <td>
+                            {{ c.indirizzo }}<br>
+                            <small class="muted">{{ c.cap }} - {{ c.comune }} ({{ c.provincia }})</small>
+                        </td>
+<td>
+                            {% if c.email %}<i class="fas fa-envelope muted"></i> {{ c.email }}<br>{% endif %}
+                            {% if c.telefono %}<i class="fas fa-phone muted"></i> {{ c.telefono }}{% endif %}
+                        </td>
+                        <td class="center">
+                            {% if c.has_ci %}
+                                <i class="fas fa-check-circle text-success" title="C.I. Caricata"></i>
+                            {% else %}
+                                <i class="fas fa-times-circle text-danger" title="C.I. Mancante"></i>
+                            {% endif %}
+                        </td>
+                        <td class="center">
+                            {% if c.has_privacy %}
+                                <i class="fas fa-check-circle text-success" title="Privacy Caricata"></i>
+                            {% else %}
+                                <i class="fas fa-times-circle text-danger" title="Privacy Mancante"></i>
+                            {% endif %}
+                        </td>
+                        <td class="center">
+                            {% if c.has_contratto %}
+                                <i class="fas fa-check-circle text-success" title="Contratto Caricato"></i>
+                            {% else %}
+                                <i class="fas fa-times-circle text-danger" title="Contratto Mancante"></i>
+                            {% endif %}
+                        </td>
+                        <td class="right">
+                            <a href="{{ url_for('dettaglio_cliente', client_id=c.id_cliente) }}" class="btn icon-btn" title="Vedi Documenti">
+                                <i class="fas fa-folder-open"></i>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+.status-in-lavorazione { background-color: #ffc107; }
+.muted { color: #64748b; font-size: 12px; }
+.right { text-align: right; }
+.center { text-align: center; }
+.text-success { color: #198754; font-size: 16px; }
+.text-danger { color: #dc3545; font-size: 16px; }
+   
+/* --- STILI SWITCH GRAFICO (DA ARCHIVIO) --- */
+.filter-switch-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background-color: #fff;
+  padding: 16px 24px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 24px;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+#active-filter-toggle {
+  appearance: none;
+  width: 48px;
+  height: 26px;
+  background-color: #cbd5e1;
+  border-radius: 15px;
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  flex-shrink: 0;
+}
+#active-filter-toggle::before {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background-color: white;
+  border-radius: 50%;
+  top: 3px;
+  left: 4px;
+  transition: transform 0.2s;
+}
+#active-filter-toggle:checked {
+  background-color: #0d6efd; 
+}
+#active-filter-toggle:checked::before {
+  transform: translateX(20px);
+}
+.filter-switch-container label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #4b5563;
+    cursor: pointer;
+}
+
+/* --- STILI TABELLA E BADGE --- */
+.badge-info { font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden; }
+.styled-table { width: 100%; border-collapse: collapse; }
+.styled-table th, .styled-table td { padding: 14px 18px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+.styled-table thead th { background: #f8f9fa; font-size: 11px; color: #64748b; text-transform: uppercase; }
+.status-badge { display: inline-block; border-radius: 4px; color: #000; font-weight: 700; text-align: center; }
+.status-in-lavorazione { background-color: #ffc107; }
+.muted { color: #64748b; font-size: 12px; }
+.right { text-align: right; }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('live-search-anagrafica');
+    const toggleSwitch = document.getElementById('active-filter-toggle');
+    const rows = document.querySelectorAll('.client-row');
+
+    function applyFilters() {
+        const term = searchInput.value.toLowerCase().trim();
+        const onlyActive = toggleSwitch.checked;
+
+        rows.forEach(row => {
+            const isActive = row.dataset.active === 'true';
+            const text = row.textContent.toLowerCase();
+            
+            const matchesSearch = text.includes(term) || term === "";
+            const matchesActive = !onlyActive || (onlyActive && isActive);
+
+            row.style.display = (matchesSearch && matchesActive) ? '' : 'none';
+        });
+    }
+
+    // Eventi per ricerca e switch
+    searchInput.addEventListener('input', applyFilters);
+    toggleSwitch.addEventListener('change', applyFilters);
+
+    // Esegui filtro al caricamento
+    applyFilters();
+});
+</script>
+{% endblock %}

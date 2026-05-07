@@ -1,0 +1,17 @@
+{
+    "version": "2.3.0",
+    "date": "05/05/2026",
+    "title": "PDF Edili, Allegati Chat e Task Private",
+    "changes": [
+      "<b>PDF Preventivi Edili:</b> Implementata la generazione ufficiale del PDF per i preventivi edili con relativo storico revisioni.",
+      "<b>Allegati in Chat:</b> Ora è possibile inviare file (immagini, PDF, documenti) direttamente nella chat interna tramite l'icona graffetta.",
+      "<b>Esente IVA (Edile):</b> Introdotto il toggle 'Esente IVA' anche nell'editor edile, con gestione automatica del saldo IVA nei pagamenti.",
+      "<b>Dashboard CEO Smart:</b> Il calcolo delle statistiche e del cashflow ora utilizza la 'Data di Conferma' del preventivo anziché quella di creazione.",
+      "<b>Modalità Servizio:</b> Nell'editor standard, selezionando l'unità di misura 'S' (Servizio), il sistema blocca automaticamente i campi non necessari.",
+      "<b>Uniformità Badge:</b> Standardizzati gli stili dei badge di stato (Bozza, Inviato, Confermato) in tutte le pagine del gestionale.",
+      "<b>Layout Fatturazione:</b> Allineato il design dei tasti IVA e allegati nella pagina Fatture allo stile della Gestione Consegne.",
+      "<b>Fix Notifiche Task:</b> Risolto il problema di visibilità delle task taggate come @venditori per il gruppo vendite.",
+      "<b>ADMIN SUPPORT:</b> Aggiunto il pulsante ADMIN, utilizzare per chiedere correzione bug e miglioramenti.",
+      "<b>BOLLA FIRMATA:</b> Ora per marcare un articolo come consegnato é obbligatorio allegare la bolla firmata, nuova colonna aggiunta nella cartella."
+ ]
+  }

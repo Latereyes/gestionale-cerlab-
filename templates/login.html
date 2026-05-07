@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Login - Gestionale Preventivi</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
+    .login-card { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; /* Centra il contenuto */ }
+    .logo { height: 60px; margin-bottom: 20px; } /* Stile per il logo */
+    h2 { margin-top: 0; margin-bottom: 24px; color: #333; }
+    .form-group { margin-bottom: 20px; text-align: left; /* Allinea a sx label e input */ }
+    label { display: block; margin-bottom: 6px; font-weight: 600; color: #555; }
+    input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+    .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; background-color: #111; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; }
+    .flash-error { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="logo">
+    
+    <h2>Accesso Gestionale</h2>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    
+    <form method="post">
+      <div class="form-group">
+        <label for="username">Nome Utente</label>
+        <input type="text" id="username" name="username" required>
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required>
+      </div>
+      <button type="submit" class="btn">Accedi</button>
+    </form>
+  </div>
+  <div class="version-info">
+  v{{ app_version }}
+</div>
+</body>
+<style>
+.version-info {
+    position: fixed; 
+    bottom: 10px;
+    right: 15px;
+    font-size: 12px;
+    color: #999;
+}
+</style>
+</html>

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-users-cog"></i> Gestione Utenti</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+
+<div class="editor-container">
+    <div class="card">
+        <div class="card-header">
+            <h3>Elenco Utenti Registrati</h3>
+            {% if session.user_role == 'amministratore' %}
+            <a href="{{ url_for('aggiungi_utente') }}" class="btn primary"><i class="fas fa-plus"></i> Aggiungi Nuovo Utente</a>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            <p class="muted">Da qui puoi modificare i dati, resettare le password o eliminare gli utenti. La password iniziale per un nuovo utente sarà `nomeutente123`.</p>
+        </div>
+        <div class="table-wrap">
+            <table class="styled-table">
+                <thead>
+                    <tr>
+                        <th>Nome Utente</th>
+                        <th>Nome Completo</th>
+                        <th>Ruolo</th>
+                        <th>Sigla</th>
+                        <th class="actions-column">Azioni</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td><strong>{{ user.username }}</strong></td>
+                        <td>{{ user.full_name }}</td>
+                        <td>{{ user.role }}</td>
+                        <td>{{ user.sigla }}</td>
+                        <td class="row-actions">
+                        {% if user.username != session.user_id %}
+                            {% if user.role != 'amministratore' %}
+                                <a href="{{ url_for('reset_password', username=user.username) }}" class="btn" onclick="return confirm('Sei sicuro di voler resettare la password per questo utente?');">Resetta Password</a>
+                            {% else %}
+                                <button class="btn" disabled title="Non è possibile resettare la password di un amministratore.">Resetta Password</button>
+                            {% endif %}
+                        {% if session.user_role == 'amministratore' and user.role != 'amministratore' %}
+                        <a href="{{ url_for('elimina_utente', username=user.username) }}" class="btn icon-btn danger" title="Elimina Utente" onclick="return confirm('Sei sicuro di voler eliminare questo utente? L\'azione è irreversibile.');"><i class="fas fa-trash-alt"></i></a>
+                        <a href="{{ url_for('modifica_utente', username=user.username) }}" class="btn icon-btn" title="Modifica Utente"><i class="fas fa-pencil-alt"></i></a>                
+                        {% endif %}
+    {% else %}
+        <span class="muted">(Utente corrente)</span>
+    {% endif %}
+</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Stili presi da altre pagine per coerenza */
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.card-body { padding: 24px; padding-top: 16px; }
+.table-wrap { overflow-x: auto; }
+.styled-table { width: 100%; border-collapse: collapse; }
+.styled-table th, .styled-table td { padding: 16px 24px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); white-space: nowrap;}
+.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table tbody tr:last-child td { border-bottom: none; }
+.actions-column { width: 1%; text-align: right; }
+.row-actions { text-align: right; display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Stile per pulsante icona */
+.btn.icon-btn {
+    padding: 8px; line-height: 1; border-radius: 8px; background-color: var(--bg-light, #f8f9fa);
+    color: var(--muted, #6c757d); border: 1px solid var(--border-color, #e2e8f0);
+}
+.btn.icon-btn:hover { background-color: var(--bg-hover, #f1f5f9); color: var(--text-primary); }
+.btn.icon-btn.danger { background-color: #fde8e8; color: #dc3545; }
+.btn.icon-btn.danger:hover { background-color: #dc3545; color: #fff; }
+</style>
+
+{% endblock %}

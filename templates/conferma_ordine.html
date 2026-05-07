@@ -1,0 +1,1059 @@
+{% extends "base.html" %}
+
+{% block extra_fab %}
+    <a href="javascript:void(0)" class="fab-btn task-fab" onclick="window.openQuickTask('{{ p.numero }}', 'CONSEGNA', '{{ p.cliente }}')" title="Nuova Task Ordine">
+        <i class="fas fa-plus"></i>
+        <span class="fab-label">TASK</span>
+    </a>
+{% endblock %}
+
+{% block page_title %}
+<h1><i class="fas fa-box-open"></i> Gestione Ordini
+    {% if p %}
+    <div class="header-client-info">
+        <i class="fas fa-file-invoice"></i>
+        <span>Preventivo #{{ p.numero }}</span>
+    </div>
+    {% endif %}
+</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+
+    <form id="items-form" data-quote-id="{{ p.numero }}">
+        <div class="card">
+            <div class="card-header">
+                <h3>Articoli non Ordinati</h3>
+            </div>
+            <div class="card-body">
+                {% if righe_non_ordinate %}
+                    <p class="muted">Seleziona uno o più articoli per creare un nuovo ordine o per aggiungerli a uno esistente.</p>
+                    <div class="table-wrap">
+                        <table class="styled-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 25px;"></th>
+                                    <th>Articolo</th>
+                                    <th>UM</th>
+                                    <th class="right">Q.tà</th>
+                                    <th class="right">Costo Presunto Articolo</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for riga in righe_non_ordinate %}
+                                <tr>
+                                    <td>
+                                        <input type="checkbox" name="selected_items" value="{{ riga.original_index }}">
+                                    </td>
+                                    <td>{{ riga.articolo }}</td>
+                                    <td>{{ riga.unt }}</td>
+                                    <td class="right">{{ riga.qt }}</td>
+                                    <td class="right">{{ money_ui(riga.costo_presunto_articolo) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="empty-state">
+                        <i class="fas fa-check-circle"></i>
+                        <h4>Tutto Ordinato</h4>
+                        <p>Tutti gli articoli di questo preventivo sono stati assegnati a un ordine.</p>
+                    </div>
+                {% endif %}
+            </div>
+            </div>
+        </div>
+    </form>
+    
+    <div class="section-title">
+        <h2>Ordini in Attesa di Conferma</h2>
+    </div>
+    {% for ordine in ordini_in_attesa %}
+    <div class="card order-card">
+        <div class="card-header">
+<div class="order-info">
+                <h3>Fornitore: <strong>{{ ordine.azienda }}</strong></h3>
+                <div class="header-totals">
+                    <span class="muted">Importo Totale (Lordo): <strong>{{ money_ui(ordine.importo) }}</strong></span>
+                    <span class="muted header-iva">di cui IVA: <strong>{{ money_ui(ordine.iva_calcolata) }}</strong></span>
+                </div>
+                <span class="status-tag warning">In attesa di numero conferma</span> </div>
+            <div class="actions-group">
+                 <button type="button" class="btn icon-btn copy-order-btn" title="Copia contenuto per email" data-target-table="#pending-order-table-{{ loop.index0 }}"><i class="fas fa-copy"></i></button>
+                 <button type="button" class="btn icon-btn edit-order-btn" title="Modifica e Conferma Ordine" 
+                        data-ordine-id="{{ ordine.ordine_id }}" 
+                        data-numero-display="{{ ordine.numero_conferma }}" 
+                        data-azienda="{{ ordine.azienda }}" 
+                        data-importo-articoli="{{ ordine.importo_articoli_form }}"
+                        data-importo-trasporto="{{ ordine.importo_trasporto_form }}"
+                        data-data="{{ ordine.data_arrivo }}"
+                        data-trasporto-incluso="{{ 'true' if ordine.trasporto_incluso_flag else 'false' }}"> <i class="fas fa-pencil-alt"></i>
+                </button>
+                 <button type="button" class="btn icon-btn danger delete-order-btn" title="Elimina Ordine" data-ordine-id="{{ ordine.ordine_id }}" data-numero-display="{{ ordine.numero_conferma }}"><i class="fas fa-trash-alt"></i></button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="styled-table minimal" id="pending-order-table-{{ loop.index0 }}">
+                <thead><tr><th>Articolo</th><th>UM</th><th class="right">Q.tà</th><th class="right">Costo Presunto Articolo</th><th style="width: 50px;"></th></tr></thead>
+                <tbody>
+                    {% for item in ordine.articoli %}
+                    <tr>
+                        <td>{{ item.articolo }}</td><td>{{ item.unt }}</td><td class="right">{{ item.qt }}</td><td class="right">{{ money_ui(item.costo_presunto_articolo) }}</td>
+                        <td class="row-actions">
+                            <button type="button" class="btn icon-btn unlink-item-btn" title="Svincola Articolo" data-item-index="{{ item.original_index }}" data-ordine-id="{{ ordine.ordine_id }}" data-numero-display="{{ ordine.numero_conferma }}"><i class="fas fa-unlink"></i></button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if ordine.allegati %}
+        <div class="attachments-section">
+            <h5><i class="fas fa-paperclip"></i> Allegati Ordine:</h5>
+            <div class="document-list">
+                {% for allegato in ordine.allegati %}
+                <div class="document-item">
+                    <div>
+                        <i class="fas fa-file"></i>
+                        <span>{{ allegato.descrizione }}</span>
+                    </div>
+                    {% if allegato.filename.lower().endswith('.pdf') %}
+                        {# Se è un PDF, crea un link per visualizzarlo in una nuova scheda #}
+                        <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=allegato.filename, action='view') }}" target="_blank" class="btn icon-btn" title="Visualizza PDF">
+                            <i class="fas fa-eye"></i>
+                        </a>
+                    {% else %}
+                        {# Altrimenti, crea il link standard per il download #}
+                        <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=allegato.filename) }}" class="btn icon-btn" title="Scarica">
+                            <i class="fas fa-download"></i>
+                        </a>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card-footer order-totals">
+            <div class="totals-group total-stimato">
+                <span>STIMATO:</span>
+                <strong>{{ money_ui(ordine.costo_totale_preventivato) }}</strong>
+                <small>(Articoli: {{ money_ui(ordine.costo_netto_articoli) }} + Trasp: {{ money_ui(ordine.costo_trasporto_preventivato) }})</small>
+            </div>
+            
+            <div class="totals-group total-effettivo">
+                <span>EFFETTIVO:</span>
+                <strong>{{ money_ui(ordine.costo_totale_effettivo_imponibile) }}</strong>
+                <small>(Articoli: {{ money_ui(ordine.costo_effettivo_articoli_imponibile) }} + Trasp: {{ money_ui(ordine.costo_effettivo_trasporto_imponibile) }})</small>
+            </div>
+            </div>
+    </div>
+        </div>
+    </div>
+    {% else %}
+        <p class="muted">Nessun ordine è in attesa di conferma.</p>
+    {% endfor %}
+    
+    <div class="section-title">
+        <h2>Ordini Fornitore Confermati</h2>
+    </div>
+    {% for ordine in ordini_confermati %}
+    <div class="card order-card">
+        
+        <div class="card-header">
+            <div class="order-info">
+                <h3>Ordine: <strong>{{ ordine.numero_conferma }}</strong></h3>
+                <div class="header-totals">
+                    <span class="muted">Fornitore: <strong>{{ ordine.azienda }}</strong></span>
+                    <span class="muted">Importo Totale (Lordo): <strong>{{ money_ui(ordine.importo) }}</strong></span>
+                    <span class="muted header-iva">di cui IVA: <strong>{{ money_ui(ordine.iva_calcolata) }}</strong></span>
+                </div>
+                <span class="status-tag success">Confermato</span>
+            </div>
+             <div class="actions-group">
+                <button type="button" class="btn icon-btn copy-order-btn" title="Copia contenuto per email" data-target-table="#confirmed-order-table-{{ loop.index0 }}"><i class="fas fa-copy"></i></button>
+                <button type="button" class="btn icon-btn upload-order-attachment-btn" title="Allega conferma d'ordine" data-ordine-id="{{ ordine.ordine_id }}" data-numero-display="{{ ordine.numero_conferma }}"><i class="fas fa-paperclip"></i></button>
+                
+                <button type="button" class="btn icon-btn edit-order-btn" title="Modifica Ordine" 
+                        data-ordine-id="{{ ordine.ordine_id }}" 
+                        data-numero-display="{{ ordine.numero_conferma }}" 
+                        data-azienda="{{ ordine.azienda }}" 
+                        data-importo-articoli="{{ ordine.importo_articoli_form }}"
+                        data-importo-trasporto="{{ ordine.importo_trasporto_form }}"
+                        data-data="{{ ordine.data_arrivo }}"
+                        data-trasporto-incluso="{{ 'true' if ordine.trasporto_incluso_flag else 'false' }}"> <i class="fas fa-pencil-alt"></i>
+                </button>
+                <button type="button" class="btn icon-btn danger delete-order-btn" title="Elimina Ordine" data-ordine-id="{{ ordine.ordine_id }}" data-numero-display="{{ ordine.numero_conferma }}"><i class="fas fa-trash-alt"></i></button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="styled-table minimal" id="confirmed-order-table-{{ loop.index0 }}">
+                <thead><tr><th>Articolo</th><th>UM</th><th class="right">Q.tà</th><th class="right">Costo Presunto Articolo</th><th style="width: 50px;"></th></tr></thead>
+                <tbody>
+                    {% for item in ordine.articoli %}
+                    <tr>
+                        <td>{{ item.articolo }}</td><td>{{ item.unt }}</td><td class="right">{{ item.qt }}</td><td class="right">{{ money_ui(item.costo_presunto_articolo) }}</td>
+                        <td class="row-actions">
+                             <button type="button" class="btn icon-btn unlink-item-btn" title="Svincola Articolo" data-item-index="{{ item.original_index }}" data-ordine-id="{{ ordine.ordine_id }}" data-numero-display="{{ ordine.numero_conferma }}"><i class="fas fa-unlink"></i></button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if ordine.allegati %}
+        <div class="attachments-section">
+            <h5><i class="fas fa-paperclip"></i> Allegati Ordine:</h5>
+            <div class="document-list">
+                {% for allegato in ordine.allegati %}
+                <div class="document-item">
+                    <div>
+                        <i class="fas fa-file"></i>
+                        <span>{{ allegato.descrizione }}</span>
+                    </div>
+                    {% if allegato.filename.lower().endswith('.pdf') %}
+                        {# Se è un PDF, crea un link per visualizzarlo in una nuova scheda #}
+                        <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=allegato.filename, action='view') }}" target="_blank" class="btn icon-btn" title="Visualizza PDF">
+                            <i class="fas fa-eye"></i>
+                        </a>
+                    {% else %}
+                        {# Altrimenti, crea il link standard per il download #}
+                        <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=allegato.filename) }}" class="btn icon-btn" title="Scarica">
+                            <i class="fas fa-download"></i>
+                        </a>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card-footer order-totals">
+            <div class="totals-group total-stimato">
+                <span>STIMATO:</span>
+                <strong>{{ money_ui(ordine.costo_totale_preventivato) }}</strong>
+                <small>(Articoli: {{ money_ui(ordine.costo_netto_articoli) }} + Trasp: {{ money_ui(ordine.costo_trasporto_preventivato) }})</small>
+            </div>
+            
+            <div class="totals-group total-effettivo">
+                <span>EFFETTIVO:</span>
+                <strong>{{ money_ui(ordine.costo_totale_effettivo_imponibile) }}</strong>
+                <small>(Articoli: {{ money_ui(ordine.costo_effettivo_articoli_imponibile) }} + Trasp: {{ money_ui(ordine.costo_effettivo_trasporto_imponibile) }})</small>
+            </div>
+        </div>
+        </div>
+    {% else %}
+        <p class="muted">Nessun ordine fornitore confermato per questo preventivo.</p>
+    {% endfor %}
+
+</div>
+
+<div id="modal-delete-row" class="modal-overlay" style="display: none;">
+    <div class="modal-content centered-content">
+        <div class="modal-icon warning">
+            <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        <h3>Conferma Eliminazione</h3>
+        <p>Sei sicuro di voler eliminare definitivamente questa riga dal preventivo?</p>
+        <div class="modal-actions centered-actions">
+            <button type="button" id="modal-delete-row-cancel" class="btn">Annulla</button>
+            <button type="button" id="modal-delete-row-confirm" class="btn danger">Sì, Elimina</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-longtext" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Modifica Descrizione Articolo</h3>
+        <div class="form-group">
+            <textarea id="modal-textarea" rows="6" placeholder="Inserisci qui la descrizione estesa..."></textarea>
+        </div>
+        <div class="modal-actions">
+            <button type="button" id="modal-close" class="btn">Annulla</button>
+            <button type="button" id="modal-save" class="btn primary">Salva Descrizione</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-pdf-choice" class="modal-overlay" style="display: none;">
+    <div class="modal-content centered-content">
+        <div class="modal-icon info">
+            <i class="fas fa-file-pdf"></i>
+        </div>
+        <h3>Generazione PDF</h3>
+        <p>Come vuoi visualizzare i totali nel PDF?</p>
+        <div class="modal-actions centered-actions column-mobile">
+            <button type="button" id="modal-pdf-choice-annulla" class="btn">Annulla</button>
+            <button type="button" id="modal-pdf-choice-no" class="btn btn-outline">Nascondi Totali Riga</button>
+            <button type="button" id="modal-pdf-choice-si" class="btn primary">Mostra Tutto</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-iva-warning" class="modal-overlay" style="display: none;">
+    <div class="modal-content centered-content">
+        <div class="modal-icon danger">
+            <i class="fas fa-times-circle"></i>
+        </div>
+        <h3>Attenzione: IVA Multipla</h3>
+        <p>
+            Non è possibile nascondere i totali perché gli articoli hanno aliquote IVA diverse (es. 4%, 10%, 22%).
+            <br><br>
+            Il PDF verrà generato <strong>mostrando i totali</strong> per garantire la correttezza fiscale.
+        </p>
+        <div class="modal-actions centered-actions">
+            <button type="button" id="modal-iva-warning-annulla" class="btn">Annulla</button>
+            <button type="button" id="modal-iva-warning-procedi" class="btn primary">Ho capito, Procedi</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* --- STILI MODALI AGGIORNATI --- */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(15, 23, 42, 0.6); /* Sfondo scuro moderno */
+    backdrop-filter: blur(4px); /* Effetto sfocatura sfondo */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    padding: 20px;
+}
+
+.modal-content {
+    background: #fff;
+    padding: 32px;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 500px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    animation: modalSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid #e2e8f0;
+}
+
+@keyframes modalSlideIn {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.modal-content h3 {
+    margin: 0 0 12px 0;
+    font-size: 20px;
+    color: #1e293b;
+    font-weight: 700;
+}
+
+.modal-content p {
+    color: #64748b;
+    line-height: 1.6;
+    margin-bottom: 24px;
+    font-size: 15px;
+}
+
+/* Stili per modali centrate (es. Conferma/Warning) */
+.centered-content {
+    text-align: center;
+    max-width: 450px;
+}
+
+/* Icone grandi sopra il titolo */
+.modal-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px auto;
+    font-size: 28px;
+}
+.modal-icon.warning { background-color: #fef3c7; color: #d97706; }
+.modal-icon.danger { background-color: #fee2e2; color: #dc2626; }
+.modal-icon.info { background-color: #e0f2fe; color: #0284c7; }
+
+/* Area di testo (per descrizione lunga) */
+.modal-content textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
+    min-height: 120px;
+}
+.modal-content textarea:focus {
+    outline: none;
+    border-color: #6f42c1;
+    box-shadow: 0 0 0 3px rgba(111, 66, 193, 0.1);
+}
+
+/* Pulsanti */
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.centered-actions {
+    justify-content: center;
+}
+
+@media (max-width: 600px) {
+    .column-mobile {
+        flex-direction: column-reverse; /* I pulsanti importanti in alto */
+    }
+    .column-mobile .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content: space-between; align-items:center; flex-wrap:wrap; gap:16px; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.card-body { padding: 24px; }
+.card-footer { padding: 16px 24px; background-color: #f8f9fa; border-top: 1px solid #f7f9fa; }
+.table-wrap { overflow-x: auto; }
+.styled-table { width: 100%; border-collapse: collapse; }
+.styled-table th, .styled-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); }
+.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table.minimal th, .styled-table.minimal td { padding: 8px 16px; }
+.styled-table .center { text-align: center; }
+.empty-state { text-align: center; padding: 40px; color: var(--muted); }
+.empty-state i { font-size: 32px; color: #198754; margin-bottom: 12px; }
+.actions-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+.actions-group { display: flex; align-items: center; gap: 12px; }
+.totals-summary { text-align: right; }
+.totals-summary .grand-total { font-weight: bold; font-size: 1.2em; margin-top: 8px; }
+.section-title { margin: 40px 0 16px 0; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; }
+.section-title h2 { margin: 0; font-size: 20px; }
+.order-info h3 { font-size: 16px; }
+.status-tag { display: inline-block; padding: 4px 10px; font-size: 11px; font-weight: 600; border-radius: 20px; color: #fff; }
+.status-tag.warning { background-color: #ffc107; color: #000; }
+.status-tag.success { background-color: #198754; }
+.btn.icon-btn.danger { background-color: #fde8e8; color: #dc3545; }
+.btn.icon-btn.danger:hover { background-color: #dc3545; color: #fff; }
+.modal-content { max-width: 500px; }
+.form-group { margin-bottom: 16px; }
+
+/* Aggiungi questo per l'intestazione */
+.order-info .header-totals {
+    display: flex;
+    gap: 16px; /* Spazio tra Importo e IVA */
+}
+.order-info .header-iva {
+    border-left: 1px solid #e2e8f0;
+    padding-left: 16px;
+}
+/* Fine stili intestazione */
+
+
+/* SOSTITUISCI le vecchie regole .order-totals con queste: */
+.order-totals {
+    display: flex;
+    justify-content: space-between; /* Allinea i due blocchi ai lati */
+    align-items: flex-start;
+    gap: 24px;
+    flex-wrap: wrap;
+}
+
+.totals-group {
+    display: flex;
+    flex-direction: column; /* Impila gli elementi verticalmente */
+}
+
+.totals-group span {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+}
+
+.totals-group strong {
+    font-size: 18px; /* Un po' più grande */
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.2;
+}
+
+.totals-group small {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+/* Stile per l'effettivo (un po' più grande) */
+.totals-group.total-effettivo strong {
+    font-size: 20px; /* Leggermente più grande dello stimato */
+    font-weight: 700;
+}
+
+/* Stili per la nuova sezione allegati */
+.attachments-section {
+    padding: 0 24px 16px 24px;
+}
+.attachments-section h5 {
+    margin: 16px 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+}
+.attachments-section .document-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.attachments-section .document-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background-color: #f8f9fa;
+    font-size: 14px;
+}
+.attachments-section .document-item i {
+    margin-right: 8px;
+    color: #6c757d;
+}
+
+.form-check-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    background-color: #f8f9fa;
+    padding: 10px;
+    border-radius: 6px;
+}
+.form-check-group input[type="checkbox"] {
+    width: auto;
+    height: auto;
+    transform: scale(1.2);
+}
+.form-check-group label {
+    margin: 0;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+/* ---
+INIZIO BLOCCO FOOTER AGGIORNATO (CON !IMPORTANT)
+--- */
+/* Stili per il footer della pagina ordini */
+.sticky-footer.order-footer {
+    /* Allinea Navigazione e Barra Azioni su una riga */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+
+    /* * NOTA: Non serve specificare padding, max-width o margin
+     * perché li ereditiamo correttamente da .sticky-footer 
+     * (proprio come fa gestione_consegna.html)
+    */
+}
+
+/* Figlio 2: Blocco Azioni (bottoni + totali) */
+.sticky-footer.order-footer .card-footer.actions-bar {
+     background-color: transparent;
+     border-top: none;
+     padding: 0; 
+     flex-grow: 1; /* Occupa lo spazio rimanente */
+     
+     /* --- MODIFICA: Allinea tutto il contenuto A DESTRA --- */
+     display: flex;
+     justify-content: flex-end; /* Prima era 'space-between' */
+     align-items: center;
+     gap: 16px; /* Spazio tra i due pulsanti */
+}
+
+/* Figlio 1: Blocco Navigazione */
+.sticky-footer.order-footer .status-actions {
+     flex-shrink: 0; /* Impedisce alla navigazione di rimpicciolirsi */
+     padding: 0;
+}
+/* ---
+FINE BLOCCO FOOTER AGGIORNATO
+--- */
+
+/* --- Cursore per Bottoni Disabilitati --- */
+.btn:disabled, .btn[disabled] {
+    cursor: default; /* Cambia il cursore da "not-allowed" (vietato) a "default" (freccia) */
+    opacity: 0.6; /* Mantiene l'effetto sbiadito per far capire che non è cliccabile */
+}
+</style>
+
+<div id="upload-order-attachment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Allega Conferma d'Ordine</h3>
+        <p class="muted">Il file verrà associato all'ordine <strong id="modal-upload-order-number"></strong>.</p>
+        <form id="upload-order-form" method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="ordine_id" id="modal-upload-hidden-order-number">
+            <div class="form-group">
+                <label for="modal-upload-descrizione">Descrizione</label>
+                <input id="modal-upload-descrizione" name="descrizione" value="Conferma d'ordine" required>
+            </div>
+            <div class="form-group">
+                <label for="modal-upload-file">File da caricare*</label>
+                <input id="modal-upload-file" name="file" type="file" required>
+            </div>
+            <div class="modal-actions">
+                <button type="button" id="modal-upload-cancel" class="btn">Annulla</button>
+                <button type="submit" class="btn primary">Carica e Salva</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% if p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
+<div class="sticky-footer order-footer"> 
+    <div class="status-actions">
+        <div>
+            {{ workflow_navbar(p, 'ordini') }}
+        </div>
+    </div>
+
+    <div class="card-footer actions-bar">
+        {% if ordini_in_attesa or ordini_confermati %}
+        <button type="button" id="btn-aggiungi-a-ordine" class="btn btn-outline" disabled>
+            <i class="fas fa-cart-plus"></i> Aggiungi a Esistente
+        </button>
+        {% endif %}
+
+        <button type="button" id="btn-crea-ordine" class="btn primary" disabled>
+            <i class="fas fa-plus-circle"></i> Crea Nuovo Ordine
+        </button>
+    </div>
+</div>
+{% endif %}
+
+<div id="order-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3 id="order-modal-title">Crea Nuovo Ordine</h3>
+        
+        <div class="form-group">
+            <label>Fornitore</label>
+            <input id="modal-azienda" type="text" placeholder="Es. FAP, Marca Corona..." autocomplete="off">
+        </div>
+        
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label>Numero Conferma / Rif.</label>
+                <input id="modal-numero" type="text" placeholder="Inserisci numero..." autocomplete="off">
+            </div>
+            <div class="form-group">
+                 <label>Data Arrivo Prevista</label>
+                 <input id="modal-data" type="date">
+            </div>
+        </div>
+        
+        <div class="form-check-group" style="margin-top: 15px;">
+            <input type="checkbox" id="modal-trasporto-incluso" checked>
+            <label for="modal-trasporto-incluso">Il trasporto è incluso nell'importo articoli?</label>
+        </div>
+
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label id="label-importo-articoli">Importo Articoli (IVA incl)</label>
+                <input id="modal-importo-articoli" type="text" placeholder="0,00">
+            </div>
+            <div class="form-group">
+                <label>Costo Trasporto (IVA incl)</label>
+                <input id="modal-importo-trasporto" type="text" placeholder="0,00" disabled>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button type="button" id="modal-order-cancel" class="btn">Annulla</button>
+            <button type="button" id="modal-order-save" class="btn primary">Salva Ordine</button>
+        </div>
+    </div>
+</div>
+
+<div id="add-to-order-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Aggiungi a Ordine Esistente</h3>
+        <p class="muted">Seleziona l'ordine a cui aggiungere gli articoli selezionati:</p>
+        <div class="form-group">
+            <select id="modal-select-ordine" style="width: 100%; padding: 10px;">
+                <option value="">-- Seleziona Ordine --</option>
+                {% for o in ordini_in_attesa %}
+                    <option value="{{ o.ordine_id }}">{{ o.azienda }} - Rif: {{ o.numero_conferma or 'Bozza' }}</option>
+                {% endfor %}
+                {% for o in ordini_confermati %}
+                    <option value="{{ o.ordine_id }}">{{ o.azienda }} - Rif: {{ o.numero_conferma }} (Confermato)</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="modal-actions">
+            <button type="button" id="modal-add-to-order-cancel" class="btn">Annulla</button>
+            <button type="button" id="modal-add-to-order-save" class="btn primary">Aggiungi</button>
+        </div>
+    </div>
+</div>
+
+<div id="upload-order-attachment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Allega File all'Ordine</h3>
+        <p class="muted">Stai caricando un file per l'ordine <strong id="modal-upload-order-number"></strong>.</p>
+        <form id="upload-order-form" method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="ordine_id" id="modal-upload-hidden-order-number">
+            <div class="form-group">
+                <label>Descrizione File</label>
+                <input id="modal-upload-descrizione" name="descrizione" value="Conferma d'ordine" required>
+            </div>
+            <div class="form-group">
+                <label>Seleziona File (PDF, Immagine...)</label>
+                <input id="modal-upload-file" name="file" type="file" required>
+            </div>
+            <div class="modal-actions">
+                <button type="button" id="modal-upload-cancel" class="btn">Annulla</button>
+                <button type="submit" class="btn primary">Carica e Salva</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="local-confirm-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content centered-content">
+        <div class="modal-icon warning">
+            <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        <h3 id="local-confirm-title">Conferma</h3>
+        <p id="local-confirm-message">Sei sicuro di voler procedere?</p>
+        <div class="modal-actions centered-actions">
+            <button type="button" id="local-confirm-cancel" class="btn">Annulla</button>
+            <button type="button" id="local-confirm-ok" class="btn danger">Conferma</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    
+    /* NUOVA REGOLA: Allinea i campi in basso se le etichette hanno altezze diverse */
+    .form-grid-2 .form-group {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+    }
+    
+    /* Opzionale: assicura che le label abbiano spazio */
+    .form-grid-2 .form-group label {
+        margin-bottom: 6px; /* Un po' più di spazio tra testo e casella */
+    }
+    /* Layout Modali */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: center; z-index: 9999; }
+    .modal-content { background: #fff; padding: 32px; border-radius: 16px; width: 95%; max-width: 500px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    
+    .modal-content h3 { margin: 0 0 16px 0; font-size: 20px; color: #1e293b; font-weight: 700; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+    
+    /* Form */
+    .form-group { margin-bottom: 16px; }
+    .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-check-group { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; background: #f8f9fa; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .form-check-group input { width: 18px; height: 18px; margin: 0; }
+    
+    /* Stile "Warning" per Svincola/Elimina */
+    .centered-content { text-align: center; max-width: 400px; }
+    .centered-actions { justify-content: center; }
+    .modal-icon { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px auto; font-size: 28px; }
+    .modal-icon.warning { background-color: #fef3c7; color: #d97706; }
+</style>
+
+<script>
+    
+    
+document.addEventListener('DOMContentLoaded', () => {
+    const itemsForm = document.getElementById('items-form');
+    if (!itemsForm) return; 
+    
+    const quoteId = itemsForm.dataset.quoteId;
+    let isEditing = false;
+    let originalOrderNumber = null;
+
+    // --- LOGICA COPIA NEGLI APPUNTI (Con Fallback per HTTP) ---
+    function fallbackCopyTextToClipboard(text) {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed"; 
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            document.execCommand('copy');
+        } catch (err) {
+            console.error('Fallback: Impossibile copiare', err);
+        }
+        document.body.removeChild(textArea);
+    }
+
+    function copyToClipboard(text) {
+        if (!navigator.clipboard) {
+            fallbackCopyTextToClipboard(text);
+            return Promise.resolve();
+        }
+        return navigator.clipboard.writeText(text);
+    }
+
+    document.body.addEventListener('click', function(e) {
+        const copyBtn = e.target.closest('.copy-order-btn');
+        if (!copyBtn) return;
+
+        const targetSelector = copyBtn.dataset.targetTable;
+        const table = document.querySelector(targetSelector);
+        if (!table) return;
+
+        let textToCopy = "";
+        const rows = table.querySelectorAll('tbody tr');
+        
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 3) {
+                const articolo = cells[0].textContent.trim();
+                const um = cells[1].textContent.trim();
+                const qta = cells[2].textContent.trim();
+                textToCopy += `• ${articolo} - Q.tà: ${qta} ${um}\n`;
+            }
+        });
+
+        if (textToCopy) {
+            copyToClipboard(textToCopy).then(() => {
+                const icon = copyBtn.querySelector('i');
+                const originalClass = icon.className;
+                icon.className = 'fas fa-check';
+                copyBtn.style.backgroundColor = '#d1fae5'; // Verde chiaro
+                
+                setTimeout(() => {
+                    icon.className = originalClass;
+                    copyBtn.style.backgroundColor = '';
+                }, 2000);
+            });
+        }
+    });
+
+    // --- MODALI ---
+    const orderModal = document.getElementById('order-modal');
+    const addToOrderModal = document.getElementById('add-to-order-modal');
+    const uploadModal = document.getElementById('upload-order-attachment-modal');
+    const uploadForm = document.getElementById('upload-order-form');
+    const confirmModal = document.getElementById('local-confirm-modal');
+
+    // --- ELEMENTI MODALE ORDINE ---
+    const modalTrasportoIncluso = document.getElementById('modal-trasporto-incluso');
+    const modalImportoTrasporto = document.getElementById('modal-importo-trasporto');
+    const labelImportoArticoli = document.getElementById('label-importo-articoli');
+
+
+    // --- HELPER: GESTIONE CONFERMA LOCALE (Svincola/Elimina) ---
+    // Questa funzione sostituisce il confirm() nativo e showConfirmation di base.html
+    let confirmCallback = null;
+    
+    function openLocalConfirm(title, message, callback) {
+        document.getElementById('local-confirm-title').textContent = title;
+        document.getElementById('local-confirm-message').innerHTML = message;
+        confirmCallback = callback;
+        confirmModal.style.display = 'flex';
+    }
+
+    document.getElementById('local-confirm-ok').addEventListener('click', () => {
+        confirmModal.style.display = 'none';
+        if (confirmCallback) confirmCallback();
+    });
+    
+    document.getElementById('local-confirm-cancel').addEventListener('click', () => {
+        confirmModal.style.display = 'none';
+        confirmCallback = null;
+    });
+
+    // --- LOGICA CHECKBOX TRASPORTO ---
+    function toggleTransportField() {
+        if (!modalTrasportoIncluso) return;
+        if (modalTrasportoIncluso.checked) {
+            modalImportoTrasporto.disabled = true;
+            modalImportoTrasporto.value = '0';
+            labelImportoArticoli.textContent = 'Importo Totale (Articoli + Trasporto, IVA incl)*';
+        } else {
+            modalImportoTrasporto.disabled = false;
+            labelImportoArticoli.textContent = 'Importo Articoli (IVA incl)*';
+        }
+    }
+    if (modalTrasportoIncluso) modalTrasportoIncluso.addEventListener('change', toggleTransportField);
+
+    // --- 1. APRIRE MODALE CREA NUOVO ---
+    const createOrderBtn = document.getElementById('btn-crea-ordine');
+    if (createOrderBtn) {
+        createOrderBtn.addEventListener('click', () => {
+            isEditing = false;
+            document.getElementById('order-modal-title').textContent = "Crea Nuovo Ordine Fornitore";
+            document.getElementById('modal-order-save').textContent = "Crea e Salva";
+            
+            // Reset campi
+            document.getElementById('modal-azienda').value = '';
+            document.getElementById('modal-numero').value = '';
+            document.getElementById('modal-data').value = '';
+            document.getElementById('modal-importo-articoli').value = '';
+            
+            modalTrasportoIncluso.checked = true;
+            toggleTransportField();
+            orderModal.style.display = 'flex';
+        });
+    }
+
+    // --- 2. APRIRE MODALE MODIFICA (FIXED) ---
+    document.body.addEventListener('click', function(e) {
+        const editBtn = e.target.closest('.edit-order-btn');
+        if (editBtn) {
+            isEditing = true;
+            originalOrderNumber = editBtn.dataset.ordineId;
+            
+            document.getElementById('order-modal-title').textContent = "Modifica Ordine";
+            document.getElementById('modal-order-save').textContent = "Salva Modifiche";
+            
+            document.getElementById('modal-azienda').value = editBtn.dataset.azienda;
+            document.getElementById('modal-numero').value = editBtn.dataset.numeroDisplay;
+            document.getElementById('modal-data').value = editBtn.dataset.data;
+            document.getElementById('modal-importo-articoli').value = editBtn.dataset.importoArticoli;
+            document.getElementById('modal-importo-trasporto').value = editBtn.dataset.importoTrasporto;
+
+            // Gestione booleano trasporto
+            const isIncluded = editBtn.dataset.trasportoIncluso === 'true';
+            modalTrasportoIncluso.checked = isIncluded;
+            toggleTransportField();
+            
+            orderModal.style.display = 'flex';
+        }
+    });
+
+    // --- 3. SALVATAGGIO ORDINE (Crea o Modifica) ---
+    document.getElementById('modal-order-save').addEventListener('click', () => {
+        const formData = new FormData();
+        formData.append('azienda', document.getElementById('modal-azienda').value);
+        formData.append('numero_conferma', document.getElementById('modal-numero').value);
+        formData.append('importo_articoli', document.getElementById('modal-importo-articoli').value);
+        formData.append('importo_trasporto', document.getElementById('modal-importo-trasporto').value);
+        formData.append('trasporto_incluso', modalTrasportoIncluso.checked ? 'true' : 'false');
+        formData.append('data_arrivo', document.getElementById('modal-data').value);
+        
+        let url;
+        if (isEditing) {
+            url = `/preventivo/${quoteId}/modifica-ordine`;
+            formData.append('ordine_id', originalOrderNumber);
+        } else {
+            url = `/preventivo/${quoteId}/salva-ordine`;
+            // Aggiungi le righe selezionate solo se è un nuovo ordine
+            const itemCheckboxes = itemsForm.querySelectorAll('input[name="selected_items"]:checked');
+            itemCheckboxes.forEach(cb => formData.append('indici_righe[]', cb.value));
+        }
+        
+        fetch(url, { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => { 
+                if (data.success) window.location.reload(); 
+                else alert('Errore: ' + data.error); 
+            });
+    });
+
+    // --- 4. GESTIONE SVINCOLA / ELIMINA (Con Modale Autonoma) ---
+    document.body.addEventListener('click', function(e) {
+        
+        // Svincola
+        const unlinkBtn = e.target.closest('.unlink-item-btn');
+        if (unlinkBtn) {
+            openLocalConfirm(
+                "Svincola Articolo", 
+                "Sei sicuro di voler rimuovere questo articolo dall'ordine? Tornerà tra i 'Non Ordinati'.", 
+                () => {
+                    const payload = { ordine_id: unlinkBtn.dataset.ordineId, item_index: parseInt(unlinkBtn.dataset.itemIndex, 10) };
+                    fetch(`/preventivo/${quoteId}/svincola-articolo`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                    }).then(res => res.json()).then(data => { if(data.success) window.location.reload(); });
+                }
+            );
+        }
+
+        // Elimina Ordine
+        const deleteBtn = e.target.closest('.delete-order-btn');
+        if (deleteBtn) {
+            openLocalConfirm(
+                "Elimina Ordine", 
+                `Stai per eliminare l'ordine <strong>${deleteBtn.dataset.numeroDisplay || 'Bozza'}</strong>.<br>Questa azione è irreversibile.`, 
+                () => {
+                    const formData = new FormData();
+                    formData.append('ordine_id', deleteBtn.dataset.ordineId);
+                    fetch(`/preventivo/${quoteId}/elimina-ordine`, { method: 'POST', body: formData })
+                        .then(res => res.json()).then(data => { if(data.success) window.location.reload(); });
+                }
+            );
+        }
+
+        // Upload Allegato
+        const uploadBtn = e.target.closest('.upload-order-attachment-btn');
+        if (uploadBtn) {
+            uploadForm.action = `/preventivo/${quoteId}/allega-a-ordine`;
+            document.getElementById('modal-upload-hidden-order-number').value = uploadBtn.dataset.ordineId;
+            document.getElementById('modal-upload-order-number').textContent = uploadBtn.dataset.numeroDisplay || 'Bozza';
+            uploadModal.style.display = 'flex';
+        }
+    });
+
+    // --- AGGIUNGI A ORDINE ESISTENTE ---
+    const addToOrderBtn = document.getElementById('btn-aggiungi-a-ordine');
+    if (addToOrderBtn) {
+        addToOrderBtn.addEventListener('click', () => { addToOrderModal.style.display = 'flex'; });
+    }
+    
+    document.getElementById('modal-add-to-order-save').addEventListener('click', () => {
+        const targetOrder = document.getElementById('modal-select-ordine').value;
+        if (!targetOrder) { alert("Seleziona un ordine."); return; }
+        
+        const formData = new FormData();
+        formData.append('target_ordine_id', targetOrder);
+        itemsForm.querySelectorAll('input[name="selected_items"]:checked').forEach(cb => formData.append('indici_righe[]', cb.value));
+        
+        fetch(`/preventivo/${quoteId}/aggiungi-a-ordine`, { method: 'POST', body: formData })
+            .then(res => res.json()).then(data => { if(data.success) window.location.reload(); });
+    });
+
+    // --- CHIUSURA MODALI (Tasto Annulla e Overlay) ---
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) overlay.style.display = 'none';
+        });
+    });
+    document.getElementById('modal-order-cancel').onclick = () => orderModal.style.display = 'none';
+    document.getElementById('modal-add-to-order-cancel').onclick = () => addToOrderModal.style.display = 'none';
+    document.getElementById('modal-upload-cancel').onclick = () => uploadModal.style.display = 'none';
+
+    // --- ABILITAZIONE BOTTONI IN ALTO ---
+    const itemCheckboxes = itemsForm.querySelectorAll('input[name="selected_items"]');
+    function updateButtonState() {
+        const anyChecked = [...itemCheckboxes].some(cb => cb.checked);
+        const hasExistingOrders = document.querySelector('#modal-select-ordine option[value]:not([value=""])');
+        if (createOrderBtn) createOrderBtn.disabled = !anyChecked;
+        if (addToOrderBtn) addToOrderBtn.disabled = !anyChecked || !hasExistingOrders;
+    }
+    itemCheckboxes.forEach(cb => cb.addEventListener('change', updateButtonState));
+    updateButtonState();
+
+    
+
+});
+</script>
+{% endblock %}

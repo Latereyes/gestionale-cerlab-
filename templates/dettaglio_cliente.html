@@ -1,0 +1,493 @@
+{% extends "base.html" %}    
+
+{% block extra_fab %}
+    <a href="javascript:void(0)" class="fab-btn task-fab" 
+       onclick="window.openQuickTask('{{ cliente.id_cliente }}', 'CLIENTE', '{{ cliente.cliente | replace("'", "\\'") }}')" 
+       title="Nuova Task Cliente">
+        <i class="fas fa-plus"></i>
+        <span class="fab-label">TASK</span>
+    </a>
+{% endblock %}
+
+{% block page_title %}
+<h1><i class="fas fa-folder-open"></i> Cartella Documenti
+    {% if cliente %}
+    <div class="header-client-info">
+        <i class="fas fa-user"></i>
+        <span>{{ cliente.cliente }}</span>
+    </div>
+    {% endif %}
+    {% if session.user_role in ['amministratore', 'ceo'] %}
+        <a href="{{ url_for('analisi_cliente', client_id=cliente.id_cliente) }}" class="btn btn-outline" title="Analisi Cliente" style="margin-left: 12px;">
+        <i class="fas fa-chart-pie"></i> Analisi Cliente
+        </a>
+    {% endif %}
+</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+
+<div class="card filter-card">
+    <div class="filter-body">
+        <label for="live-search-input">
+            <i class="fas fa-filter"></i>
+            Filtra documenti in questa pagina
+        </label>
+        <input type="text" 
+               id="live-search-input" 
+               placeholder="Scrivi qui per filtrare per numero preventivo, tipo documento, ecc..."
+               autocomplete="off">
+    </div>
+</div>
+{% if source_quote %}
+<div class="sticky-footer">
+    <div class="status-actions">
+        <div>
+            <label>&nbsp;</label>
+            {# Ora usiamo SOLO il preventivo da cui siamo arrivati #}
+            {{ workflow_navbar(source_quote, 'cliente') }}
+        </div>
+    </div>
+</div>
+{% endif %}
+<style>
+.filter-card {
+    margin-bottom: 24px;
+}
+.filter-body {
+    padding: 16px 24px;
+}
+.filter-body label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #475569;
+}
+.filter-body input {
+    width: 100%;
+}
+</style>
+
+<div class="card">
+    <div class="card-header">
+        <h3><i class="fas fa-id-card"></i> Documenti Anagrafici Cliente</h3>
+    </div>
+    <div class="altri-documenti-layout">
+        <div class="upload-form">
+            <h5><i class="fas fa-upload"></i> Carica Documento</h5>
+            <form action="{{ url_for('allega_documento_cliente', client_id=cliente.id_cliente) }}" method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label>Tipo Documento</label>
+                    <select name="tipo_documento" class="full-width" required>
+                        <option value="" disabled selected>Seleziona tipo...</option>
+                        <option value="Carta Identità">Carta d'Identità</option>
+                        <option value="Contratto Vendita">Contratto di Vendita</option>
+                        <option value="Autorizzazione Privacy">Autorizzazione Privacy</option>
+                        <option value="Visura Camerale">Visura Camerale</option>
+                        <option value="Altro">Altro</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>File</label>
+                    <input name="file" type="file" class="full-width" required>
+                </div>
+                <button type="submit" class="btn primary full-width">Carica in Anagrafica</button>
+            </form>
+        </div>
+        <div class="document-list-wrapper">
+            <div class="document-list">
+                {% if cliente.documenti_anagrafici %}
+                    {% for doc in cliente.documenti_anagrafici %}
+                    <div class="document-item">
+                        <div>
+                            <i class="fas fa-file-alt"></i>
+                            <span style="font-weight: 600; color: #0d6efd; margin-right: 10px;">{{ doc.tipo }}:</span>
+                            <span title="{{ doc.filename }}">{{ doc.filename }}</span>
+                        </div>
+                        
+                        <div class="document-actions">
+                            {% if doc.filename.lower().endswith('.pdf') %}
+                                <a href="{{ url_for('serve_allegato_cliente', client_id=cliente.id_cliente, filename=doc.filename, action='view') }}" target="_blank" class="btn icon-btn" title="Visualizza PDF"><i class="fas fa-eye"></i></a>
+                            {% else %}
+                                <a href="{{ url_for('serve_allegato_cliente', client_id=cliente.id_cliente, filename=doc.filename) }}" class="btn icon-btn" title="Scarica"><i class="fas fa-download"></i></a>
+                            {% endif %}
+                            <button type="button" 
+                                    class="btn icon-btn danger delete-client-doc-btn" 
+                                    title="Elimina"
+                                    data-client-id="{{ cliente.id_cliente }}"
+                                    data-filename="{{ doc.filename }}">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="muted">Nessun documento anagrafico caricato per questo cliente.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+
+{% for p in preventivi %}
+    {% set is_edile = p.tipo_preventivo == 'edile' %}
+    <div class="card">
+        <div class="card-header">
+            <h3>Preventivo: <strong>{{ p.numero }}</strong></h3>
+                    {% if session.user_role in ['amministratore', 'ceo'] %}
+                  <a href="{{ url_for('analisi_preventivo', quote_id=p.numero) }}" class="btn icon-btn" title="Analisi Dettagliata"><i class="fas fa-chart-pie"></i> Analisi preventivo</a>
+                  {% endif %}
+            
+            {% if is_edile %}
+                <a href="{{ url_for('editor_preventivo_edile', quote_id=p.numero) }}" class="btn btn-outline">
+                    <i class="fas fa-pencil-alt"></i> Modifica Preventivo Edile
+                </a>
+            {% else %}
+                <a href="{{ url_for('editor_preventivo', quote_id=p.numero) }}" class="btn btn-outline">
+                    <i class="fas fa-pencil-alt"></i> Modifica Preventivo
+                </a>
+            {% endif %}
+
+        </div>
+        
+        <div class="document-grid">
+            
+            {# 1. COLONNA: PREVENTIVI PDF #}
+            <div class="document-section">
+                <h4><i class="fas fa-file-pdf"></i> Preventivi Generati (PDF)</h4>
+                <div class="document-list">
+                    {% if p.storico_pdf %}
+                        {% for rev in p.storico_pdf %}
+                        <div class="document-item {{ 'primary' if rev.filename == p.pdf_attivo else '' }}">
+                            <div>
+                                <i class="fas fa-file-pdf"></i>
+                                <span title="{{ rev.filename }}"><strong>{{ rev.id }}:</strong> {{ rev.filename }}</span>
+                            </div>
+                            <div class="document-actions">
+                                <a href="{{ url_for('pdf_inline', filename=rev.filename) }}" target="_blank" class="btn icon-btn" title="Visualizza"><i class="fas fa-eye"></i></a>
+                                <button type="button" class="btn icon-btn danger delete-attachment-btn" data-quote-id="{{ p.numero }}" data-filename="{{ rev.filename }}" title="Elimina">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="muted">Nessun PDF generato.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            {# 2. COLONNA: BOLLE DI CONSEGNA (SISTEMA) #}
+            <div class="document-section">
+                <h4><i class="fas fa-truck"></i> Bolle di Consegna</h4>
+                <div class="document-list">
+                    {% if p.bolle %}
+                        {% for bolla in p.bolle %}
+                        <div class="document-item">
+                            <div>
+                                <i class="fas fa-receipt"></i>
+                                <span><strong>{{ bolla.id }}:</strong> {{ bolla.data }}</span>
+                            </div>
+                            <div class="document-actions">
+                                <a href="{{ url_for('export_bolla_pdf', quote_id=p.numero, bolla_id=bolla.id) }}" target="_blank" class="btn icon-btn" title="Visualizza/Stampa"><i class="fas fa-print"></i></a>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="muted">Nessuna bolla generata.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            {# 3. COLONNA: BOLLE FIRMATE (UPLOAD) #}
+            <div class="document-section">
+                <h4><i class="fas fa-signature"></i> Bolle Firmate</h4>
+                <div class="document-list">
+                    {% set ns_signed = namespace(found=false) %}
+                    {% if p.allegati %}
+                        {% for allegato in p.allegati %}
+                            {% if allegato.descrizione == 'Bolla di consegna firmata (Upload automatico)' %}
+                                {% set ns_signed.found = true %}
+                                <div class="document-item primary">
+                                    <div>
+                                        <i class="fas fa-file-signature"></i>
+                                        <span title="{{ allegato.filename }}">{{ allegato.filename }}</span>
+                                    </div>
+                                    <div class="document-actions">
+                                        <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=allegato.filename, action='view') }}" target="_blank" class="btn icon-btn" title="Visualizza"><i class="fas fa-eye"></i></a>
+                                        <button type="button" class="btn icon-btn danger delete-attachment-btn" data-quote-id="{{ p.numero }}" data-filename="{{ allegato.filename }}" title="Elimina">
+                                            <i class="fas fa-trash-alt"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    {% endif %}
+                    {% if not ns_signed.found %}
+                        <p class="muted">Nessuna bolla firmata caricata.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            {# 4. COLONNA: CONFERME ORDINE (Solo Standard) #}
+            {% if not is_edile %}
+            <div class="document-section">
+                <h4><i class="fas fa-clipboard-check"></i> Conferme Ordine</h4>
+                <div class="document-list">
+                    {% set found_attachments = [] %}
+                    {% if p.ordini_fornitore %}
+                        {% for ordine in p.ordini_fornitore %}
+                            {% if ordine.allegati %}
+                                {% for allegato in ordine.allegati %}
+                                    {% set _ = found_attachments.append(1) %}
+                                    <div class="document-item">
+                                        <div>
+                                            <i class="fas fa-file-invoice"></i>
+                                            <span title="{{ ordine.numero_conferma }}: {{ allegato.descrizione }}">
+                                                <strong>{{ ordine.numero_conferma }}:</strong> {{ allegato.descrizione }}
+                                            </span>
+                                        </div>
+                                        <div class="document-actions">
+                                            <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=allegato.filename, action='view') }}" target="_blank" class="btn icon-btn" title="Visualizza"><i class="fas fa-eye"></i></a>
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% endfor %}
+                    {% endif %}
+                    {% if not found_attachments %}
+                        <p class="muted">Nessuna conferma allegata.</p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            
+            {# 5. COLONNA: FATTURE EMESSE #}
+            <div class="document-section">
+                <h4><i class="fas fa-file-invoice-dollar"></i> Fatture Emesse</h4>
+                <div class="document-list">
+                    {% if p.fatture_allegate %}
+                        {% for fattura in p.fatture_allegate %}
+                            <div class="document-item">
+                                <div>
+                                    <i class="fas fa-file-alt"></i>
+                                    <span>{{ fattura.filename }}</span>
+                                </div>
+                                <div class="document-actions">
+                                    <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=fattura.filename, action='view') }}" target="_blank" class="btn icon-btn" title="Visualizza"><i class="fas fa-eye"></i></a>
+                                </div>
+                           </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="muted">Nessuna fattura emessa.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+        </div> {# Chiusura document-grid #}
+
+        {# Nuovo blocco separato per Altri Documenti #}
+        <div class="document-section" style="border-top: 1px solid #e2e8f0; padding: 24px;">
+            <h4><i class="fas fa-paperclip"></i> Altri Documenti</h4>
+            <div class="altri-documenti-compact">
+                <div class="upload-form-inline">
+                    <form action="{{ url_for('allega_documento', quote_id=p.numero) }}" method="POST" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <input name="descrizione" placeholder="Descrizione file..." class="full-width" required>
+                        </div>
+                        <div class="form-group" style="display: flex; gap: 5px;">
+                            <input name="file" type="file" required style="font-size: 11px; flex: 1;">
+                            <button type="submit" class="btn primary" style="padding: 4px 8px;"><i class="fas fa-upload"></i></button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="document-list" style="margin-top: 15px; border-top: 1px dashed #e2e8f0; padding-top: 10px;">
+                    {% set ns_others = namespace(found=false) %}
+                    {% if p.allegati %}
+                        {% for allegato in p.allegati %}
+                            {# Mostra l'allegato solo se NON è una bolla firmata #}
+                            {% if allegato.descrizione != 'Bolla di consegna firmata (Upload automatico)' %}
+                                {% set ns_others.found = true %}
+                                <div class="document-item">
+                                    <div>
+                                        <i class="fas fa-file"></i>
+                                        <span title="{{ allegato.filename }}">{{ allegato.descrizione }}</span>
+                                    </div>
+                                    <div class="document-actions">
+                                        <a href="{{ url_for('serve_allegato', quote_id=p.numero, filename=allegato.filename, action='view') }}" target="_blank" class="btn icon-btn"><i class="fas fa-eye"></i></a>
+                                        <button type="button" class="btn icon-btn danger delete-attachment-btn" data-quote-id="{{ p.numero }}" data-filename="{{ allegato.filename }}">
+                                            <i class="fas fa-trash-alt"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    {% endif %}
+                    {% if not ns_others.found %}
+                        <p class="muted" style="font-size: 12px;">Nessun documento generico.</p>
+                    {% endif %}
+                </div>
+
+            </div>
+        </div>
+    </div> {# Chiusura card preventivo #}
+{% endfor %}
+</div>
+
+<style>
+/* Stili base (invariati) */
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.empty-state { text-align: center; padding: 40px; }
+
+/* ELIMINA I VECCHI STILI .altri-documenti-layout, .upload-form E SOSTITUISCI CON QUESTI */
+
+.altri-documenti-compact {
+    display: flex;
+    flex-direction: column;
+}
+
+.upload-form-inline {
+    background: #f1f5f9;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+.upload-form-inline .form-group {
+    margin-bottom: 8px;
+}
+
+.upload-form-inline input {
+    font-size: 13px;
+    padding: 6px;
+}
+
+/* Assicurati che la griglia gestisca bene il wrapping se ci sono 5 sezioni */
+.document-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 1px;
+    background-color: #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+}
+.document-section {
+    background-color: #fff;
+    padding: 24px;
+}
+.document-section h4 { margin: 0 0 16px 0; display: flex; align-items: center; gap: 8px; }
+.document-list { display: flex; flex-direction: column; gap: 8px; }
+.document-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 8px; background-color: #f8f9fa; color: var(--ink); text-decoration: none; transition: background-color 0.2s; }
+.document-item:hover { background-color: #e9ecef; }
+.document-item.primary { background-color: #e7f5e9; color: #198754; font-weight: 600; }
+.document-item i { margin-right: 10px; color: #6c757d; }
+.document-item.primary i { color: #198754; }
+
+/* LAYOUT A DUE COLONNE PER "ALTRI DOCUMENTI" */
+.altri-documenti-layout { display: flex; gap: 24px; align-items: flex-start; padding: 24px; }
+.upload-form { flex-basis: 320px; flex-shrink: 0; padding-right: 24px; border-right: 1px dashed #ced4da; }
+.upload-form h5 { margin: 0 0 16px 0; font-size: 14px; font-weight: 600; }
+.document-list-wrapper { flex: 1; min-width: 0; }
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; font-size: 12px; margin-bottom: 4px; }
+.full-width { width: 100%; }
+.btn.icon-btn { padding: 6px; line-height: 1; }
+
+/* Correzione testo lungo (ellipsis) */
+.document-item > div:first-child { min-width: 0; display: flex; align-items: center; }
+.document-item > div:first-child span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.document-actions {
+    display: flex;
+    gap: 4px; /* Spazio tra i bottoni */
+}
+.btn.icon-btn.danger {
+    background-color: #fde8e8;
+    color: #dc3545;
+}
+.btn.icon-btn.danger:hover {
+    background-color: #dc3545;
+    color: #fff;
+}
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('live-search-input');
+    const contentContainer = document.querySelector('.editor-container');
+    
+    const cardsToFilter = Array.from(contentContainer.querySelectorAll('.card')).filter(card => {
+        return card.querySelector('h3 strong'); 
+    });
+
+    const searchForm = searchInput.closest('form');
+    if (searchForm) {
+        searchForm.addEventListener('submit', (e) => e.preventDefault());
+    }
+
+    searchInput.addEventListener('input', () => {
+        const searchTerm = searchInput.value.toLowerCase().trim();
+        if (searchTerm.length > 0 && searchTerm.length < 3) return;
+
+        cardsToFilter.forEach(card => {
+            const cardText = card.textContent.toLowerCase();
+            card.style.display = (cardText.includes(searchTerm) || searchTerm === "") ? '' : 'none';
+        });
+    });
+
+    // GESTIONE CLIC UNIFICATA (Delegazione Eventi)
+    contentContainer.addEventListener('click', (e) => {
+        
+        // A. ELIMINAZIONE ALLEGATO PREVENTIVO
+        const deleteAttachBtn = e.target.closest('.delete-attachment-btn');
+        if (deleteAttachBtn) {
+            const quoteId = deleteAttachBtn.dataset.quoteId;
+            const filename = deleteAttachBtn.dataset.filename;
+
+            showConfirmation(
+                'Conferma Eliminazione',
+                `Sei sicuro di voler eliminare definitivamente l'allegato "${filename}"?`,
+                () => {
+                    const formData = new FormData();
+                    formData.append('filename', filename);
+                    fetch(`/preventivo/${quoteId}/elimina-allegato`, { method: 'POST', body: formData })
+                    .then(res => res.json())
+                    .then(data => data.success ? window.location.reload() : showNotification('Errore', data.error))
+                    .catch(() => showNotification('Errore', 'Errore di comunicazione col server.'));
+                }
+            );
+            return;
+        }
+
+        // B. ELIMINAZIONE DOCUMENTO ANAGRAFICO CLIENTE
+        const deleteClientDocBtn = e.target.closest('.delete-client-doc-btn');
+        if (deleteClientDocBtn) {
+            const clientId = deleteClientDocBtn.dataset.clientId;
+            const filename = deleteClientDocBtn.dataset.filename;
+
+            showConfirmation(
+                'Conferma Eliminazione Anagrafica',
+                `Vuoi eliminare "${filename}" dall'anagrafica del cliente?`,
+                () => {
+                    const formData = new FormData();
+                    formData.append('filename', filename);
+                    fetch(`/cliente/${clientId}/elimina-documento`, { method: 'POST', body: formData })
+                    .then(res => res.json())
+                    .then(data => data.success ? window.location.reload() : showNotification('Errore', data.error))
+                    .catch(() => showNotification('Errore', 'Errore di comunicazione col server.'));
+                }
+            );
+        }
+    });
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,652 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1></i> La tua Dashboard</h1>
+{% endblock %}
+{% block extra_fab %}
+    <a href="{{ url_for('allert_page') }}" class="fab-btn alert-fab" title="Centro Notifiche">
+        <i class="fas fa-exclamation"></i>
+        <span class="fab-label">ALERT</span>
+    </a>
+<a href="{{ url_for('tasks_page') }}" class="fab-btn task-fab" title="Task e Report" style="background: #6610f2;">
+        <i class="fas fa-tasks"></i>
+        <span class="fab-label">TASKS</span>
+    </a>
+{% endblock %}
+
+
+{% block body %}
+
+
+{% macro render_table_header() %}
+<thead>
+    <tr>
+      <th>Preventivo</th>
+      <th data-sortable>Cliente <i class="sort-arrow fas fa-sort"></i></th>
+      <th data-sortable>Stato <i class="sort-arrow fas fa-sort"></i></th>
+      <th data-sortable>Ordini<i class="sort-arrow fas fa-sort"></i></th> 
+      <th data-sortable>Consegna<i class="sort-arrow fas fa-sort"></i></th>
+      <th data-sortable>Saldo<i class="sort-arrow fas fa-sort"></i></th>
+      <th data-sortable>Fattura<i class="sort-arrow fas fa-sort"></i></th>
+      <th>Azioni</th>
+    </tr>
+</thead>
+{% endmacro %}
+
+{% macro render_quote_row(p) %}
+<tr>
+  <td>
+    <strong>{{ p.numero }}</strong><br>
+    <small class="muted">{{ p.data }}</small>
+  </td>
+  <td>{{ p.cliente }}</td>
+  <td>
+    <span class="status-badge status-principale status-{{ p.stato | lower | replace(' ', '-') }}">{{ p.stato }}</span>
+  </td>
+  
+  <td>
+      {% if p.stato in ['Confermato', 'In Lavorazione'] %}
+          {% if p.articoli_da_ordinare_count > 0 %}
+              <span class="status-badge status-annullato">Da Ordinare</span>
+          {% elif p.articoli_in_attesa_conferma > 0 %}
+              <span class="status-badge status-in-lavorazione">In Attesa</span>
+          {% elif p.articoli_da_ordinare_totale > 0 %}
+              <span class="status-badge status-confermato">Ordinato</span>
+          {% else %}
+              <span class="status-badge status-nd">N/D</span>
+          {% endif %}
+      {% else %}
+          <span class="status-badge status-nd">N/D</span>
+      {% endif %}
+  </td>
+  <td>
+    {% set stato_consegna = p.stato_consegna_globale | default('N/D') %}
+    <span class="status-badge status-{{ stato_consegna | lower | replace(' ', '-') | replace('/', '') }}">{{ stato_consegna }}</span>
+  </td>
+  <td>
+    {% set stato_saldo = p.stato_pagamento_globale | default('N/D') %}
+    <span class="status-badge status-{{ stato_saldo | lower | replace(' ', '-') | replace('/', '') }}">{{ stato_saldo }}</span>
+  </td>
+    <td>
+   {% if p.stato in ['Bozza', 'Inviato'] %}
+        <span class="status-badge status-nd">N/D</span>
+    {% elif p.stato_fattura == 'Fatturato' %}
+        <span class="status-badge status-fattura-emessa">Emessa</span>
+    {% elif p.stato_fattura == 'Fatturato Parziale' %}
+        <span class="status-badge status-in-attesa-di-fattura">In Attesa</span>
+    {% else %}
+        <span class="status-badge status-in-attesa-di-fattura">In Attesa</span>
+    {% endif %}
+  </td>
+  <td class="row-actions">
+      <a href="{{ url_for('editor_preventivo', quote_id=p.numero) }}" class="btn icon-btn primary" title="Modifica Preventivo"><i class="fas fa-arrow-right"></i></a>
+  </td>
+</tr>
+{% endmacro %}
+
+{% macro render_empty_state(role) %}
+<tr>
+  <td colspan="7">
+    <div class="empty-state">
+      <i class="fas fa-file-signature"></i>
+      {% if role == 'venditore' %}
+          <h4>Nessun preventivo attivo</h4>
+          <p>Sembra che tu non abbia preventivi in lavorazione. Inizia creandone uno nuovo!</p>
+      {% else %}
+          <h4>Nessun preventivo personale</h4>
+          <p>Non hai preventivi attivi assegnati direttamente a te.</p>
+      {% endif %}
+    </div>
+  </td>
+</tr>
+{% endmacro %}
+<!-- Font Awesome per le icone -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="dashboard-container">
+
+<div class="tagbox-container">
+      <div class="tagbox-header">
+          <span><i class="fas fa-comment-alt"></i> TAG BOARD</span>
+          <div class="tagbox-hints">
+              <small>Usa @ per taggare un collega</small>
+              <small>Usa # per richiamare un cliente o un preventivo</small>
+          </div>
+      </div>
+      <div class="tagbox-content" id="tagboxContent">
+      </div>
+      <div class="tagbox-input-area">
+          <input type="text" id="tagboxInput" placeholder="Scrivi un messaggio veloce..." autocomplete="off">
+          <div id="mentionSuggestions" class="mention-list"></div>
+          <button id="sendShoutBtn"><i class="fas fa-paper-plane"></i></button>
+      </div>
+  </div>
+  </div>
+
+  <!-- Contenitore per i menu circolari -->
+  <div class="circular-layout-wrapper">
+    <!-- Menu Principale -->
+    <div class="circular-menu main-menu">
+      <!-- Pulsante Centrale -->
+      <a href="{{ url_for('dashboard_clienti') }}" class="center-item" title="Visualizza e gestisci i preventivi per cliente">
+        <i class="fas fa-address-book"></i>
+        <span>Preventivi Cliente</span>
+      </a>
+
+
+      <!-- Pulsanti Satellite -->
+        <div class="item" style="--i:0;">
+        {% if session.user_role != 'segreteria' %}
+            {% if session.user_role in ['amministratore', 'ceo'] %}
+            <a href="javascript:void(0);" onclick="openQuoteTypeModal()" class="item-link black-slice" title="Crea un nuovo preventivo">
+              <i class="fas fa-plus"></i>
+              <span>Nuovo Preventivo</span>
+            </a>
+            {% else %}
+            <a href="{{ url_for('cerca_cliente', action='new_quote') }}" class="item-link black-slice" title="Crea un nuovo preventivo">
+              <i class="fas fa-plus"></i>
+              <span>Nuovo Preventivo</span>
+            </a>
+            {% endif %}
+        {% endif %}
+      </div>
+      <div class="item" style="--i:1;">
+        <a href="{{ url_for('dashboard_ordini') }}" class="item-link" title="Gestisci gli ordini fornitore e le conferme">
+          <i class="fas fa-box-open"></i>
+          <span>Conferma Ordine</span>
+        </a>
+      </div>
+      <div class="item" style="--i:2;">
+        <a href="{{ url_for('dashboard_consegne') }}" class="item-link" title="Traccia lo stato delle consegne in corso">
+          <i class="fas fa-truck"></i>
+          <span>Consegna Ordine</span>
+        </a>
+      </div>
+      <div class="item" style="--i:3;">
+        <a href="{{ url_for('dashboard_pagamenti') }}" class="item-link" title="Monitora i pagamenti e le scadenze">
+          <i class="fas fa-coins"></i>
+          <span>Saldo Acconto</span>
+        </a>
+      </div>
+      <div class="item" style="--i:4;">
+        <a href="{{ url_for('dashboard_fatture') }}" class="item-link" title="Visualizza i preventivi da fatturare">
+          <i class="fas fa-file-invoice"></i>
+          <span>Fatture</span>
+        </a>
+      </div>
+    </div>
+      
+
+    <!-- Menu Azioni Speciali (CEO/Admin) -->
+    {% if session.user_role in ['amministratore', 'ceo'] %}
+    <div class="circular-menu ceo-menu">
+      <div class="item">
+        <a href="{{ url_for('gestisci_utenti') }}" class="item-link inverted" title="Aggiungi o modifica gli account utente">
+          <i class="fas fa-users-cog"></i>
+          <span>Gestione Utenti</span>
+        </a>
+      </div>
+      <div class="item">
+        <a href="{{ url_for('dashboard_ceo') }}" class="item-link inverted" title="Accedi alle metriche di business avanzate">
+          <i class="fas fa-chart-line"></i>
+          <span>Modalità CEO</span>
+        </a>
+      </div>
+      <div class="item">
+        <a href="{{ url_for('gestisci_margini') }}" class="item-link inverted" title="Personalizza le logiche di ricarico">
+          <i class="fas fa-cogs"></i>
+          <span>Margini</span>
+        </a>
+      </div>
+      <div class="item">
+        <a href="javascript:void(0);" id="openConfirmModalBtn" class="item-link inverted danger-style" 
+           title="Forza l'aggiornamento di tutti i preventivi">
+          <i class="fas fa-sync-alt"></i>
+          <span>Aggiorna Stati</span>
+        </a>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  
+
+  <!-- 5. Card Archivio Clienti -->
+<div class="card archive-card">
+    <p>Gestione documentale e anagrafica clienti</p>
+    <div style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
+        <a href="{{ url_for('anagrafica_clienti') }}" class="btn with-icon" style="background-color: #0d6efd;">
+            <i class="fas fa-address-card"></i> Anagrafica Clienti
+        </a>
+        <a href="{{ url_for('archivio_globale') }}" class="btn with-icon">
+            <i class="fas fa-archive"></i>Archivio Preventivi
+        </a>
+    </div>
+  </div>
+<div id="confirmModalOverlay" class="modal-overlay">
+  <div id="confirmModal" class="modal-content">
+    <h3><i class="fas fa-exclamation-triangle"></i> Conferma Operazione</h3>
+    <p>Sei sicuro di voler ricalcolare lo stato di <strong>TUTTI</strong> i preventivi? L'operazione potrebbe richiedere alcuni secondi. Assicurarsi che nessun operatore stia lavorando sul gestionale.</p>
+    <div class="modal-actions">
+      <button type="button" id="modalCancel" class="btn secondary">Annulla</button>
+      <a href="{{ url_for('refresh_all_quotes') }}" id="modalConfirm" class="btn danger with-icon">
+        <i class="fas fa-sync-alt"></i> Sì, aggiorna
+      </a>
+    </div>
+  </div>
+</div>
+<div id="quoteTypeModalOverlay" class="modal-overlay">
+  <div class="modal-content" style="max-width: 400px; text-align: center;">
+    <h3><i class="fas fa-hammer"></i> Tipo di Preventivo</h3>
+    <p>Scegli il flusso di lavoro desiderato:</p>
+    <div class="modal-actions" style="justify-content: center; flex-direction: column; gap: 10px;">
+      <a href="{{ url_for('cerca_cliente', action='new_quote_edile') }}" class="btn primary" style="width: 100%; justify-content: center;">
+        <i class="fas fa-hard-hat"></i> Preventivo EDILE
+      </a>
+      <a href="{{ url_for('cerca_cliente', action='new_quote') }}" class="btn" style="width: 100%; justify-content: center; border: 1px solid #0d6efd; color: #0d6efd;">
+        <i class="fas fa-truck-loading"></i> Solo FORNITURA
+      </a>
+      <button type="button" onclick="closeQuoteTypeModal()" class="btn secondary" style="width: 100%; margin-top: 10px;">Annulla</button>
+    </div>
+  </div>
+</div>
+
+<script>
+    window.openQuoteTypeModal = () => { document.getElementById('quoteTypeModalOverlay').classList.add('visible'); };
+    window.closeQuoteTypeModal = () => { document.getElementById('quoteTypeModalOverlay').classList.remove('visible'); };
+</script>
+
+<style>
+/* --- Stili per Tabelle Raggruppate --- */
+.venditore-group-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #0d6efd; /* Blu */
+    margin: 24px 0 8px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.card-body > .venditore-group-title:first-child {
+    margin-top: 0;
+}
+.indented-table {
+    margin-bottom: 16px;
+}
+  /* --- STEP 1: Miglioramento dello sfondo --- */
+  body {
+    min-height: 100vh;
+  }
+
+  /* Stili Generali */
+  .dashboard-container { max-width: 1200px; margin: 0 auto; padding: 24px; font-family: 'Inter', sans-serif; }
+  .card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; }
+  .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
+  .card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+  .card-body { padding: 24px; }
+  .btn.with-icon { display: inline-flex; align-items: center; gap: 8px; }
+  .btn.icon-btn { padding: 8px; width: 36px; height: 36px; font-size: 14px; }
+  .muted { color: #64748b; }
+
+  .circular-layout-wrapper { display: flex; flex-direction: column; align-items: center; gap: 64px; margin: 48px 0 64px; min-height: 500px; }
+  .circular-menu { position: relative; display: flex; justify-content: center; align-items: center; }
+  .main-menu { width: 600px; height: 600px; }
+
+  /* Stile 3D per i pulsanti */
+  .center-item { position: absolute; width: 200px; height: 200px; background: #eef2f7; border-radius: 50%; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; color: #334155; text-decoration: none; cursor: pointer; z-index: 10; padding: 12px; transition: all 0.2s ease-in-out; border: 1px solid rgba(255, 255, 255, 0.6); box-shadow: 6px 6px 12px #7e8c9a, -6px -6px 12px #a0b0c6; }
+  .center-item:hover { transform: scale(1.03) translateY(-5px); box-shadow: 10px 10px 20px #7e8c9a, -10px -10px 20px #a0b0c6; }
+  .center-item:active { transform: scale(0.98); box-shadow: inset 4px 4px 8px #7e8c9a, inset -4px -4px 8px #a0b0c6; }
+  .center-item i { font-size: 42px; margin-bottom: 12px; color: #1a202c; }
+  .center-item span { font-weight: 600; font-size: 18px; line-height: 1.2; }
+  .item { position: absolute; top: 50%; left: 50%; width: 146px; height: 146px; margin: -73px; transition: transform 0.3s ease; }
+  .item-link { width: 100%; height: 100%; background: #eef2f7; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #334155; text-decoration: none; transition: all 0.2s ease-in-out; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.6); box-shadow: 5px 5px 10px #7e8c9a, -5px -5px 10px #a0b0c6; }
+  .item-link:hover { transform: translateY(-5px); box-shadow: 8px 8px 16px #7e8c9a, -8px -8px 16px #a0b0c6; }
+  .item-link:active { transform: translateY(1px); box-shadow: inset 3px 3px 6px #7e8c9a, inset -3px -3px 6px #a0b0c6; }
+  .item-link i { font-size: 28px; margin-bottom: 8px; }
+  .item-link span { font-size: 13px; font-weight: 500; line-height: 1.2; }
+  .main-menu .item { --angle: calc(var(--i) * 72deg - 90deg); transform: rotate(var(--angle)) translate(235px) rotate(calc(-1 * var(--angle))); }
+
+  /* Menu CEO */
+  .ceo-menu { position: static; width: 100%; height: auto; flex-wrap: wrap; gap: 30px; }
+  .ceo-menu .item { position: static; transform: none; margin: 0; width: 150px; height: 150px; }
+  .ceo-menu .item-link { border-radius: 30px; }
+  .ceo-menu .item-link i { font-size: 32px; }
+  .ceo-menu .item-link span { font-size: 15px; }
+
+  /* Pulsanti scuri */
+  .item-link.black-slice, .item-link.inverted { background: #2d3748; color: #f8fafc; border-color: rgba(255, 255, 255, 0.1); box-shadow: 5px 5px 10px #1c232e, -5px -5px 10px #3e4b62; }
+  .item-link.black-slice:hover, .item-link.inverted:hover { background-color: #3a475c; box-shadow: 8px 8px 16px #1c232e, -8px -8px 16px #3e4b62; }
+  .item-link.black-slice:active, .item-link.inverted:active { box-shadow: inset 3px 3px 6px #1c232e, inset -3px -3px 6px #3e4b62; }
+  .item-link.black-slice i, .item-link.black-slice span, .item-link.inverted i, .item-link.inverted span { color: #f8fafc; }
+
+  /* Stili Tabella */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 12px 16px; text-align: left; vertical-align: middle; }
+  th { font-size: 12px; font-weight: 600; color: #475569; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; }
+  tbody tr:not(:last-child) { border-bottom: 1px solid #f1f5f9; }
+  .row-actions { display: flex; gap: 8px; flex-wrap: nowrap; }
+
+  /* --- Badge di Stato (Stile unificato da dashboard_clienti) --- */
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 20px; /* Stile "pillola" */
+  color: #fff; /* Testo bianco di default */
+  min-width: 80px;
+  text-align: center;
+  text-transform: capitalize; /* Manteniamo questo per coerenza */
+}
+.status-badge.status-principale {
+  border-radius: 6px; /* Questo lo rende più squadrato */
+  font-weight: 700;   /* Già che ci siamo, lo rendiamo più evidente */
+  font-size: 12px;
+}
+
+/* Colori specifici (presi da dashboard_clienti) */
+.status-bozza {
+  background-color: #6c757d;
+}
+.status-inviato {
+  background-color: #0d6efd;
+}
+.status-confermato, .status-chiuso, .status-completato, .status-saldato {
+  background-color: #198754;
+}
+.status-in-lavorazione, .status-parziale {
+  background-color: #ffc107;
+  color: #000; /* Testo nero per leggibilità sul giallo */
+}
+.status-annullato, .status-da-saldare, .status-da-consegnare {
+  background-color: #dc3545;
+}
+.status-nd {
+  background-color: #e9ecef;
+  color: #495057; /* Testo scuro per leggibilità sul grigio chiaro */
+}
+.status-in-attesa-di-fattura { 
+    background-color: #ffc107; 
+    color: #000; 
+}
+.status-fatturato-parziale { background-color: #0d6efd; } /* Blu */
+.status-fattura-emessa { 
+    background-color: #198754; 
+}
+.status-non-disponibile { 
+    background-color: #3f4348; 
+}
+  
+  /* Stato Vuoto per la Tabella */
+  .empty-state { text-align: center; padding: 48px; }
+  .empty-state i { font-size: 48px; color: #cbd5e1; margin-bottom: 16px; }
+  .empty-state h4 { font-size: 18px; font-weight: 600; margin: 0 0 8px 0; }
+  .empty-state p { margin: 0; color: #64748b; }
+
+  /* Card Archivio */
+  .archive-card { text-align: center; padding: 24px; }
+  .archive-card p { margin: 0 0 16px 0; color: #475569; }
+
+  /* Layout responsive per schermi piccoli */
+  @media (max-width: 768px) {
+    .circular-layout-wrapper { gap: 24px; margin: 24px 0 32px; min-height: unset; }
+    .main-menu { position: static; width: 100%; height: auto; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+    .ceo-menu { margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 24px; flex-direction: column; align-items: center; }
+    .item { position: static; transform: none !important; width: 100%; max-width: 400px; height: auto; margin: 0; }
+    .center-item, .item-link { width: 100%; max-width: 400px; height: auto; border-radius: 12px; flex-direction: row; justify-content: flex-start; gap: 20px; padding: 16px; text-align: left; }
+    .center-item i, .item-link i { font-size: 24px; margin-bottom: 0; }
+    .center-item span, .item-link span { font-size: 16px; }
+    .center-item:hover, .item-link:hover { transform: scale(1.02); }
+    .center-item:active, .item-link:active { transform: scale(0.98); box-shadow: inset 3px 3px 6px #7e8c9a, inset -3px -3px 6px #a0b0c6; }
+  }
+  .ceo-menu .item-link.danger-style {
+      background: #dc3545; /* Rosso */
+      color: #fff;
+      box-shadow: 5px 5px 10px #b02a37, -5px -5px 10px #ff4053;
+  }
+  .ceo-menu .item-link.danger-style:hover {
+      background-color: #c82333;
+      box-shadow: 8px 8px 16px #b02a37, -8px -8px 16px #ff4053;
+  }
+  .ceo-menu .item-link.danger-style:active {
+      box-shadow: inset 3px 3px 6px #b02a37, inset -3px -3px 6px #ff4053;
+  }
+.ceo-menu .item-link.danger-style:active {
+      box-shadow: inset 3px 3px 6px #b02a37, inset -3px -3px 6px #ff4053;
+  }
+  
+  /* --- Stili per Modale di Conferma --- */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    display: none; /* Nascosto di default */
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(5px);
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+  }
+  .modal-overlay.visible {
+    display: flex; /* Mostra la modale */
+    opacity: 1;
+  }
+  .modal-content {
+    background: #ffffff;
+    padding: 24px 32px;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    width: 90%;
+    max-width: 450px;
+    transform: scale(0.95);
+    transition: transform 0.2s ease-in-out;
+  }
+  .modal-overlay.visible .modal-content {
+      transform: scale(1);
+  }
+  .modal-content h3 {
+    margin-top: 0;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .modal-content h3 .fa-exclamation-triangle {
+    color: #dc3545; /* Rosso pericolo */
+  }
+  .modal-content p {
+    font-size: 15px;
+    line-height: 1.6;
+    color: #475569;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+  }
+  /* Stili per i bottoni (dovrebbero ereditare da .btn, ma aggiungiamo fallback) */
+  .btn.secondary {
+      background-color: #6c757d;
+      color: #fff;
+      border: none;
+  }
+  .btn.danger {
+      background-color: #dc3545;
+      color: #fff;
+      border: none;
+  }
+  /* --- Stili per tabelle ordinabili --- */
+th[data-sortable] {
+    cursor: pointer;
+    user-select: none; /* Impedisce di selezionare il testo dell'intestazione */
+}
+th[data-sortable]:hover {
+    background-color: #f1f5f9; /* Leggero sfondo al passaggio del mouse */
+}
+.sort-arrow {
+    margin-left: 5px;
+    color: #cbd5e1; /* Grigio chiaro (inattivo) */
+    width: 10px; /* Dà spazio all'icona per allinearsi */
+    display: inline-block;
+    text-align: center;
+}
+th[data-sortable].sort-asc .sort-arrow,
+th[data-sortable].sort-desc .sort-arrow {
+    color: #334155; /* Colore scuro (attivo) */
+}  
+
+
+
+/* Ottimizzazione Mobile */
+@media (max-width: 768px) {
+    .floating-action-group {
+        bottom: 20px;
+        right: 20px;
+    }
+    .fab-btn {
+        width: 55px;
+        height: 55px;
+        font-size: 20px;
+    }
+}
+
+  /* STILI PER TAGBOX */
+  .tagbox-container {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    margin-bottom: 30px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+.tagbox-header {
+    background: #f8fafc;
+    padding: 8px 15px; /* Leggermente ridotto per compattezza */
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 700;
+    font-size: 12px;
+}
+
+/* NUOVA CLASSE PER AVVICINARE LE ISTRUZIONI */
+.tagbox-hints {
+    display: flex;
+    flex-direction: column; /* Mette le scritte una sotto l'altra */
+    align-items: flex-end;  /* Le allinea a destra */
+    gap: 0px;               /* DISTANZA TRA LE RIGHE: 0px per la massima vicinanza */
+    line-height: 1.1;       /* Riduce lo spazio verticale del testo */
+}
+
+.tagbox-hints small {
+    color: #64748b;
+    font-weight: 500;
+}
+.tagbox-content {
+    height: 180px;
+    overflow-y: auto;
+    padding: 10px;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.shout { padding: 4px 8px; border-radius: 6px; position: relative; }
+.shout.pinned { background: #fffbeb; border-left: 4px solid #f59e0b; }
+.shout-user { font-weight: 800; color: #0d6efd; margin-right: 5px; }
+.shout-time { font-size: 10px; color: #94a3b8; }
+.shout-mention { background: #dbeafe; color: #1e40af; padding: 0 4px; border-radius: 4px; font-weight: 600; }
+.pin-btn { cursor: pointer; color: #cbd5e1; float: right; font-size: 11px; }
+.pin-btn.active { color: #f59e0b; }
+
+.tagbox-input-area {
+    display: flex;
+    padding: 8px;
+    background: #f1f5f9;
+    gap: 10px;
+}
+.tagbox-input-area input {
+    flex: 1;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+}
+/* SUGGERIMENTI MENZIONI @ */
+  .tagbox-input-area { position: relative; }
+  .mention-list {
+      position: absolute;
+      bottom: 100%;
+      left: 8px;
+      right: 8px;
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+      display: none;
+      max-height: 150px;
+      overflow-y: auto;
+      z-index: 10001;
+  }
+  .mention-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex;
+      justify-content: space-between;
+  }
+  .mention-item:hover { background: #f1f5f9; color: #0d6efd; }
+  .mention-item .tag-sigla { font-size: 9px; opacity: 0.6; }
+  .mention-item i { margin-right: 8px; width: 14px; text-align: center; }
+  .shout-link { color: #0d6efd; font-weight: 600; text-decoration: underline; cursor: pointer; }
+  .shout-link:hover { color: #004dc0; }
+
+
+</style>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- Riferimenti solo alla Tag Box ---
+    const shoutContent = document.getElementById('tagboxContent');
+    const shoutInput = document.getElementById('tagboxInput');
+    const shoutBtn = document.getElementById('sendShoutBtn');
+    const shoutMentionList = document.getElementById('mentionSuggestions');
+
+    async function refreshTagbox() {
+        const res = await fetch('/api/tagbox');
+        const shouts = await res.json();
+        shoutContent.innerHTML = '';
+        shouts.forEach(s => {
+            const div = document.createElement('div');
+            div.className = `shout ${s.pinned ? 'pinned' : ''}`;
+            let pinIcon = ['amministratore', 'ceo', 'segreteria'].includes("{{ session.user_role }}") 
+                ? `<i class="fas fa-thumbtack pin-btn ${s.pinned ? 'active' : ''}" onclick="togglePin('${s.id}')"></i>` : '';
+            // Usa la funzione globale window.parseMessage
+            div.innerHTML = `${pinIcon}<span class="shout-time">${s.timestamp}</span> <span class="shout-user">${s.user}:</span> ${window.parseMessage(s.text)}`;
+            shoutContent.appendChild(div);
+        });
+    }
+
+    shoutInput.addEventListener('input', () => window.handleAutocomplete(shoutInput, shoutMentionList));
+    
+    shoutBtn.onclick = async () => {
+        const val = shoutInput.value.trim();
+        if(!val) return;
+        await fetch('/api/tagbox', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: val }) });
+        shoutInput.value = ''; refreshTagbox();
+    };
+
+    window.togglePin = async (id) => { await fetch(`/api/tagbox/pin/${id}`, { method: 'POST' }); refreshTagbox(); };
+    shoutInput.onkeypress = (e) => { if(e.key === 'Enter') shoutBtn.click(); };
+    
+    setInterval(refreshTagbox, 20000); refreshTagbox();
+});
+</script>
+{% endblock %}

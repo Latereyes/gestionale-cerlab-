@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Preventivo Edile #{{ p.numero }}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        
+        :root {
+            --text-primary: #1a202c;
+            --text-secondary: #4a5568;
+            --border-color: #e2e8f0;
+            --bg-light: #f8f9fa;
+        }
+
+        @page { 
+            size: A4; 
+            margin: 40px 40px 60px 40px; 
+            @bottom-center {
+                content: "Pagina " counter(page) " di " counter(pages);
+                font-family: 'Inter', sans-serif;
+                font-size: 10px;
+                color: #4a5568;
+            }
+        }
+
+        body { 
+            font-family: 'Inter', sans-serif; 
+            font-size: 11pt; 
+            color: var(--text-primary); 
+            line-height: 1.6; 
+            margin: 0;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+            border-bottom: 2px solid var(--text-primary);
+        }
+
+        .logo { height: 60px; }
+        .company-details { font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
+        .quote-info { text-align: right; }
+        .quote-info h1 { margin: 0; font-size: 24px; text-transform: uppercase; }
+
+        .client-section {
+            background-color: var(--bg-light);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        /* ----- REGOLE SALTO PAGINA PDF (Evitano che il testo venga tagliato) ----- */
+        .section-title { 
+            font-weight: 700; 
+            text-transform: uppercase; 
+            margin-top: 25px; 
+            margin-bottom: 10px; 
+            font-size: 11pt; 
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 4px;
+            page-break-after: avoid; /* Il titolo non rimane mai solo a fine pagina */
+        }
+
+       .row-item { 
+            margin-bottom: 10px; 
+            padding-left: 0; 
+            text-align: justify; 
+            font-size: 10.5pt; 
+            page-break-inside: avoid;
+        }
+
+        .row-item span {
+            color: var(--text-secondary);
+            font-family: monospace; /* Mantiene i numeri allineati */
+        }
+        
+        .riepilogo-box, .totals-section, .print-footer-block {
+            page-break-inside: avoid; /* Protegge i blocchi interi */
+        }
+        /* -------------------------------------------------------------------------- */
+
+        .riepilogo-box { 
+            margin-bottom: 30px; 
+            font-size: 10pt; 
+            text-align: justify; 
+            font-style: italic;
+            color: var(--text-secondary);
+            padding: 15px;
+            background: #fcfcfc;
+            border-left: 3px solid var(--border-color);
+        }
+
+        .totals-section {
+            margin-top: 40px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .totals-table { width: 350px; border-collapse: collapse; }
+        .totals-table td { padding: 8px 12px; }
+        .totals-table .right { text-align: right; }
+        .totals-table .grand-total td {
+            font-size: 16px;
+            font-weight: 700;
+            padding-top: 10px;
+            border-top: 2px solid var(--text-primary);
+        }
+
+        .footer-notes { margin-top: 40px; font-size: 9.5pt; color: var(--text-secondary); }
+        .signatures { margin-top: 50px; display: flex; justify-content: space-between; }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <img src="{{ url_for('static', filename='logo.png') }}" class="logo">
+            <div class="company-details">
+                <strong>CER LAB srl</strong><br>
+                Via Guarneville, 1 – 04011 Aprilia (LT)<br>
+                C.F./P.IVA 03122400595<br>
+                info@cerlab.it
+            </div>
+        </div>
+        <div class="quote-info">
+            <h1>Preventivo Edile</h1>
+            <p><strong>N.</strong> {{ p.numero }}<br><strong>Data:</strong> {{ p.data }}</p>
+        </div>
+    </header>
+
+    <section class="client-section">
+        <div style="font-size: 10pt; color: var(--text-secondary); margin-bottom: 5px;">Spett.le</div>
+        <strong>{{ p.cliente }}</strong><br>
+        {{ p.indirizzo }}<br>
+        {{ p.cap }} {{ p.comune }} ({{ p.provincia }})
+    </section>
+
+    <div style="margin-bottom: 20px;">
+        A Sua gentile richiesta ed in base ai disegni da Lei forniti rimettiamo la nostra migliore offerta per le opere di seguito elencate:
+    </div>
+
+    <!-- Intorno alla riga 115 di stampa_edile.html -->
+    {% if p.riepilogo %}
+    <div class="section-title">1. RIEPILOGO</div>
+    <div class="riepilogo-box">
+        {{ p.riepilogo | replace('\n', '<br>') | safe }}
+    </div>
+    {% endif %}
+
+    <!-- ELENCO LAVORAZIONI CON STRUTTURA A PARAGRAFI -->
+    {% for sezione in p.sezioni_edili %}
+        {% set s_num = loop.index + 1 %}
+        <div class="section-title">{{ s_num }}.0 {{ sezione.titolo | upper }}</div>
+        
+        {% for riga in sezione.righe %}
+            {% if riga.articolo %}
+                <div class="row-item" style="display: flex; gap: 10px; align-items: flex-start;">
+                    <span style="font-weight: 600; min-width: 30px;">{{ s_num }}.{{ loop.index }}</span>
+                    <div style="flex: 1;">{{ riga.articolo | replace('\n', '<br>') | safe }}</div>
+                </div>
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+
+
+    <!-- TABELLA TOTALI PROFESSIONALE -->
+    <section class="totals-section">
+        <table class="totals-table">
+            <tbody>
+                <!-- Se hai il dettaglio imponibile lo usa, altrimenti mette il totale -->
+                <tr>
+                    <td>Imponibile</td>
+                    <td class="right">{{ money_ui(p.tot_imponibile_cliente if p.tot_imponibile_cliente else p.totale) }} </td>
+                </tr>
+                
+                {% if p.tot_iva_dettaglio %}
+                    {% for aliquota, iva_valore in p.tot_iva_dettaglio.items() %}
+                    <tr>
+                        <td>IVA ({{ aliquota }}%)</td>
+                        <td class="right">{{ iva_valore }} €</td>
+                    </tr>
+                    {% endfor %}
+                {% endif %}
+
+                <tr class="grand-total">
+                    <td>TOTALE + IVA</td>
+                    <td class="right">{{ money_ui(p.totale) }} </td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- NOTE E FIRMA (protette dal taglio pagina) -->
+    <div class="print-footer-block">
+        <div class="footer-notes">
+            <p>Il preventivo è comprensivo di direzione lavori effettuata direttamente da CERLAB SRL.</p>
+            <p>Opere da eseguirsi secondo le perfette regole dell'arte. I prezzi si intendono esclusi di IVA.</p>
+        </div>
+
+        <div class="signatures">
+            <div>Aprilia, lì {{ p.data }}</div>
+            <div style="text-align: center;">Per Accettazione<br><br><br>___________________________</div>
+        </div>
+    </div>
+</body>
+</html>

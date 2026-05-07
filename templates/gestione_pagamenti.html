@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+
+{% block extra_fab %}
+    <a href="javascript:void(0)" class="fab-btn task-fab" onclick="window.openQuickTask('{{ p.numero }}', 'CONSEGNA', '{{ p.cliente }}')" title="Nuova Task Saldo">
+        <i class="fas fa-plus"></i>
+        <span class="fab-label">TASK</span>
+    </a>
+{% endblock %}
+
+{% block page_title %}
+<h1><i class="fas fa-cash-register"></i> Gestione Pagamenti
+    {% if p %}
+    <div class="header-client-info">
+        <i class="fas fa-file-invoice"></i>
+        <span>Preventivo #{{ p.numero }}</span>
+    </div>
+    {% endif %}
+</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Riepilogo Contabile</h3>
+        </div>
+        <div class="summary-grid">
+            <div class="summary-item">
+                <label>Totale Preventivo</label>
+                <strong class="total-main">{{ money_ui(p.totale) }}</strong>
+            </div>
+            <div class="summary-item">
+                <label>Importo Saldato</label>
+                <strong class="total-paid">{{ money_ui(p.totale_pagato) }}</strong>
+            </div>
+            <div class="summary-item">
+                <label>Ancora da Incassare</label>
+                <strong class="total-future">{{ money_ui(p.totale_da_incassare) }}</strong>
+            </div>
+            <div class="summary-item">
+                <label>Importo da Saldare</label>
+                <strong class="total-due">{{ money_ui(p.totale_da_saldare) }}</strong>
+            </div>
+        </div>
+    </div>
+    {% if session.user_role in ['segreteria', 'amministratore', 'ceo'] %}
+    <div class="card">
+        <div class="card-header">
+            <h3>Aggiungi Nuovo Acconto/Saldo</h3>
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('aggiungi_pagamento', quote_id=p.numero) }}" method="POST" class="payment-form">
+                <div class="form-group">
+                    <label for="data">Data Pagamento</label>
+                    <input type="date" name="data" id="data" required>
+                </div>
+    {% endif %}            
+                <div class="form-group amount-group">
+                    <label for="importo">Importo (€)</label>
+                    <div class="input-with-actions">
+                        <input 
+                                type="text" 
+                                name="importo" 
+                                id="importo" 
+                                class="form-control" 
+                                placeholder="0,00" 
+                                inputmode="decimal" 
+                                required
+                            >
+                        
+                        {% if p.totale_pagato == 0 %}
+                        <button type="button" id="btn-set-40" class="btn btn-blue" title="Calcola acconto 40%">40%</button>
+                        <button type="button" id="btn-set-50" class="btn btn-blue" title="Calcola acconto 50%">50%</button>
+                        {% endif %}
+                        
+                        <button type="button" id="btn-set-saldo" class="btn btn-green" title="Imposta il saldo rimanente">SALDO</button>
+                    </div>
+                </div>
+                <div class="form-group note-group">
+                    <label for="note">Note (opzionale)</label>
+                    <input type="text" name="note" id="note" placeholder="es. Acconto 40%, Saldo finale">
+                </div>
+                <div class="form-group">
+                    <label>&nbsp;</label>
+                    <button type="submit" class="btn primary"><i class="fas fa-plus"></i> Aggiungi Pagamento</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Storico Pagamenti</h3>
+        </div>
+        <div class="table-wrap">
+            <table class="styled-table">
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th class="right">Importo</th>
+                        <th>Note</th>
+                        <th style="width: 1%;">Azioni</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pagamento in p.pagamenti_elaborati %}
+                    <tr class="{% if pagamento.is_future %}future-payment{% elif pagamento.type == 'auto_iva' %}virtual-payment{% endif %}">
+                        <td>{{ pagamento.data }}</td>
+                        
+                        {% if pagamento.is_future %}
+                            <td class="right total-future" title="Pagamento futuro, non ancora incassato">
+                                {{ money_ui(pagamento.importo) }}
+                            </td>
+                        {% elif pagamento.type == 'auto_iva' %}
+                             <td class="right" style="color: #6c757d; font-style: italic;">
+                                {{ money_ui(pagamento.importo) }}
+                            </td>
+                        {% elif (pagamento.importo | replace(',', '.') | float) < 0 %}
+                            <td class="right total-due">{{ money_ui(pagamento.importo) }}</td>
+                        {% else %}
+                            <td class="right total-paid">{{ money_ui(pagamento.importo) }}</td>
+                        {% endif %}
+
+                        <td>
+                            {{ pagamento.note }}
+                            {% if pagamento.type == 'auto_iva' %}
+                                <span style="font-size: 10px; background: #e9ecef; padding: 2px 5px; border-radius: 4px; color: #495057; margin-left: 5px;">IVA</span>
+                            {% endif %}
+                        </td>
+                        <td class="center">
+                            {% if session.user_role in ['segreteria', 'amministratore', 'ceo'] %}
+                                {% if pagamento.type == 'auto_iva' %}
+                                    <i class="fas fa-robot" title="Generato automaticamente da opzione Esente IVA" style="color: #adb5bd;"></i>
+                                {% elif pagamento.is_future %}
+                                    <form action="{{ url_for('conferma_incasso', quote_id=p.numero) }}" method="POST">
+                                        <input type="hidden" name="payment_id" value="{{ pagamento.id }}">
+                                        <button type="submit" class="btn btn-outline btn-small-action" title="Conferma Incasso di questo pagamento">
+                                            <i class="fas fa-check-circle"></i> Conferma
+                                        </button>
+                                    </form>
+                                        <button type="button" 
+                                                class="btn btn-outline btn-small-action" 
+                                                title="Modifica Pagamento"
+                                                onclick="openEditPaymentModal('{{ pagamento.id }}', '{{ pagamento.data }}', '{{ pagamento.importo }}')">
+                                            <i class="fas fa-pen"></i> Modifica
+                                        </button>
+                                {% elif pagamento.is_rectifiable %}
+                                    <form action="{{ url_for('rettifica_pagamento', quote_id=p.numero) }}" method="POST" class="rettifica-form">
+                                        <input type="hidden" name="payment_id" value="{{ pagamento.id }}">
+                                        <button type="submit" class="btn btn-outline btn-small-action" title="Rettifica Pagamento">
+                                            <i class="fas fa-undo"></i> Rettifica
+                                        </button>
+                                    </form>
+                                    
+                                        </form>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="empty-state">Nessun pagamento registrato.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="confirm-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 450px; text-align: center;">
+        <h3 id="confirm-modal-title">Conferma Azione</h3>
+        <p id="confirm-modal-text" style="line-height: 1.6;"></p>
+        <div class="modal-actions" style="justify-content: center; gap: 12px; margin-top:24px;">
+            <button type="button" id="confirm-modal-cancel" class="btn">Annulla</button>
+            <button type="button" id="confirm-modal-ok" class="btn primary">Conferma</button>
+        </div>
+    </div>
+</div>
+
+<div id="edit-payment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 400px;">
+        <h3><i class="fas fa-edit"></i> Modifica Pagamento</h3>
+        <form action="{{ url_for('modifica_pagamento_programmato', quote_id=p.numero) }}" method="POST" id="edit-payment-form">
+            <input type="hidden" name="payment_id" id="edit-payment-id">
+            
+            <div class="form-group" style="margin-top: 15px;">
+                <label>Data Prevista</label>
+                <input type="date" name="nuova_data" id="edit-payment-data" class="form-control" required style="width: 100%;">
+            </div>
+
+            <div class="form-group" style="margin-top: 15px;">
+                <label>Importo (€)</label>
+                <input type="text" name="nuovo_importo" id="edit-payment-importo" class="form-control" required style="width: 100%;">
+            </div>
+
+            <div class="modal-actions" style="margin-top: 25px; justify-content: flex-end; gap: 10px;">
+                <button type="button" class="btn" onclick="closeEditPaymentModal()">Annulla</button>
+                <button type="submit" class="btn primary">Salva Modifiche</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
+.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
+.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.card-body { padding: 24px; }
+.table-wrap { overflow-x: auto; }
+.styled-table { width: 100%; border-collapse: collapse; }
+.styled-table th, .styled-table td { padding: 16px 24px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); }
+.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table tbody tr:last-child td { border-bottom: none; }
+.empty-state { text-align: center; padding: 40px; color: var(--muted); }
+.empty-state i { font-size: 32px; color: #ced4da; margin-bottom: 12px; }
+.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; color: var(--text-primary); }
+.empty-state p { margin: 0; font-size: 14px; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; padding: 24px; }
+.summary-item label { display: block; color: var(--muted); margin-bottom: 8px; font-size: 14px; }
+.summary-item strong { font-size: 24px; font-weight: 700; }
+.total-main { color: #0d6efd; }
+.total-paid { color: #198754; }
+.total-due { color: #dc3545; }
+.payment-form { display: grid; grid-template-columns: 1fr 3fr 2fr auto; align-items: flex-end; gap: 16px; }
+.form-group label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+.input-with-actions { display: flex; gap: 8px; }
+.input-with-actions input { flex-grow: 1; }
+.btn.primary { display: inline-flex; align-items: center; gap: 8px; }
+.btn-small-action { padding: 6px 10px; font-size: 12px; height: auto; line-height: 1.2; white-space: nowrap; }
+.btn-small-action i { font-size: 11px; }
+@media (max-width: 992px) {
+    .payment-form { grid-template-columns: 1fr 1fr; }
+    .note-group { grid-column: span 2; }
+}
+/* Stili per pagamenti futuri */
+.summary-item .total-future {
+    color: #fd7e14; /* Arancione */
+}
+.styled-table .total-future {
+    color: #fd7e14;
+    font-weight: 600;
+}
+.styled-table tr.future-payment td {
+    background-color: #fff9e6; /* Sfondo giallo/arancio molto chiaro */
+}
+.btn.btn-green {
+    background: #198754; /* Colore verde (lo stesso di "Saldato") */
+    color: #fff;
+    border-color: #198754;
+    font-weight: 600;
+}
+.btn.btn-green:hover {
+    background: #157347;
+    border-color: #146c43;
+}
+
+.btn.btn-blue {
+    background: #0d6efd; /* Colore blu (lo stesso di "Totale") */
+    color: #fff;
+    border-color: #0d6efd;
+    font-weight: 600;
+}
+.btn.btn-blue:hover {
+    background: #0b5ed7;
+    border-color: #0a58ca;
+}
+.virtual-payment td {
+    background-color: #f8f9fa;
+    color: #6c757d;
+}
+</style>
+{% if p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
+<div class="sticky-footer">
+    <div class="status-actions">
+        <div>
+            <label>&nbsp;</label>
+            {{ workflow_navbar(p, 'saldo') }}
+        </div>
+    </div>
+</div>
+{% endif %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    
+    // 1. RIFERIMENTI AGLI ELEMENTI
+    const importoInput = document.getElementById('importo');
+    const noteInput = document.getElementById('note');
+    
+    // Bottoni rapidi
+    const btnSet30 = document.getElementById('btn-set-30');
+    const btnSet50 = document.getElementById('btn-set-50');
+    const btnSetSaldo = document.getElementById('btn-set-saldo');
+
+    // 2. FUNZIONE DI PARSING INTELLIGENTE (Fix Decimali)
+    // Gestisce sia "1.200,50" (Stringa IT) che "1200.50" (Float Python/DB)
+    function safeParse(valStr) {
+        if (!valStr) return 0.0;
+        valStr = valStr.toString().trim();
+
+        // Se c'è una virgola, è sicuramente formato Italiano (1.000,00)
+        if (valStr.includes(',')) {
+            // Rimuovi i punti delle migliaia
+            valStr = valStr.replace(/\./g, '');
+            // Sostituisci la virgola decimale con il punto per JS
+            valStr = valStr.replace(',', '.');
+        } 
+        // Se NON c'è la virgola, assumiamo sia un numero standard (1200.50)
+        // In questo caso NON rimuoviamo i punti, perché sono decimali!
+        
+        return parseFloat(valStr) || 0.0;
+    }
+
+    // Recuperiamo i valori grezzi senza filtri Jinja che potrebbero rompere i float
+    const totalePreventivo = safeParse("{{ p.totale }}");
+    const totaleDaSaldare = safeParse("{{ p.totale_da_saldare }}");
+
+    // 3. GESTIONE INPUT (Mentre scrivi: Punto -> Virgola)
+    if (importoInput) {
+        importoInput.addEventListener('input', function(e) {
+            let val = this.value;
+            // Sostituisce punto con virgola
+            val = val.replace(/\./g, ','); 
+            // Rimuove tutto ciò che non è numero o virgola
+            val = val.replace(/[^0-9,]/g, ''); 
+            // Assicura che ci sia una sola virgola
+            const parts = val.split(',');
+            if (parts.length > 2) {
+                val = parts[0] + ',' + parts.slice(1).join('');
+            }
+            if (val !== this.value) {
+                this.value = val;
+            }
+        });
+    }
+
+    // 4. LOGICA TASTI RAPIDI
+    // Formatta il numero per l'input (es. 120,50)
+    function formatForInput(num) {
+        return num.toFixed(2).replace('.', ',');
+    }
+
+    if (btnSet30) {
+        btnSet30.addEventListener('click', () => {
+            const val = totalePreventivo * 0.30;
+            importoInput.value = formatForInput(val);
+            if (noteInput) noteInput.value = 'Acconto 30%';
+        });
+    }
+
+    if (btnSet50) {
+        btnSet50.addEventListener('click', () => {
+            const val = totalePreventivo * 0.50;
+            importoInput.value = formatForInput(val);
+            if (noteInput) noteInput.value = 'Acconto 50%';
+        });
+    }
+
+    if (btnSetSaldo) {
+        btnSetSaldo.addEventListener('click', () => {
+            // Usiamo il totale da saldare calcolato correttamente
+            importoInput.value = formatForInput(totaleDaSaldare);
+            if (noteInput) noteInput.value = 'Saldo finale';
+        });
+    }
+
+    // 5. GESTIONE MODALE RETTIFICA
+    const rettificaForms = document.querySelectorAll('.rettifica-form');
+    rettificaForms.forEach(form => {
+        form.addEventListener('submit', function(event) {
+            event.preventDefault(); 
+            const message = "Sei sicuro di voler rettificare questo pagamento?<br>Verrà creato un <strong>nuovo movimento di storno</strong>.";
+            
+            if (typeof showConfirmation === 'function') {
+                showConfirmation('Conferma Rettifica', message, () => form.submit());
+            } else if (confirm(message.replace(/<br>|<strong>|<\/strong>/g, ' '))) {
+                form.submit();
+            }
+        });
+    });
+
+});
+// FUNZIONI MODALE EDITING
+function openEditPaymentModal(id, data, importo) {
+    document.getElementById('edit-payment-id').value = id;
+    document.getElementById('edit-payment-data').value = data;
+    document.getElementById('edit-payment-importo').value = importo;
+    document.getElementById('edit-payment-modal').style.display = 'flex';
+}
+
+function closeEditPaymentModal() {
+    document.getElementById('edit-payment-modal').style.display = 'none';
+}
+
+// Chiudi modale cliccando fuori
+window.onclick = function(event) {
+    const editModal = document.getElementById('edit-payment-modal');
+    if (event.target == editModal) {
+        closeEditPaymentModal();
+    }
+}
+</script>
+
+{% endblock %}
