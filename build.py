@@ -19,7 +19,6 @@ def clean_previous_builds():
         if os.path.exists(folder):
             shutil.rmtree(folder)
 
-# ... (tutte le altre funzioni come get_current_version, update_file etc. sono invariate)
 def get_current_version():
     with open(VERSION_FILE, "r") as f: return f.read().strip()
 def get_next_version(current_version, bump_type):
@@ -103,6 +102,12 @@ if __name__ == "__main__":
                     print("Esecuzione comandi git (add, commit, push)...")
                     subprocess.run(["git", "add", "."], check=True)
                     subprocess.run(["git", "commit", "-m", f"Release v{new_version}"], check=True)
+                    
+                    # Configurazione corretta del remote e del branch
+                    print("Sincronizzazione con il repository reale...")
+                    subprocess.run(["git", "remote", "set-url", "origin", "https://github.com/Latereyes/gestionale-cerlab-"], check=True)
+                    subprocess.run(["git", "branch", "-M", "main"], check=True)
+                    
                     # Anche 'git push' può usare il token se necessario
                     subprocess.run(["git", "push", "origin", "main"], check=True, env=env_vars)
                     
