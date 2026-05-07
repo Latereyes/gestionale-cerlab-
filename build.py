@@ -108,9 +108,16 @@ if __name__ == "__main__":
                     subprocess.run(["git", "remote", "set-url", "origin", "https://github.com/Latereyes/gestionale-cerlab-"], check=True)
                     subprocess.run(["git", "branch", "-M", "main"], check=True)
                     
-                    # Recupera le modifiche remote per evitare l'errore non-fast-forward
-                    print("Recupero modifiche da GitHub (pull --rebase)...")
-                    subprocess.run(["git", "pull", "origin", "main", "--rebase"], check=True, env=env_vars)
+                    try:
+                        # Recupera le modifiche remote per evitare l'errore non-fast-forward
+                        print("Recupero modifiche da GitHub (pull --rebase)...")
+                        subprocess.run(["git", "pull", "origin", "main", "--rebase"], check=True, env=env_vars)
+                    except subprocess.CalledProcessError:
+                        print("\n!!! ERRORE: Conflitti rilevati durante il pull.")
+                        print("Annullamento del rebase per sbloccare il repository...")
+                        subprocess.run(["git", "rebase", "--abort"], check=False)
+                        print("AZIONE RICHIESTA: Risolvi i conflitti manualmente nel terminale (git pull), poi riavvia la build.")
+                        raise
                     
                     # Anche 'git push' può usare il token se necessario
                     subprocess.run(["git", "push", "origin", "main"], check=True, env=env_vars)
