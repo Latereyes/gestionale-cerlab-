@@ -1,0 +1,1399 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+<style>
+    .task-fab {
+    background: #6366f1; /* Colore Indigo delle Task */
+}
+#quickTaskInput::placeholder { color: #94a3b8; }
+    .notify-item { padding: 12px 15px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.2s; }
+    .notify-item:hover { background: #fffbeb; }
+    .notify-item.unread { border-left: 4px solid #f59e0b; background: #fffcf0; }
+    .notify-text { font-size: 13px; color: #1e293b; margin-bottom: 3px; line-height: 1.4; }
+    .notify-time { font-size: 10px; color: #94a3b8; }
+    /* --- INTEGRAZIONI CHAT GLOBALE --- */
+    /* --- NUOVO STILE CARD UTENTI CHAT --- */
+/* Correzione visibilità link nei messaggi inviati (evita blu su blu) */
+.message-sent .shout-link {
+    color: #ffffff !important;
+    text-decoration: underline;
+    opacity: 0.9;
+}
+.message-sent .shout-link:hover {
+    opacity: 1;
+}
+.message-sent .shout-mention {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}    
+.chat-user-item {
+    padding: 12px;
+    margin-bottom: 8px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.chat-user-item:hover {
+    border-color: #0d6efd;
+    background-color: #f8faff;
+    transform: translateY(-1px);
+}
+
+.chat-user-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+}
+
+.chat-user-info strong {
+    font-size: 14px;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-user-info .role-line {
+    font-size: 11px;
+    color: #64748b;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.last-time-msg {
+    color: #94a3b8;
+    font-weight: 400;
+    text-transform: lowercase;
+}
+.chat-user-item .role { 
+    font-size: 10px; 
+    color: #64748b; 
+    text-transform: uppercase; 
+}
+.chat-user-info strong { 
+    font-size: 14px; 
+    color: #1e293b;
+}
+.user-unread-badge {
+    background: #ff4757;
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.shout-mention { 
+    background: #dbeafe; 
+    color: #1e40af; 
+    padding: 0 4px; 
+    border-radius: 4px; 
+    font-weight: 600; 
+}
+.shout-link { 
+    color: #0d6efd; 
+    font-weight: 600; 
+    text-decoration: underline; 
+    cursor: pointer; 
+}
+/* --- NUOVO STILE PULSANTI FLOTTANTI (FAB) --- */
+.floating-action-group {
+    position: fixed;
+    bottom: 500px;
+    right: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    z-index: 9999; /* Sempre sopra tutto */
+}
+
+.fab-btn {
+    width: 65px;
+    height: 65px;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    color: #fff;
+    font-size: 24px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    position: relative;
+    border: 2px solid rgba(255,255,255,0.2);
+}
+
+.fab-btn:hover {
+    transform: scale(1.1) translateX(-5px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+}
+
+.alert-fab {
+    background: #da0303; /* Rosso per attirare l'attenzione */
+}
+
+.message-fab {
+      background: #0d6efd; /* Blu per i messaggi */
+  }
+
+  .unread-badge {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      background: #ff4757;
+      color: white;
+      font-size: 11px;
+      font-weight: 800;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: none; /* Nascosto se zero */
+      align-items: center;
+      justify-content: center;
+      border: 2px solid white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      z-index: 10;
+  }
+
+  .fab-label {
+    font-size: 9px;
+    font-weight: 800;
+    margin-top: 2px;
+    text-transform: uppercase;
+}
+
+/* Tooltip laterale al passaggio del mouse */
+.fab-btn::after {
+    content: attr(title);
+    position: absolute;
+    right: 75px;
+    background: #334155;
+    color: white;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.fab-btn:hover::after {
+    opacity: 1;
+}
+/* --- STILI CHAT MODALE GLOBALE --- */
+.chat-modal {
+    position: fixed; bottom: 100px; right: 30px; width: 350px; height: 450px;
+    background: white; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    display: none; flex-direction: column; z-index: 10000; overflow: hidden; border: 1px solid #e2e8f0;
+}
+.chat-modal.active { display: flex; }
+.chat-header { background: #0d6efd; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.chat-body { flex: 1; overflow-y: auto; padding: 15px; background: #f8fafc; }
+.message-bubble { margin-bottom: 10px; padding: 8px 12px; border-radius: 12px; max-width: 80%; font-size: 13px; line-height: 1.4; }
+.message-sent { background: #0d6efd; color: white; align-self: flex-end; margin-left: auto; }
+.message-received { background: #e2e8f0; color: #1e293b; align-self: flex-start; }
+.chat-footer { padding: 10px; border-top: 1px solid #e2e8f0; display: none; gap: 8px; position: relative; }
+.chat-footer.active { display: flex; }
+.chat-input { flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 20px; outline: none; }
+.mention-list { position: absolute; bottom: 100%; left: 8px; right: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 -4px 12px rgba(0,0,0,0.1); display: none; max-height: 150px; overflow-y: auto; z-index: 10001; }
+.mention-item { padding: 8px 12px; cursor: pointer; font-size: 12px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; }
+.mention-item:hover { background: #f1f5f9; color: #0d6efd; }
+    :root{
+      --ink:#111; --muted:#666; --line:#ddd; --bg:#fafafa; --lock:#f2f2f2;
+      --primary-color: #0d6efd;
+      --line: #e2e8f0;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;
+      color:var(--ink); margin:0; background:var(--bg);
+      font-size:14px;
+      /* Spazio per i footer fissi */
+      padding-bottom: 90px; 
+    }
+    main{ max-width:1400px; margin: 24px auto; padding: 0 24px; }
+    
+    /* --- STILI HEADER (Unificati e Corretti) --- */
+    .site-header {
+        background-color: #ffffff;
+        padding: 12px 32px;
+        border-bottom: 1px solid var(--line);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+    }
+    .header-container {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+    }
+    .header-main-content {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex: 1; /* Occupa lo spazio a sinistra */
+        min-width: 0; /* Permette di stringersi */
+    }
+    .brand-link {
+        display: flex;
+        align-items: center;
+        text-decoration: none;
+        flex-shrink: 0; /* Non stringere il logo */
+    }
+    .brand-link .logo {
+        height: 45px;
+        transition: transform 0.2s ease;
+    }
+    .back-link {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+    }
+    .back-link i {
+        font-size: 26px; /* Leggermente più piccola della casa per estetica */
+        color: #333;
+        transition: transform 0.2s ease;
+    }
+    .brand-link:hover .logo,
+    .back-link:hover i {
+        transform: scale(1.05);
+    }
+    .page-title-header {
+        display: flex;
+        align-items: center;
+        flex: 1;
+        min-width: 0;
+    }
+    .page-title-header h1 {
+        font-size: 22px;
+        margin: 0;
+        color: #1a202c;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        /* Verrà modificato dai media query */
+        white-space: nowrap; 
+        overflow: hidden;
+        text-overflow: ellipsis; 
+    }
+    .page-title-header .quote-number {
+        color: var(--muted);
+        font-weight: 500;
+    }
+    .page-title-header .header-client-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 16px;
+        color: #4a5568;
+        font-weight: 400;
+        border-left: 1px solid var(--line);
+        padding-left: 12px;
+        margin-left: 12px;
+        flex-shrink: 0; /* Non stringere */
+    }
+    .page-title-header .status-badge {
+        margin-left: 12px;
+        transform: scale(0.9);
+        flex-shrink: 0;
+    }
+    .user-menu {
+        flex-shrink: 0; /* Non stringere il menu utente */
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .user-info {
+        text-align: right;
+        font-size: 13px;
+    }
+    
+    /* Media Query per andare a capo (Corretto) */
+    @media (max-width: 900px) {
+        .header-container {
+            flex-direction: column; 
+            align-items: stretch; 
+            gap: 12px;
+        }
+        .header-main-content {
+            justify-content: space-between;
+        }
+        .user-menu {
+            justify-content: flex-end;
+            border-top: 1px solid var(--line);
+            padding-top: 12px;
+        }
+        .page-title-header h1 {
+            font-size: 20px;
+            white-space: normal; /* Permette al titolo di andare a capo */
+            flex-wrap: wrap; /* Permette ai badge/pulsanti di andare a capo */
+            overflow: visible;
+        }
+    }
+    @media (max-width: 450px) {
+        .header-main-content {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+    }
+    /* --- FINE STILI HEADER --- */
+    
+    /* --- STILI GENERICI (Bottoni, Card, Tabelle) --- */
+    .btn{
+      display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:10px;
+      border:1px solid var(--line); background:#fff; text-decoration:none; color:inherit;
+      cursor:pointer; height:40px; font-weight: 500;
+    }
+    .btn.primary{ background:#111; color:#fff; border-color:#111; }
+    .btn:hover { background-color: #f8f9fa; }
+    .btn.primary:hover { background-color: #333; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-outline { background: transparent; border-color: #cbd5e1; }
+    .btn-outline:hover { background: #f8f9fa; }
+    
+    .card{ border:1px solid var(--line); border-radius:12px; padding:16px; margin:12px 0; background:#fff; }
+    input,select,textarea{
+      padding:10px 12px; border:1px solid var(--line); border-radius:8px; width:100%;
+      height:40px; line-height:1.2; font-size:14px;
+    }
+    select{ appearance:auto; }
+    textarea{ height:auto; min-height:80px; }
+    label{ font-size:12px; color:var(--muted); display:block; margin:6px 0; }
+    .table-wrap { overflow-x: auto; }
+    .muted{ color:var(--muted); }
+
+    /* --- FOOTER FISSO WORKFLOW (Editor, Ordini, ecc.) --- */
+    .sticky-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background-color: #fff;
+        border-top: 1px solid #e2e8f0;
+        box-shadow: 0 -4px 15px rgba(0,0,0,0.08);
+        padding: 12px 32px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        z-index: 99;
+        min-height: 85px; 
+    }
+    .action-buttons-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 10px;
+      width: 100%;
+      max-width: 950px;
+    }
+    .action-buttons-grid .btn {
+      width: 100%;
+      justify-content: center;
+      font-size: 13px;
+      padding: 10px 8px;
+    }
+    .action-buttons-grid .btn.disabled {
+        background-color: #6c757d;
+        color: #fff;
+        opacity: 1;
+        pointer-events: none;
+        border-color: #6c757d;
+    }
+    @media (max-width: 1200px) {
+        .sticky-footer .footer-status-controls { display: none; }
+    }
+    @media (max-width: 992px) {
+        .action-buttons-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+    @media (max-width: 768px) {
+        .sticky-footer { 
+            flex-direction: column; 
+            gap: 12px; 
+            padding: 12px; 
+            height: auto; 
+            align-items: stretch; 
+        }
+        .sticky-footer .totals { display: none; }
+    }
+    @media (max-width: 500px) {
+        .action-buttons-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+
+    /* --- FOOTER FISSO DASHBOARD (Home, Clienti, ecc.) --- */
+    .dashboard-footer-nav {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background-color: #ffffff;
+        border-top: 1px solid #e2e8f0;
+        box-shadow: 0 -4px 15px rgba(0,0,0,0.08);
+        padding: 12px 32px;
+        display: flex;
+        justify-content: center; 
+        align-items: center;
+        z-index: 99;
+        min-height: 85px; 
+    }
+    .dashboard-nav-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 10px;
+        width: 100%;
+        max-width: 1100px;
+    }
+    .dashboard-nav-grid .btn {
+        width: 100%;
+        justify-content: center;
+        font-size: 13px;
+        padding: 10px 8px;
+    }
+    .dashboard-nav-grid .btn.btn-hub {
+        background-color: #e7f0fe;
+        color: #0d6efd;
+        border-color: #0d6efd;
+        font-weight: 600;
+    }
+    .dashboard-nav-grid .btn.btn-hub:hover {
+        background-color: #0d6efd;
+        color: #fff;
+    }
+    .dashboard-nav-grid .btn.disabled {
+        background-color: #6c757d;
+        color: #fff;
+        opacity: 1;
+        pointer-events: none;
+        border-color: #6c757d;
+    }
+    .dashboard-nav-grid .btn.btn-hub.disabled {
+        background-color: #0b5ed7; /* Blu scuro */
+        color: #fff;
+        border-color: #0a58ca;
+    }
+    @media (max-width: 992px) {
+        .dashboard-nav-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+    @media (max-width: 768px) {
+        .dashboard-footer-nav {
+            padding: 12px;
+            height: auto; 
+        }
+        .dashboard-nav-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+
+    /* --- STILI MODALI GLOBALI --- */
+    .modal-overlay { 
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+        background: rgba(0,0,0,0.5); display: flex; 
+        justify-content: center; align-items: center; z-index: 1000; 
+        animation: fadeIn 0.2s ease-out;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .modal-content { 
+        background: white; padding: 24px; border-radius: 12px; 
+        width: 90%; max-width: 450px; 
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3); 
+    }
+    .modal-content h3 { margin-top: 0; }
+    .modal-content p { line-height: 1.6; }
+    .modal-actions { 
+        margin-top: 16px; display: flex; 
+        justify-content: flex-end; gap: 8px; 
+    }
+    #unlock-password-input { margin-top: 4px; }
+    .mention-item:hover { background: #f1f5f9; color: #0d6efd; }
+  .mention-item.current-context { background: #fff9c4; border-left: 4px solid #f59e0b; }
+  .mention-item .tag-sigla { font-size: 9px; opacity: 0.6; }
+  </style>
+
+<div id="quickTaskModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+        <h3><i class="fas fa-bolt"></i> Task Rapida</h3>
+        <p class="muted" style="font-size: 12px; margin-bottom: 10px;">Stai creando una nota collegata a questo preventivo.</p>
+        <div style="position: relative;">
+            <div id="quickTaskMentions" class="mention-list" style="bottom: 100%; top: auto;"></div>
+            <textarea id="quickTaskInput" placeholder="Cosa c'è da fare? Usa @ per assegnare..." 
+                      style="min-height: 100px; padding: 12px;"></textarea>
+        </div>
+        <div class="modal-actions">
+            <button id="saveQuickTaskBtn" class="btn primary">Crea Task</button>
+            <button onclick="document.getElementById('quickTaskModal').style.display='none'" class="btn">Annulla</button>
+        </div>
+    </div>
+</div>
+</head>
+
+{% macro workflow_navbar(p, active_page) %}
+<div class="action-buttons-grid">
+    <a href="{{ url_for('editor_preventivo_edile' if p.tipo_preventivo == 'edile' else 'editor_preventivo', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'preventivo' else '' }}" 
+       title="Modifica Preventivo">
+       <i class="fas fa-edit"></i> Preventivo
+    </a>
+
+    {% if p.tipo_preventivo != 'edile' %}
+    <a href="{{ url_for('conferma_ordine', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'ordini' else '' }}" 
+       title="Gestisci Ordini">
+       <i class="fas fa-box-open"></i> Ordini
+    </a>
+    {% endif %}
+
+    <a href="{{ url_for('gestione_consegna', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'consegna' else '' }}"
+       title="Gestisci Consegna">
+       <i class="fas fa-truck"></i> Consegna
+    </a>
+
+    <a href="{{ url_for('gestione_pagamenti', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'saldo' else '' }}" 
+       title="Gestisci Saldo">
+       <i class="fas fa-coins"></i> Saldo
+    </a>
+
+    <a href="{{ url_for('editor_fattura', quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'fatture' else '' }}" 
+       title="Gestisci Fattura">
+       <i class="fas fa-file-invoice-dollar"></i> Fatture
+    </a>
+
+    <a href="{{ url_for('dettaglio_cliente', client_id=p.id_cliente, source_quote_id=p.numero) }}" 
+       class="btn {{ 'disabled' if active_page == 'cliente' else '' }}" 
+       title="Apri cartella documenti">
+       <i class="fas fa-folder-open"></i> Cliente
+    </a>
+</div>
+{% endmacro %}
+
+{% macro dashboard_navbar(active_page) %}
+<div class="dashboard-nav-grid"> 
+
+    <a href="{{ url_for('dashboard_clienti') }}" 
+       class="btn btn-hub {{ 'disabled' if active_page == 'clienti' else '' }}" 
+       title="Dashboard Preventivi per Cliente">
+       <i class="fas fa-users"></i> Dashboard Clienti
+    </a>
+    
+    <a href="{{ url_for('dashboard_ordini') }}" 
+       class="btn {{ 'disabled' if active_page == 'ordini' else '' }}" 
+       title="Dashboard Ordini">
+       <i class="fas fa-box-open"></i> Ordini
+    </a>
+    
+    <a href="{{ url_for('dashboard_consegne') }}" 
+       class="btn {{ 'disabled' if active_page == 'consegne' else '' }}" 
+       title="Dashboard Consegne">
+       <i class="fas fa-truck"></i> Consegne
+    </a>
+    
+    <a href="{{ url_for('dashboard_pagamenti') }}" 
+       class="btn {{ 'disabled' if active_page == 'pagamenti' else '' }}" 
+       title="Dashboard Pagamenti">
+       <i class="fas fa-coins"></i> Saldo
+    </a>
+    
+    <a href="{{ url_for('dashboard_fatture') }}" 
+       class="btn {{ 'disabled' if active_page == 'fatture' else '' }}" 
+       title="Dashboard Fatture">
+       <i class="fas fa-file-invoice"></i> Fatture
+    </a>
+
+</div> 
+{% endmacro %}
+
+<body>
+
+<body>
+<header class="site-header">
+    <div class="header-container">
+        
+        <div class="header-main-content">
+            {% if title != 'Dashboard' %}
+            <a href="javascript:history.back()" class="back-link" title="Torna indietro">
+                <i class="fas fa-arrow-left"></i>
+            </a>
+            {% endif %}
+            <a href="{{ url_for('dashboard') }}" class="brand-link">
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="CERLAB DESIGN Logo" class="logo">
+            </a>
+            
+            <div class="page-title-header">
+                {% block page_title %}{% endblock %}
+            </div>
+        </div>
+
+        <div class="user-menu">
+            {% if session.user_name %}
+            <div class="user-info">
+                <span>Ciao, <strong>{{ session.user_name }}</strong></span>
+            </div>
+            <a href="{{ url_for('cambia_password') }}" class="btn btn-outline">Cambia Password</a>
+            <a href="{{ url_for('logout') }}" class="btn">Logout</a>
+            {% endif %}
+        </div>
+    </div>
+</header>
+
+  {% block body %}
+  <main>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="card" style="background:#f4fff4;border-color:#cfe8cf">{{ messages[0] }}</div>
+      {% endif %}
+    {% endwith %}
+    
+    </main>
+  {% endblock %}
+  <script>
+    // Identifica il contesto attuale della pagina per i suggerimenti intelligenti
+    window.currentContextId = "{{ p.numero if p else (cliente.id_cliente if cliente else '') }}";
+    window.currentContextLabel = "{{ p.cliente if p else (cliente.cliente if cliente else '') }}";
+    window.currentContextType = "{{ 'quote' if p else ('client' if cliente else '') }}";
+// Funzione globale per aprire la modale task da qualsiasi pagina
+window.openQuickTask = function(quoteId, contextLabel, subjectName) {
+    const modal = document.getElementById('quickTaskModal');
+    const input = document.getElementById('quickTaskInput');
+    const saveBtn = document.getElementById('saveQuickTaskBtn');
+    
+    // Rimuove eventuali cancelletti doppi
+    const cleanId = quoteId.toString().replace('#', '');
+    let tagValue = "";
+
+    // Applichiamo la formattazione richiesta per i preventivi e per i clienti
+    if (contextLabel.toUpperCase() === 'CLIENTE') {
+        // Formato Cliente: basta il Nome (es. #CLT-XYZ[Mario Rossi] -> Mario Rossi)
+        tagValue = `#${cleanId}[${subjectName}]`;
+    } else {
+        // Formato Preventivo: ID (Nome) (es. #ID[#ID (Mario Rossi)] -> #ID (Mario Rossi))
+        tagValue = `#${cleanId}[#${cleanId} (${subjectName})]`;
+    }
+    
+    // Inseriamo il tag nel campo di testo
+    input.value = tagValue + " ";
+    
+    modal.style.display = 'flex';
+    input.focus();
+    
+    input.oninput = () => window.handleAutocomplete(input, document.getElementById('quickTaskMentions'));
+
+    saveBtn.onclick = async () => {
+        const text = input.value.trim();
+        if(!text) return;
+        
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Inviando...';
+        
+        try {
+            const response = await fetch('/api/tasks', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ description: text })
+            });
+            
+            if(response.ok) {
+                const result = await response.json();
+                if(result.success) {
+                    modal.style.display = 'none';
+                    showNotification("Task Creata", "L'azione è stata registrata con successo.");
+                    // Opzionale: se sei nella pagina tasks, ricarica la lista
+                    if(typeof window.loadTasks === 'function') window.loadTasks();
+                } else {
+                    alert("Il server ha segnalato un problema: " + (result.error || "Errore sconosciuto"));
+                }
+            } else {
+                alert("Errore del server: " + response.status);
+            }
+        } catch(e) {
+            console.error("Errore invio task:", e);
+            alert("Errore di connessione durante il salvataggio.");
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = 'Crea Task';
+        }
+    };
+};
+    // ========== Funzioni Helper Globali ==========
+    function normalizeNumberString(raw) { if (raw == null) return ""; let s = String(raw).trim().replace(/[ €%]/g, ""); const lastDot = s.lastIndexOf("."); const lastComma = s.lastIndexOf(","); if (lastDot !== -1 && lastComma !== -1) { if (lastComma > lastDot) { s = s.replace(/\./g, "").replace(/,/g, "."); } else { s = s.replace(/,/g, ""); } } else if (lastComma !== -1) { s = s.replace(/,/g, "."); } return s; }
+    function parseNum(str) { const s = normalizeNumberString(str); const n = parseFloat(s); return isNaN(n) ? 0 : n; }
+    function hasValue(str) { return str != null && String(str).trim() !== ""; }
+    function fmtMoney(n) { return Number(n).toFixed(2).replace(".", ",") + " €"; }
+    function prezzoMatrioska(pc, s1, s2, s3) { let res = parseNum(pc);[s1, s2, s3].forEach(d => { res *= (1 - parseNum(d) / 100); }); return Math.max(0, res); }
+    function formatOnBlur(el) { const t = el.dataset.type; if (!t) return; const raw = el.value.trim(); if (raw === "") return; let cleaned = raw.replace(/[€%]/g, "").trim(); if (t === "percent") { el.value = cleaned + " %"; return; } if (t === "currency") { el.value = cleaned + " €"; return; } if (t === "int") { el.value = cleaned.replace(/[^0-9]/g, ""); return; } }
+    function stripForSubmit(form) { form.querySelectorAll('[data-type]').forEach(el => { el.value = normalizeNumberString(el.value); }); }
+
+    function handlePreview(ev) { handlePdfGeneration(ev, 'stampa_html'); }
+    function handlePdf(ev) { handlePdfGeneration(ev, 'generate_pdf_task'); }
+
+    function handlePdfGeneration(ev, targetEndpoint, onCompleteCallback) {
+        ev.preventDefault();
+        const form = document.getElementById('grid-form');
+        if (!form) return;
+        const saveBtn = document.getElementById('save-quote-btn');
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvataggio in corso...';
+        saveBtn.disabled = true;
+        const formData = new FormData(form);
+        formData.append('is_ajax', '1');
+        fetch(form.action, { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                saveBtn.innerHTML = '<i class="fas fa-check"></i> Salvato!';
+                setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.disabled = false; }, 2000);
+                const quoteId = form.dataset.quoteId;
+                if (targetEndpoint === 'stampa_html') {
+                    window.open(`/stampa-html/${quoteId}`, '_blank');
+                    return;
+                }
+                const newTab = window.open("{{ url_for('loading_static') }}", "_blank");
+                fetch(`/generate-pdf-task/${quoteId}`)
+                    .then(res => res.json())
+                    .then(pdfData => {
+                        if (newTab) {
+                            if (pdfData.pdf_url) {
+                                newTab.location.href = pdfData.pdf_url;
+                                if (typeof onCompleteCallback === 'function') { onCompleteCallback(pdfData); }    
+                            } else {
+                                newTab.close();
+                                alert(`Errore nella generazione del PDF: ${pdfData.error}`);
+                            }
+                        }
+                    });
+            } else {
+                alert("Errore durante il salvataggio. Impossibile generare il PDF.");
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+            }
+        }).catch(err => {
+            alert("Errore di connessione. Impossibile salvare e generare il PDF.");
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        
+        // --- NUOVO: Listener globale per la copia HTML ---
+        document.addEventListener('copy', function(e) {
+            if (document.body.hasAttribute('data-copy-html')) {
+                const htmlToCopy = document.body.getAttribute('data-copy-html');
+                const textToCopy = document.body.getAttribute('data-copy-text');
+                e.clipboardData.setData('text/html', htmlToCopy);
+                e.clipboardData.setData('text/plain', textToCopy);
+                e.preventDefault();
+                document.body.removeAttribute('data-copy-html');
+                document.body.removeAttribute('data-copy-text');
+            }
+});
+
+
+        window.showNotification = function(title, message, onOk) {
+            const modal = document.getElementById('notification-modal');
+            if (!modal) return;
+            
+            modal.querySelector('#notification-modal-title').textContent = title;
+            modal.querySelector('#notification-modal-text').textContent = message;
+            modal.style.display = 'flex';
+            
+            const okBtn = modal.querySelector('#notification-modal-ok');
+            // Pulizia dei vecchi eventi per evitare doppie chiamate
+            const newOkBtn = okBtn.cloneNode(true); 
+            okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+            
+            newOkBtn.addEventListener('click', () => {
+                modal.style.display = 'none';
+                if (onOk) onOk();
+            }, { once: true });
+        };
+
+        // Fai lo stesso per showConfirmation se presente:
+        window.showConfirmation = function(title, message, onConfirm) {
+            const modal = document.getElementById('confirm-modal');
+            if (!modal) return;
+            modal.querySelector('#confirm-modal-title').textContent = title;
+            modal.querySelector('#confirm-modal-text').innerHTML = message;
+            modal.style.display = 'flex';
+            const okBtn = modal.querySelector('#confirm-modal-ok');
+            const cancelBtn = modal.querySelector('#confirm-modal-cancel');
+            
+            // Ricrea i bottoni per pulire i listener precedenti
+            const newOkBtn = okBtn.cloneNode(true);
+            okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+            const newCancelBtn = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+            const closeModal = () => { modal.style.display = 'none'; };
+            
+            newOkBtn.addEventListener('click', () => {
+                closeModal();
+                if (onConfirm) onConfirm();
+            }, { once: true });
+            newCancelBtn.addEventListener('click', closeModal, { once: true });
+        }
+
+        const editorForm = document.getElementById('grid-form');
+        if (editorForm) {
+            document.querySelectorAll('[data-type]').forEach(el => { el.addEventListener('blur', () => formatOnBlur(el)); if (el.value && el.value.trim() !== "") formatOnBlur(el); });
+            const feeHeader = document.querySelector('input[name="fee_pct"]');
+            if (feeHeader) { ['input', 'change', 'blur'].forEach(ev => { feeHeader.addEventListener(ev, () => { document.querySelectorAll('tbody tr').forEach(updateRow); updateTotals(); }); }); }
+            const ivaInput = document.querySelector('input[name="iva_pct"]');
+            if (ivaInput) { ['input', 'change', 'blur'].forEach(ev => { ivaInput.addEventListener(ev, () => updateTotals()); }); }
+            editorForm.addEventListener('submit', () => stripForSubmit(editorForm));
+            const fields = Array.from(document.querySelectorAll('#grid-form input, #grid-form select, #grid-form textarea'));
+            fields.forEach((el, i) => { el.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); const next = fields[i + 1]; if (next) { next.focus(); if (next.select) next.select(); } } }); });
+            
+            const card = document.getElementById('header-card');
+            const toggleBtn = document.getElementById('toggle-header-btn');
+            const venditoreInput = document.querySelector('input[name="venditore"]');
+            const numeroInput = document.querySelector('input[name="numero"]');
+            const dataInput = document.querySelector('input[name="data"]');
+            const clienteInput = document.querySelector('input[name="cliente"]');
+            const summaryVenditore = document.getElementById('summary-venditore');
+            const summaryNumero = document.getElementById('summary-numero');
+            const summaryData = document.getElementById('summary-data');
+            const summaryCliente = document.getElementById('summary-cliente');
+            const updateSummary = () => { if (summaryVenditore) summaryVenditore.textContent = venditoreInput.value || '...'; if (summaryNumero) summaryNumero.textContent = numeroInput.value || '...'; if (summaryData) summaryData.textContent = dataInput.value || '...'; if (summaryCliente) summaryCliente.textContent = clienteInput.value || '...'; };
+            if (card && toggleBtn) {
+                toggleBtn.addEventListener('click', () => { card.classList.toggle('is-collapsed'); if (card.classList.contains('is-collapsed')) { toggleBtn.innerHTML = '↓ Mostra Dettagli'; updateSummary(); } else { toggleBtn.innerHTML = '↑ Nascondi'; } });
+                if (venditoreInput) venditoreInput.addEventListener('input', updateSummary);
+                if (numeroInput) numeroInput.addEventListener('input', updateSummary);
+                if (dataInput) dataInput.addEventListener('input', updateSummary);
+                if (clienteInput) clienteInput.addEventListener('input', updateSummary);
+                updateSummary();
+            }
+
+            const modal = document.getElementById('modal-longtext');
+            const modalTextarea = document.getElementById('modal-textarea');
+            const modalSaveBtn = document.getElementById('modal-save');
+            const modalCloseBtn = document.getElementById('modal-close');
+            const itemRowsContainer = document.getElementById('tabella-righe');
+            let activeInput = null;
+
+            function openModal(inputElement) { activeInput = inputElement; modalTextarea.value = activeInput.value; modal.style.display = 'flex'; modalTextarea.focus(); }
+            function closeModal() { modal.style.display = 'none'; activeInput = null; }
+
+            if (itemRowsContainer && modal) {
+                itemRowsContainer.addEventListener('click', (e) => {
+                    const editButton = e.target.closest('.edit-icon'); 
+                    if (editButton) {
+                        const wrapper = editButton.closest('.article-cell-wrapper');
+                        const input = wrapper.querySelector('.main-article-input');
+                        if (input) { openModal(input); }
+                    }
+                });
+                modalSaveBtn.addEventListener('click', () => { if (activeInput) { activeInput.value = modalTextarea.value; } closeModal(); });
+                modalCloseBtn.addEventListener('click', closeModal);
+                modal.addEventListener('click', (e) => { if (e.target === modal) { closeModal(); } });
+            }
+
+            const lockBtn = document.getElementById('lock-btn');
+            const lockInput = document.querySelector('input[name="is_locked"]');
+            const unlockModal = document.getElementById('unlock-modal');
+            const unlockModalTitle = document.getElementById('unlock-modal-title');
+            const unlockModalText = document.getElementById('unlock-modal-text');
+            const unlockPasswordGroup = document.getElementById('unlock-password-group');
+            const unlockPasswordInput = document.getElementById('unlock-password-input');
+            const unlockModalCancel = document.getElementById('unlock-modal-cancel');
+            const unlockModalConfirm = document.getElementById('unlock-modal-confirm');
+            let currentUnlockStep = 1;
+
+            function applyLockState(isLocked) { if (isLocked) { editorForm.classList.add('is-locked'); lockBtn.innerHTML = '🔒'; lockInput.value = 'true'; } else { editorForm.classList.remove('is-locked'); lockBtn.innerHTML = '🔓'; lockInput.value = 'false'; } }
+            function closeUnlockModal() { unlockModal.style.display = 'none'; unlockPasswordGroup.style.display = 'none'; unlockPasswordInput.value = ''; }
+            
+            if (lockBtn && lockInput && editorForm) {
+                applyLockState(lockInput.value === 'true');
+                lockBtn.addEventListener('click', () => {
+                    if (!editorForm.classList.contains('is-locked')) return;
+                    const quoteNumber = document.querySelector('input[name="numero"]')?.value || 'N/D';
+                    const quoteStatus = document.querySelector('select[name="stato"]')?.value || 'N/D';
+                    currentUnlockStep = 1;
+                    unlockModalTitle.textContent = 'Conferma Sblocco Preventivo';
+                    unlockModalText.innerHTML = `Il preventivo N. <strong>${quoteNumber}</strong> risulta "${quoteStatus}".<br>Sei sicuro di volerlo sbloccare e riportare allo stato di <strong>BOZZA</strong>?`;
+                    unlockPasswordGroup.style.display = 'none';
+                    unlockModalConfirm.textContent = 'Sì, procedi';
+                    unlockModal.style.display = 'flex';
+                });
+
+                unlockModalConfirm.addEventListener('click', () => {
+                    if (currentUnlockStep === 1) {
+                        currentUnlockStep = 2;
+                        unlockModalTitle.textContent = 'Verifica Sicurezza';
+                        unlockModalText.textContent = 'Per confermare l\'operazione, inserisci la tua password.';
+                        unlockPasswordGroup.style.display = 'block';
+                        unlockModalConfirm.textContent = 'Sblocca Ora';
+                        unlockPasswordInput.focus();
+                    } else {
+                        const password = unlockPasswordInput.value;
+                        const quoteId = editorForm.dataset.quoteId;
+                        if (!password) { showNotification('Errore', 'Per favore, inserisci la password.'); return; }
+                        fetch(`/preventivo/${quoteId}/sblocca`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: password }) })
+                        .then(response => response.json())
+                        .then(data => {
+                            closeUnlockModal();
+                            if (data.success) { showNotification("Operazione Completata", "Preventivo sbloccato con successo!", () => window.location.reload()); }
+                            else { showNotification('Errore', data.error || 'Impossibile sbloccare il preventivo.'); }
+                        })
+                        .catch(error => { console.error("Errore Fetch:", error); showNotification('Errore di Rete', 'Impossibile comunicare con il server. Controlla la connessione.'); });
+                    }
+                });
+                unlockModalCancel.addEventListener('click', closeUnlockModal);
+                unlockModal.addEventListener('click', (e) => { if (e.target === unlockModal) closeUnlockModal(); });
+            }
+        }
+        
+        const geoData = JSON.parse('{{ geo_data|tojson|safe if geo_data else "[]" }}');
+        const selRegione = document.getElementById('select-regione');
+        if (geoData && geoData.length > 0 && selRegione) {
+            const selProvincia = document.getElementById('select-provincia');
+            const selComune = document.getElementById('select-comune');
+            const regioni = [...new Map(geoData.map(item => [item.regione.codice, item.regione])).values()].sort((a, b) => a.nome.localeCompare(b.nome));
+            regioni.forEach(regione => { selRegione.add(new Option(regione.nome, regione.codice)); });
+            selRegione.addEventListener('change', () => {
+                selProvincia.innerHTML = '<option value="">Seleziona provincia...</option>'; selComune.innerHTML = '<option value="">...</option>';
+                const codiceRegione = selRegione.value; if (!codiceRegione) return;
+                const nomeRegioneInput = document.getElementById('regione_nome');
+                if(nomeRegioneInput) nomeRegioneInput.value = selRegione.options[selRegione.selectedIndex].text;
+                const provinceInRegione = geoData.filter(c => c.regione.codice === codiceRegione);
+                const provinceUniche = [...new Map(provinceInRegione.map(item => [item.provincia.codice, {nome: item.provincia.nome, sigla: item.sigla}])).values()].sort((a, b) => a.nome.localeCompare(b.nome));
+                provinceUniche.forEach(prov => { selProvincia.add(new Option(`${prov.nome} (${prov.sigla})`, prov.sigla)); });
+            });
+            selProvincia.addEventListener('change', () => {
+                selComune.innerHTML = '<option value="">Seleziona comune...</option>';
+                const siglaProvincia = selProvincia.value; if (!siglaProvincia) return;
+                const comuni = geoData.filter(c => c.sigla === siglaProvincia).sort((a, b) => a.nome.localeCompare(b.nome));
+                comuni.forEach(comune => { selComune.add(new Option(comune.nome, comune.nome)); });
+            });
+            {% if p %}
+            const valoreSalvatoRegione = '{{ p.regione | default("", true) }}'; const valoreSalvatoProvincia = '{{ p.provincia | default("", true) }}'; const valoreSalvatoComune = '{{ p.comune | default("", true) }}';
+            if (valoreSalvatoRegione) {
+                selRegione.value = valoreSalvatoRegione; selRegione.dispatchEvent(new Event('change'));
+                setTimeout(() => {
+                    if (valoreSalvatoProvincia) selProvincia.value = valoreSalvatoProvincia; selProvincia.dispatchEvent(new Event('change'));
+                    setTimeout(() => { if (valoreSalvatoComune) selComune.value = valoreSalvatoComune; }, 100); 
+                }, 100);
+            }
+            {% endif %}
+        }
+        
+    });
+</script>
+
+<div id="modal-longtext" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>Modifica Descrizione Articolo</h3>
+        <textarea id="modal-textarea"></textarea>
+        <div class="modal-actions">
+            <button id="modal-save" class="btn primary">Salva</button>
+            <button id="modal-close" class="btn">Chiudi</button>
+        </div>
+    </div>
+</div>
+<div id="unlock-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 450px;">
+        <h3 id="unlock-modal-title"></h3>
+        <p id="unlock-modal-text" style="line-height: 1.6; color: var(--muted);"></p>
+        <div id="unlock-password-group" style="display: none; margin-top: 16px;">
+            <label for="unlock-password-input">Password</label>
+            <input type="password" id="unlock-password-input" placeholder="Inserisci la tua password">
+        </div>
+        <div class="modal-actions">
+            <button type="button" id="unlock-modal-cancel" class="btn">Annulla</button>
+            <button type="button" id="unlock-modal-confirm" class="btn primary">Sì, procedi</button>
+        </div>
+    </div>
+</div>
+<div id="notification-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 400px; text-align: center;">
+        <h3 id="notification-modal-title"></h3>
+        <p id="notification-modal-text" style="line-height: 1.6;"></p>
+        <div class="modal-actions" style="justify-content: center; margin-top:20px;">
+            <button type="button" id="notification-modal-ok" class="btn primary">OK</button>
+        </div>
+    </div>
+</div>
+
+<div id="confirm-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 450px; text-align: center;">
+        <h3 id="confirm-modal-title">Conferma Azione</h3>
+        <p id="confirm-modal-text" style="line-height: 1.6;"></p>
+        <div class="modal-actions" style="justify-content: center;">
+            <button type="button" id="confirm-modal-cancel" class="btn">Annulla</button>
+            <button type="button" id="confirm-modal-ok" class="btn primary">Conferma</button>
+        </div>
+    </div>
+</div>
+<div class="floating-action-group">
+    {% block extra_fab %}{% endblock %}
+    
+    <a href="#" class="fab-btn notify-fab" id="notifyFab" title="Notifiche" style="background: #f59e0b;">
+        <div class="unread-badge" id="notifyBadge">0</div>
+        <i class="fas fa-bell"></i>
+        <span class="fab-label">NOTIFICHE</span>
+    </a>
+
+    <a href="#" class="fab-btn message-fab" title="Messaggi">
+        <div class="unread-badge" id="unreadBadge">0</div>
+        <i class="fas fa-comments"></i>
+        <span class="fab-label">MESSAGGI</span>
+    </a>
+</div>
+
+<div class="chat-modal" id="chatModal">
+    <div class="chat-header">
+        <span id="chatTitle">Messaggi Team</span>
+        <button class="btn icon-btn" id="closeChat" style="background:none; border:none; color:white; cursor:pointer;"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="chat-body" id="chatBody"></div>
+    <div class="chat-footer" id="chatFooter">
+        <div id="chatMentionList" class="mention-list"></div>
+        <input type="text" class="chat-input" id="chatInput" placeholder="Scrivi un messaggio...">
+        <button class="btn primary" id="sendMsgBtn" style="border-radius: 50%; width: 35px; height: 35px; padding: 0; display: flex; align-items: center; justify-content: center; border: none; flex-shrink: 0;">
+            <i class="fas fa-paper-plane" style="margin-right: 2px; margin-top: -1px; font-size: 14px;"></i>
+        </button>
+    </div>
+</div>
+<div class="chat-modal" id="notifyModal">
+    <div class="chat-header" style="background: #f59e0b;">
+        <span>Centro Notifiche</span>
+        <button class="btn icon-btn" onclick="window.toggleNotify()" style="background:none; border:none; color:white; cursor:pointer;"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="chat-body" id="notifyBody" style="padding: 0;"></div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- LOGICA NOTIFICHE ---
+    const notifyFab = document.getElementById('notifyFab');
+    const notifyModal = document.getElementById('notifyModal');
+    const notifyBody = document.getElementById('notifyBody');
+    const notifyBadge = document.getElementById('notifyBadge');
+
+    window.toggleNotify = async () => {
+        const isActive = notifyModal.classList.toggle('active');
+        if (isActive) {
+            const res = await fetch('/api/notifications');
+            const data = await res.json();
+            renderNotifications(data.notifications);
+            // Segna come lette e resetta il badge
+            fetch('/api/notifications/read', { method: 'POST' });
+            notifyBadge.style.display = 'none';
+        }
+    };
+
+    function renderNotifications(notifs) {
+        if (notifs.length === 0) {
+            notifyBody.innerHTML = '<p class="muted center" style="margin-top:20px; text-align:center;">Nessuna notifica recente</p>';
+            return;
+        }
+        notifyBody.innerHTML = notifs.map(n => `
+            <div class="notify-item ${n.read ? '' : 'unread'}" onclick="location.href='${n.link}'">
+                <div class="notify-text">${n.text}</div>
+                <div class="notify-time">${n.timestamp}</div>
+            </div>
+        `).join('');
+    }
+
+    async function checkNotifs() {
+        const res = await fetch('/api/notifications');
+        const data = await res.json();
+        if (data.unread_count > 0) {
+            notifyBadge.innerText = data.unread_count;
+            notifyBadge.style.display = 'flex';
+        }
+    }
+
+    notifyFab.onclick = (e) => { e.preventDefault(); window.toggleNotify(); };
+    setInterval(checkNotifs, 15000); // Controlla ogni 15 secondi
+    checkNotifs();
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    // --- LOGICA MESSAGGISTICA GLOBALE ---
+    const chatFab = document.querySelector('.message-fab');
+    const chatModal = document.getElementById('chatModal');
+    const chatBody = document.getElementById('chatBody');
+    const chatFooter = document.getElementById('chatFooter');
+    const chatInput = document.getElementById('chatInput');
+    const chatBtn = document.getElementById('sendMsgBtn');
+    const chatTitle = document.getElementById('chatTitle');
+    const chatMentionList = document.getElementById('chatMentionList');
+    
+    let activeChatUser = null;
+    let chatRefreshInterval = null;
+    let teamUsers = []; 
+    let linkSuggestions = [];
+
+    // --- 1. FUNZIONE DI PARSING (VISUALIZZAZIONE) ---
+window.parseMessage = function(text) {
+    if (!text) return "";
+    
+    const routeMap = {
+        'ORDINE': 'conferma-ordine',
+        'SALDO': 'gestione_pagamenti',
+        'CONSEGNA': 'consegna',
+        'FATTURE': 'fattura',
+        'CLIENTE': 'dettaglio_cliente' // Aggiunto supporto link cliente
+    };
+
+    return text
+        .replace(/\[VEDI TASK #TASK-([\w-]+)\]/g, '<a href="/tasks#$1" class="shout-link" style="font-weight:bold;"><i class="fas fa-external-link-alt"></i> VAI ALLA TASK</a>')
+        .replace(/@(\w+)/g, '<span class="shout-mention">@$1</span>')
+        // Regex aggiornata: cattura ID e opzionalmente tutto ciò che è dentro []
+        .replace(/(^|\s)#([A-Z0-9-]+)(?:\s*\[([^\]]+)\])?/g, (match, space, id, tag) => {
+            const context = tag ? tag.toUpperCase() : null;
+            let url = "";
+
+            // Se il tag è un contesto conosciuto (es. [ORDINE]), usiamo la rotta specifica
+            if (context && routeMap[context] && context !== 'CLIENTE') {
+                if (context === 'ORDINE') url = `/preventivo/${id}/conferma-ordine`;
+                else if (context === 'SALDO') url = `/pagamenti/${id}`;
+                else if (context === 'CONSEGNA') url = `/consegna/${id}`;
+                else if (context === 'FATTURE') url = `/fattura/${id}`;
+            } else if (id.startsWith('CLT-')) {
+                url = `/cliente/dettaglio/${id}`;
+            } else {
+                const folder = id.startsWith('EDIL-') ? 'preventivo-edile' : 'preventivo';
+                url = `/${folder}/edit/${id}`;
+            }
+
+            // SE ESISTE IL TAG (NOME), MOSTRIAMO SOLO QUELLO. ALTRIMENTI L'ID.
+            const label = tag ? tag : `#${id}`;
+            return `${space}<a href="${url}" class="shout-link">${label}</a>`;
+        });
+};
+
+   // --- 2. FUNZIONE DI INSERIMENTO SUGGERIMENTO ---
+    function addSuggestionItem(inputEl, listEl, code, label, icon, triggerIdx, isCurrent = false) {
+        const item = document.createElement('div');
+        item.className = 'mention-item' + (isCurrent ? ' current-context' : '');
+        
+        // Puliamo la label dai prefissi tecnici per l'inserimento nel tag
+        const cleanLabel = label.replace(/^(Cartella:\s*|Prev\.\s*)/i, '');
+        
+        item.innerHTML = `<span><i class="fas ${icon}"></i> ${label}</span> <span class="tag-sigla">${code}</span>`;
+        item.onclick = () => {
+            const val = inputEl.value;
+            // Puliamo la label e creiamo il tag nel formato #ID[Nome]
+            const tagToInsert = code.startsWith('#') ? `${code}[${cleanLabel}]` : code;
+            
+            const newVal = val.substring(0, triggerIdx) + tagToInsert + ' ' + val.substring(inputEl.selectionStart);
+            inputEl.value = newVal;
+            listEl.style.display = 'none';
+            inputEl.focus();
+            const newPos = triggerIdx + tagToInsert.length + 1;
+            inputEl.setSelectionRange(newPos, newPos);
+        };
+        listEl.appendChild(item);
+    }
+
+    window.handleAutocomplete = async function(inputEl, listEl) {
+        const val = inputEl.value;
+        const cursorIdx = inputEl.selectionStart;
+        const textBeforeCursor = val.substring(0, cursorIdx);
+        const lastAt = textBeforeCursor.lastIndexOf('@');
+        const lastHash = textBeforeCursor.lastIndexOf('#');
+        const lastTriggerIdx = Math.max(lastAt, lastHash);
+        
+        if (lastTriggerIdx === -1 || textBeforeCursor.substring(lastTriggerIdx).includes(' ')) {
+            listEl.style.display = 'none';
+            return;
+        }
+
+        const currentTrigger = textBeforeCursor.charAt(lastTriggerIdx);
+        const query = textBeforeCursor.substring(lastTriggerIdx + 1).toLowerCase();
+        listEl.innerHTML = '';
+        let hasResults = false;
+
+        if (currentTrigger === '@') {
+            if (teamUsers.length === 0) teamUsers = await (await fetch('/api/messages/users')).json();
+            
+            // Definizione Gruppi Speciali
+            const gruppi = [
+                { code: '@tutti', label: 'Tutti (Team completo)', icon: 'fa-users' },
+                { code: '@venditori', label: 'Gruppo Venditori', icon: 'fa-users' },
+                { code: '@segreteria', label: 'Gruppo Segreteria', icon: 'fa-users' },
+                { code: `@{{ session.user_id }}`, label: 'Personale (Assegna a me)', icon: 'fa-user-tag', search: 'personale' }
+            ];
+
+            // Filtra e aggiungi gruppi
+            gruppi.filter(g => g.code.includes(query) || (g.search && g.search.includes(query))).forEach(g => {
+                addSuggestionItem(inputEl, listEl, g.code, g.label, g.icon, lastTriggerIdx);
+                hasResults = true;
+            });
+
+            // Filtra e aggiungi utenti singoli
+            teamUsers.filter(u => u.full_name.toLowerCase().includes(query)).forEach(u => {
+                addSuggestionItem(inputEl, listEl, `@${u.username}`, u.full_name, 'fa-user', lastTriggerIdx);
+                hasResults = true;
+            });
+        } else {
+            const res = await fetch(`/api/suggestions/links?q=${encodeURIComponent(query)}`);
+            let results = await res.json();
+
+            // LOGICA DI PRIORITÀ: Se siamo in una pagina specifica, mettiamo quel preventivo/cliente in cima
+            if (window.currentContextId) {
+                const cleanCurrentId = window.currentContextId.replace('#', '');
+                const currentIndex = results.findIndex(s => s.id === cleanCurrentId);
+                
+                let currentItem = null;
+                if (currentIndex !== -1) {
+                    // Se è già nei risultati, lo estraiamo
+                    currentItem = results.splice(currentIndex, 1)[0];
+                } else if (cleanCurrentId.toLowerCase().includes(query) || window.currentContextLabel.toLowerCase().includes(query) || query === "") {
+                    // Se non è nei risultati ma corrisponde alla ricerca (o ricerca vuota), lo creiamo al volo
+                    currentItem = {
+                        id: cleanCurrentId,
+                        label: window.currentContextLabel,
+                        type: window.currentContextType
+                    };
+                }
+
+                if (currentItem) {
+                    // Lo aggiungiamo in prima posizione
+                    results.unshift(currentItem);
+                }
+            }
+
+            results.forEach(s => {
+                const isCurrent = s.id === window.currentContextId.replace('#', '');
+                addSuggestionItem(
+                    inputEl, 
+                    listEl, 
+                    `#${s.id}`, 
+                    s.label, 
+                    s.type === 'quote' ? 'fa-file-invoice' : 'fa-folder-open', 
+                    lastTriggerIdx,
+                    isCurrent
+                );
+                hasResults = true;
+            });
+        }
+        listEl.style.display = hasResults ? 'block' : 'none';
+    };
+
+
+    window.loadChatUsers = async function() {
+        clearInterval(chatRefreshInterval);
+        activeChatUser = null; 
+        chatTitle.innerText = "Messaggi Team"; 
+        chatFooter.classList.remove('active');
+        
+        const res = await fetch('/api/messages/users');
+        const users = await res.json();
+        chatBody.innerHTML = '';
+        
+        users.forEach(u => {
+            const div = document.createElement('div');
+            div.className = 'chat-user-item';
+            
+            // Gestione badge notifiche
+            let badge = u.unread_count > 0 ? `<span class="user-unread-badge">${u.unread_count}</span>` : '';
+            
+            // Formattazione data ultimo messaggio
+            let displayTime = "";
+            if (u.last_message_timestamp && u.last_message_timestamp !== "0000-00-00 00:00:00") {
+                const parts = u.last_message_timestamp.split(' '); // Es: "2024-03-20 15:30"
+                displayTime = `<span class="last-time-msg"> - ${parts[1] || parts[0]}</span>`;
+            }
+
+            div.innerHTML = `
+                <div class="chat-user-info">
+                    <strong>${u.full_name}</strong>
+                    <div class="role-line">
+                        <span>${u.role}</span>
+                        ${displayTime}
+                    </div>
+                </div>
+                ${badge}
+            `;
+            
+            div.onclick = () => openConversation(u);
+            chatBody.appendChild(div);
+        });
+    };
+
+    async function openConversation(user) {
+        activeChatUser = user.username;
+        chatTitle.innerHTML = `<i class="fas fa-chevron-left" onclick="loadChatUsers()" style="cursor:pointer; margin-right:10px;"></i> ${user.full_name}`;
+        chatFooter.classList.add('active');
+        chatBody.innerHTML = '<p class="muted center" style="margin-top:20px;">Caricamento...</p>';
+        await renderMessages();
+        clearInterval(chatRefreshInterval);
+        chatRefreshInterval = setInterval(renderMessages, 3000);
+    }
+
+    async function renderMessages() {
+        if (!activeChatUser) return;
+        const res = await fetch(`/api/messages/history/${activeChatUser}`);
+        const msgs = await res.json();
+        if (msgs.length === 0) { chatBody.innerHTML = '<p class="muted center" style="margin-top:20px;">Invia un messaggio!</p>'; return; }
+        if (msgs.length !== chatBody.querySelectorAll('.message-bubble').length) {
+            chatBody.innerHTML = '';
+            msgs.forEach(m => {
+                const div = document.createElement('div');
+                div.className = `message-bubble ${m.from === "{{ session.user_id }}" ? 'message-sent' : 'message-received'}`;
+                div.innerHTML = window.parseMessage(m.text);
+                chatBody.appendChild(div);
+            });
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+    }
+
+    chatBtn.onclick = async () => {
+        const text = chatInput.value.trim();
+        if (!text || !activeChatUser) return;
+        await fetch('/api/messages/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: activeChatUser, text: text }) });
+        chatInput.value = ''; renderMessages();
+    };
+
+    chatFab.onclick = (e) => { e.preventDefault(); chatModal.classList.toggle('active'); if (chatModal.classList.contains('active')) loadChatUsers(); else clearInterval(chatRefreshInterval); };
+    document.getElementById('closeChat').onclick = () => { chatModal.classList.remove('active'); clearInterval(chatRefreshInterval); };
+    chatInput.addEventListener('input', () => window.handleAutocomplete(chatInput, chatMentionList));
+    chatInput.onkeypress = (e) => { if(e.key === 'Enter') chatBtn.click(); };
+
+    async function updateUnreadBadge() {
+        const res = await fetch('/api/messages/unread_total');
+        const data = await res.json();
+        const badge = document.getElementById('unreadBadge');
+        if (badge) { badge.innerText = data.unread_count; badge.style.display = data.unread_count > 0 ? 'flex' : 'none'; }
+    }
+    setInterval(updateUnreadBadge, 10000); updateUnreadBadge();
+});
+</script>
+
+
+
+</body>
+</html>

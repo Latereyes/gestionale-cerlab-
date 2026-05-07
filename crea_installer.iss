@@ -5,7 +5,7 @@
 AppName=Gestionale Preventivi
 AppVersion={#MyAppVersion}
 ; <-- CORREZIONE: La riga AppId era malformattata
-AppId={{6002330e-1b7d-4691-bb10-fa9120279154}}
+AppId={{fe068f3a-dabb-4882-af6d-f7dbbefb8d45}}
 AppPublisher=Cerlab srls
 UninstallDisplayIcon={app}\Gestionale.exe
 DefaultDirName={autopf}\Gestionale Preventivi
