@@ -35,7 +35,7 @@
                         <th class="left">C.I.</th>
                         <th class="left">PRVC</th>
                         <th class="left">CONTR</th>
-                        <th class="right">Cartella</th>
+                        <th class="right">AZIONI</th>
                     </tr>
                 </thead>
                 </thead>
@@ -80,9 +80,18 @@
                                 <i class="fas fa-times-circle text-danger" title="Contratto Mancante"></i>
                             {% endif %}
                         </td>
-                        <td class="right">
+                        <td class="right" style="white-space: nowrap; min-width: 130px;">
                             <a href="{{ url_for('dettaglio_cliente', client_id=c.id_cliente) }}" class="btn icon-btn" title="Vedi Documenti">
                                 <i class="fas fa-folder-open"></i>
+                            </a>
+                            <a href="{{ url_for('modifica_cliente', client_id=c.id_cliente) }}" class="btn icon-btn" title="Modifica Dati Cliente">
+                                <i class="fas fa-pen"></i>
+                            </a>
+                            <button type="button" class="btn icon-btn" title="Elimina Cliente" style="color: #ef4444; background: none; border: none; padding: 0; cursor: pointer; margin-left: 8px;" onclick="eliminaClienteJs('{{ c.id_cliente }}')">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </td>
+                    </tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -163,6 +172,28 @@
 .right { text-align: right; }
 </style>
 
+<div id="delete-client-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000;">
+    <div class="modal-content" style="background: white; padding: 24px; border-radius: 8px; max-width: 400px; width: 100%; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h3><i class="fas fa-exclamation-triangle" style="color: #ef4444; margin-bottom: 12px; display: block; font-size: 28px;"></i> Elimina Cliente</h3>
+        <p>Sei sicuro di voler eliminare questo cliente dal sistema?</p>
+        <p style="font-size: 13px; color: #6c757d; margin-top: 8px;">Il sistema verificherà la presenza di preventivi attivi prima di procedere.</p>
+        <div class="modal-actions" style="display: flex; gap: 12px; justify-content: center; margin-top: 20px;">
+            <button type="button" class="btn btn-outline" onclick="closeDeleteClientModal()">Annulla</button>
+            <button type="button" class="btn" id="btn-confirm-delete-client" style="background-color: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Sì, Elimina</button>
+        </div>
+    </div>
+</div>
+
+<div id="error-client-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000;">
+    <div class="modal-content" style="background: white; padding: 24px; border-radius: 8px; max-width: 400px; width: 100%; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h3><i class="fas fa-times-circle" style="color: #ef4444; margin-bottom: 12px; display: block; font-size: 28px;"></i> Impossibile Eliminare</h3>
+        <p id="error-modal-text" style="font-weight: 500; line-height: 1.5; color: #333;"></p>
+        <div class="modal-actions" style="display: flex; justify-content: center; margin-top: 20px;">
+            <button type="button" class="btn btn-outline" onclick="closeErrorModal()">Chiudi</button>
+        </div>
+    </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('live-search-anagrafica');
@@ -184,12 +215,56 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Eventi per ricerca e switch
-    searchInput.addEventListener('input', applyFilters);
+searchInput.addEventListener('input', applyFilters);
     toggleSwitch.addEventListener('change', applyFilters);
-
-    // Esegui filtro al caricamento
+    
     applyFilters();
+});
+
+let clientToDeleteId = null;
+
+function eliminaClienteJs(clientId) {
+    clientToDeleteId = clientId;
+    document.getElementById('delete-client-modal').style.display = 'flex';
+}
+
+function closeDeleteClientModal() {
+    document.getElementById('delete-client-modal').style.display = 'none';
+    clientToDeleteId = null;
+}
+
+function showErrorModal(errorMessage) {
+    document.getElementById('error-modal-text').innerText = errorMessage;
+    document.getElementById('error-client-modal').style.display = 'flex';
+}
+
+function closeErrorModal() {
+    document.getElementById('error-client-modal').style.display = 'none';
+}
+
+document.getElementById('btn-confirm-delete-client').addEventListener('click', function() {
+    if (clientToDeleteId !== null) {
+        fetch(`/cliente/elimina/${clientToDeleteId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            closeDeleteClientModal();
+            if (data.success) {
+                alert(data.message);
+                window.location.reload();
+            } else {
+                showErrorModal(data.error);
+            }
+        })
+        .catch(error => {
+            closeDeleteClientModal();
+            showErrorModal("Errore di rete durante l'eliminazione.");
+        });
+    }
 });
 </script>
 {% endblock %}

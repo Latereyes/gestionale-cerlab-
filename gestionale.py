@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.3.0"  
+APP_VERSION = "2.3.1"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -1529,19 +1529,16 @@ def dashboard_clienti():
         is_edile = p.get("tipo_preventivo") == "edile"
         
         if is_edile:
-            # Calcolo totale al volo per Edile (Somma prezzo_vendita)
-            tot_edile = sum(_to_num(r.get("prezzo_vendita")) for r in p.get("righe_edili", []))
-            p["totale"] = tot_edile
-            # Calcolo IVA (assumendo media o leggendo righe) per il saldo
-            tot_iva_edile = sum(_to_num(r.get("prezzo_vendita")) * (_to_num(r.get("iva_pct"))/100) for r in p.get("righe_edili", []))
-            p["tot_iva"] = tot_iva_edile
-            p["totale_lordo"] = tot_edile + tot_iva_edile
+            # --- MODIFICA: RIMOSSO IL RICALCOLO FORZATO ---
+            # Non sovrascriviamo più i totali (p["totale"], p["tot_iva"]).
+            # Utilizziamo i valori già calcolati e salvati nel file JSON
+            # (tot_imponibile_cliente, tot_iva, totale).
+            # Impostiamo solo i contatori degli ordini a 0 per la visualizzazione corretta.
             
-            # Reset dei contatori ordini per evitare errori nel template
             p["articoli_da_ordinare_count"] = 0
             p["articoli_da_ordinare_totale"] = 0
             p["articoli_in_attesa_conferma"] = 0
-        
+            
         # Se l'utente è segreteria, salta anche le bozze
         if session.get("user_role") == 'segreteria' and p.get("stato") == "Bozza":
             continue
@@ -1964,9 +1961,69 @@ def crea_cliente():
         
     return render_template("crea_cliente.html", title="Crea Nuovo Cliente", geo_data=GEO_DATA, action=action)
 
-# --- FLUSSO PREVENTIVI EDILI (LOGICA SEPARATA) ---
+@app.route("/cliente/modifica/<client_id>", methods=["GET", "POST"])
+@login_required
+def modifica_cliente(client_id):
+    client_data = load_client(client_id)
+    if not client_data:
+        flash("Cliente non trovato.", "error")
+        return redirect(url_for("anagrafica_clienti"))
+        
+    if request.method == "POST":
+        form_keys = ["cliente", "rag_sociale", "p_iva", "indirizzo", "cap", "comune", "provincia", "regione", "regione_nome", "email", "telefono", "codice_univoco"]
+        for key in form_keys: 
+            client_data[key] = request.form.get(key, "")
+        save_client(client_id, client_data)
+        flash("Dati anagrafici aggiornati con successo.", "success")
+        return redirect(url_for("anagrafica_clienti"))
+        
+    # Aggiungiamo il parametro 'id' ai dati inviati al template per far commutare il bottone in "Salva Modifiche"
+    client_data["id"] = client_id
+    return render_template("crea_cliente.html", title="Modifica Cliente", geo_data=GEO_DATA, p=client_data, action="edit")
 
-# --- NUOVA ROTTA: Crea il file del preventivo Edile ---
+@app.route("/cliente/elimina/<client_id>", methods=["POST"])
+@login_required
+def elimina_cliente(client_id):
+    client_data = load_client(client_id)
+    if not client_data:
+        return jsonify({"success": False, "error": "Cliente non trovato."})
+    
+    quote_dirs = ["preventivi", os.path.join("data", "preventivi")]
+    has_active_quotes = False
+    
+    for q_dir in quote_dirs:
+        if os.path.exists(q_dir):
+            for fname in os.listdir(q_dir):
+                if fname.endswith(".json"):
+                    try:
+                        with open(os.path.join(q_dir, fname), "r", encoding="utf-8") as f:
+                            q_data = json.load(f)
+                            if q_data.get("id_cliente") == client_id:
+                                if q_data.get("stato") not in ["Annullato", "annullato"]:
+                                    has_active_quotes = True
+                                    break
+                    except Exception:
+                        pass
+            if has_active_quotes:
+                break
+                
+    if has_active_quotes:
+        return jsonify({"success": False, "error": "Preventivi presenti per questo cliente, annullare tutti i preventivi o contattare l'amministratore di sistema."})
+        
+    client_dirs = ["clienti", os.path.join("data", "clienti")]
+    deleted = False
+    for c_dir in client_dirs:
+        filepath = os.path.join(c_dir, f"{client_id}.json")
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            deleted = True
+            break
+            
+    if deleted:
+        return jsonify({"success": True, "message": "Cliente eliminato con successo."})
+    else:
+        return jsonify({"success": False, "error": "Impossibile trovare il file del cliente per l'eliminazione."})
+
 @app.route("/preventivo-edile/nuovo/<client_id>")
 @login_required
 @role_required('amministratore', 'ceo')
@@ -2060,8 +2117,6 @@ def salva_righe_edili(quote_id):
             nuove_sezioni.append({"titolo": sez_map[s_i]["titolo"], "righe": r_list})
         p["sezioni_edili"] = nuove_sezioni
 
-    # --- INIZIO LOGICA CORRETTA AZIONI ---
-    
     # 1. Recupera azioni di AGGIUNTA dall'URL (Query String via formaction)
     action_add_section = request.args.get("add_section")
     action_add_row_to = request.args.get("add_row")
@@ -2069,6 +2124,7 @@ def salva_righe_edili(quote_id):
     # 2. Recupera azioni di ELIMINAZIONE dal corpo del FORM (via JS hidden inputs)
     del_s_idx = form.get("delete_section")
     del_r_idx = form.get("delete_row")
+    del_whole_s_idx = form.get("delete_whole_section")
 
     if action_add_section == "1":
         p["sezioni_edili"].append({"titolo": "Nuova Sezione", "righe": []})
@@ -2095,8 +2151,23 @@ def salva_righe_edili(quote_id):
                     p["sezioni_edili"][s_idx]["righe"].pop(r_idx)
         except ValueError:
             pass
+
+    elif del_whole_s_idx is not None:
+        try:
+            s_idx = int(del_whole_s_idx)
+            if 0 <= s_idx < len(p["sezioni_edili"]):
+                p["sezioni_edili"].pop(s_idx)
+        except ValueError:
+            pass
     
     # --- FINE LOGICA CORRETTA AZIONI ---
+
+    # Sincronizzazione dell'elenco piatto righe_edili per ripulire il JSON dai dati eliminati
+    flat_righe = []
+    for sezione in p.get("sezioni_edili", []):
+        for riga in sezione.get("righe", []):
+            flat_righe.append(riga)
+    p["righe_edili"] = flat_righe
         
     save_quote(quote_id, p)
     if form.get("is_ajax") == "1": return jsonify({"success": True})
@@ -2382,57 +2453,57 @@ def _to_num(x, default=0.0):
 @login_required
 def clona_preventivo(quote_id):
     """
-    Crea una copia esatta di un preventivo esistente, ma lo imposta
-    come una nuova bozza pronta per essere modificata.
+    Crea una copia esatta di un preventivo esistente (Edile o Standard),
+    gestendo correttamente la struttura a sezioni.
     """
     # 1. Carica il preventivo originale
     p_originale = load_quote(quote_id)
     if not p_originale:
-        flash("Preventivo originale non trovato.", "error")
-        return redirect(url_for("dashboard"))
+        return jsonify({"success": False, "error": "Preventivo originale non trovato."})
 
-    # 2. Crea una copia profonda per non modificare l'originale
+    # 2. Crea una copia profonda
     p_clonato = copy.deepcopy(p_originale)
 
-    # 3. Genera un nuovo ID e aggiorna i dati chiave
+    # 3. Genera nuovo ID
     venditore_sigla = session.get("user_sigla", "XX")
     nuovo_id = get_new_quote_id(venditore_sigla)
     
     p_clonato["numero"] = nuovo_id
     p_clonato["data"] = datetime.date.today().strftime('%Y-%m-%d')
-    
-    # 4. Resetta lo stato a "Bozza" e rimuovi la cronologia
     p_clonato["stato"] = "Bozza"
     p_clonato["is_locked"] = False
     
-    # Rimuove dati specifici della "vita" del vecchio preventivo
-    p_clonato.pop("pdf_attivo", None)
-    p_clonato.pop("storico_pdf", None)
-    p_clonato.pop("pagamenti", None)
-    p_clonato.pop("bolle", None)
-    p_clonato.pop("fatture_allegate", None)
-    p_clonato.pop("ordini_fornitore", None) # Rimuoviamo anche gli ordini
+    # 4. Copia esplicita della struttura a sezioni (fondamentale per Edili)
+    if "sezioni_edili" in p_originale:
+        p_clonato["sezioni_edili"] = copy.deepcopy(p_originale["sezioni_edili"])
     
-    # Resetta lo stato di consegna di ogni riga
-    for riga in p_clonato.get("righe", []):
-        riga.pop("stato_consegna", None)
-        riga.pop("bolla_id", None)
-        riga.pop("data_consegna", None)
-        riga.pop("data_arrivo_in_house", None)
+    # 5. Pulizia dati specifici del vecchio preventivo
+    campi_da_rimuovere = [
+        "pdf_attivo", "storico_pdf", "pagamenti", "bolle", 
+        "fatture_allegate", "ordini_fornitore", "data_conferma", "data_chiusura"
+    ]
+    for campo in campi_da_rimuovere:
+        p_clonato.pop(campo, None)
     
-    # Ricalcola gli stati globali per pulizia
-    aggiorna_stato_consegna_globale(p_clonato)
-    aggiorna_stato_pagamento_globale(p_clonato)
+    # Resetta stato consegna righe (sia standard che edili)
+    if "righe" in p_clonato:
+        for r in p_clonato["righe"]:
+            r.pop("stato_consegna", None); r.pop("bolla_id", None); r.pop("data_consegna", None)
+            
+    if "sezioni_edili" in p_clonato:
+        for sez in p_clonato["sezioni_edili"]:
+            for r in sez.get("righe", []):
+                r.pop("stato_consegna", None); r.pop("bolla_id", None); r.pop("data_consegna", None)
 
-    # 5. Salva il nuovo preventivo
+    # 6. Salva
     save_quote(nuovo_id, p_clonato)
 
-    # 6. Restituisci i dati in formato JSON
+    # 7. Restituisci JSON strutturato correttamente
     return jsonify({
         "success": True, 
         "vecchio_id": quote_id, 
         "nuovo_id": nuovo_id,
-        "new_url": url_for('editor_preventivo', quote_id=nuovo_id)
+        "new_url": url_for('editor_preventivo_edile', quote_id=nuovo_id) if p_clonato.get("tipo_preventivo") == "edile" else url_for('editor_preventivo', quote_id=nuovo_id)
     })
 
 @app.route("/preventivo/<quote_id>/conferma-ordine") 
@@ -4249,10 +4320,20 @@ def marca_consegnato(quote_id):
         "data_upload": today_str
     })
 
-    for index in indici_da_marcare:
-        if 0 <= index < len(p["righe"]):
-            p["righe"][index]["stato_consegna"] = "Consegnato"
-            p["righe"][index]["data_consegna"] = today_str
+    if p.get("tipo_preventivo") == "edile":
+        for idx_assoluto in indici_da_marcare:
+            curr_idx = 0
+            for sezione in p.get("sezioni_edili", []):
+                for riga in sezione.get("righe", []):
+                    if curr_idx == idx_assoluto:
+                        riga["stato_consegna"] = "Consegnato"
+                        riga["data_consegna"] = today_str
+                    curr_idx += 1
+    else:
+        for index in indici_da_marcare:
+            if 0 <= index < len(p["righe"]):
+                p["righe"][index]["stato_consegna"] = "Consegnato"
+                p["righe"][index]["data_consegna"] = today_str
 
     aggiorna_stato_consegna_globale(p)
     aggiorna_stato_avanzamento(p)
@@ -4281,30 +4362,49 @@ def annulla_stato_consegna(quote_id):
     if not item_indices or not target_status:
         return jsonify({"success": False, "error": "Dati mancanti per l'operazione."})
 
-    # Seleziona la lista corretta in base al tipo
-    target_list = "righe_edili" if p.get("tipo_preventivo") == "edile" else "righe"
+    is_edile = p.get("tipo_preventivo") == "edile"
 
-    for index in item_indices:
-        if 0 <= index < len(p[target_list]):
-            riga = p[target_list][index]
-            original_bolla_id = riga.get("bolla_id")
+    if is_edile:
+        for idx_assoluto in item_indices:
+            curr_idx = 0
+            for sezione in p.get("sezioni_edili", []):
+                for riga in sezione.get("righe", []):
+                    if curr_idx == idx_assoluto:
+                        original_bolla_id = riga.get("bolla_id")
+                        riga["stato_consegna"] = target_status
+                        riga.pop("data_consegna", None)
 
-            # 1. Aggiorna lo stato e resetta le date successive
-            riga["stato_consegna"] = target_status
-            riga.pop("data_consegna", None) # Rimuovi la data di consegna in ogni caso
+                        if target_status == "Da Consegnare":
+                            riga.pop("data_arrivo_in_house", None)
 
-            if target_status == "Da Consegnare":
-                riga.pop("data_arrivo_in_house", None) # Rimuovi anche la data di arrivo
+                        if original_bolla_id and not keep_bolla:
+                            riga.pop("bolla_id", None)
+                            for bolla in p.get("bolle", []):
+                                if bolla.get("id") == original_bolla_id:
+                                    if idx_assoluto in bolla.get("indici_righe", []):
+                                        bolla["indici_righe"].remove(idx_assoluto)
+                                    break
+                    curr_idx += 1
+    else:
+        target_list = "righe"
+        for index in item_indices:
+            if 0 <= index < len(p[target_list]):
+                riga = p[target_list][index]
+                original_bolla_id = riga.get("bolla_id")
 
-            # 2. Gestisci il collegamento con la bolla
-            if original_bolla_id and not keep_bolla:
-                riga.pop("bolla_id", None)
-                # Rimuovi l'articolo anche dalla bolla stessa
-                for bolla in p.get("bolle", []):
-                    if bolla.get("id") == original_bolla_id:
-                        if index in bolla.get("indici_righe", []):
-                            bolla["indici_righe"].remove(index)
-                        break
+                riga["stato_consegna"] = target_status
+                riga.pop("data_consegna", None) 
+
+                if target_status == "Da Consegnare":
+                    riga.pop("data_arrivo_in_house", None) 
+
+                if original_bolla_id and not keep_bolla:
+                    riga.pop("bolla_id", None)
+                    for bolla in p.get("bolle", []):
+                        if bolla.get("id") == original_bolla_id:
+                            if index in bolla.get("indici_righe", []):
+                                bolla["indici_righe"].remove(index)
+                            break
     
     # Ricalcola lo stato globale e salva
     aggiorna_stato_consegna_globale(p)
@@ -4820,11 +4920,23 @@ def generate_bolla_task(quote_id, bolla_id):
 
     # === AGGIORNAMENTO DI STATO SULLA LISTA CORRETTA ===
     made_changes = False
-    for index in bolla.get("indici_righe", []):
-        if 0 <= index < len(p[target_list]):
-            p[target_list][index]["stato_consegna"] = "In Bolla"
-            p[target_list][index]["bolla_id"] = bolla_id
-            made_changes = True
+    is_edile = p.get("tipo_preventivo") == "edile"
+    if is_edile:
+        for idx_assoluto in bolla.get("indici_righe", []):
+            curr_idx = 0
+            for sezione in p.get("sezioni_edili", []):
+                for riga in sezione.get("righe", []):
+                    if curr_idx == idx_assoluto:
+                        riga["stato_consegna"] = "In Bolla"
+                        riga["bolla_id"] = bolla_id
+                        made_changes = True
+                    curr_idx += 1
+    else:
+        for index in bolla.get("indici_righe", []):
+            if 0 <= index < len(p[target_list]):
+                p[target_list][index]["stato_consegna"] = "In Bolla"
+                p[target_list][index]["bolla_id"] = bolla_id
+                made_changes = True
 
     if made_changes:
         aggiorna_stato_consegna_globale(p)

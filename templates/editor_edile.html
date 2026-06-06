@@ -72,8 +72,11 @@
             <div class="card-header">
                 <input type="text" name="s[{{s_idx}}][titolo]" value="{{ sezione.titolo }}" 
                        class="header-title-input" placeholder="Titolo Sezione (es. Demolizioni)">
-                <div class="header-actions">
+                <div class="header-actions" style="display: flex; align-items: center; gap: 12px;">
                     <span class="badge">Sezione {{ s_idx + 1 }}</span>
+                    <button type="button" class="btn icon-btn delete-section-btn" onclick="confirmDeleteSection({{ s_idx }})" title="Elimina intera sezione">
+                        <i class="fas fa-trash-alt" style="color: #ef4444;"></i>
+                    </button>
                 </div>
             </div>
             
@@ -517,6 +520,18 @@ input:checked + .slider:before { transform: translateX(18px); }
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
+<div id="delete-section-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3><i class="fas fa-exclamation-triangle" style="color: #dc3545; margin-bottom: 12px; display: block; font-size: 28px;"></i> Elimina Sezione</h3>
+        <p>Sei sicuro di voler eliminare l'intera sezione e <strong>tutte le lavorazioni</strong> in essa contenute?</p>
+        <p style="font-size: 13px; color: #6c757d; margin-top: 8px;">Questa azione è irreversibile.</p>
+        
+        <div class="modal-actions">
+            <button type="button" class="btn btn-outline" onclick="closeDeleteSectionModal()">Annulla</button>
+            <button type="button" class="btn" id="btn-confirm-delete-section" style="background-color: #dc3545; color: white; border: none;">Sì, Elimina</button>
+        </div>
+    </div>
+</div>
 
 
 <script>
@@ -527,7 +542,7 @@ input:checked + .slider:before { transform: translateX(18px); }
         if (shouldBeLocked) form.classList.add('is-locked');
         else form.classList.remove('is-locked');
 
-        // Disabilita input per impedire modifiche, MA ESCLUDE la casella password
+    // Disabilita input per impedire modifiche, MA ESCLUDE la casella password
         const inputs = document.querySelectorAll('#grid-form input, #grid-form select, #grid-form textarea');
         inputs.forEach(el => {
             // Aggiunta eccezione per unlock-password-input
@@ -537,7 +552,7 @@ input:checked + .slider:before { transform: translateX(18px); }
         });
 
         // Nasconde controlli riga e drag
-        document.querySelectorAll('.drag-handle, .delete-row-btn, .btn-outline, .btn-row-attach').forEach(el => {
+        document.querySelectorAll('.drag-handle, .delete-row-btn, .delete-section-btn, .btn-outline, .btn-row-attach').forEach(el => {
             el.style.display = shouldBeLocked ? 'none' : 'flex';
         });
 
@@ -714,6 +729,10 @@ function updateAllInputIndices() {
             const delBtn = row.querySelector('.delete-row-btn');
             if(delBtn) delBtn.setAttribute('onclick', `confirmDeleteRow(${sIdx}, ${rIdx})`);
         });
+        
+        // Aggiorna il puntatore della funzione elimina sezione
+        const delSecBtn = section.querySelector('.delete-section-btn');
+        if(delSecBtn) delSecBtn.setAttribute('onclick', `confirmDeleteSection(${sIdx})`);
     });
 }
 
@@ -819,6 +838,34 @@ async function triggerUpload(index) {
             form.submit();
         }
     }
+
+    // --- ELIMINAZIONE SEZIONE (Con Modale Personalizzata) ---
+    let sectionToDeleteIndex = null;
+
+    window.confirmDeleteSection = function(sIdx) {
+        sectionToDeleteIndex = sIdx;
+        document.getElementById('delete-section-modal').style.display = 'flex';
+    };
+
+    window.closeDeleteSectionModal = function() {
+        document.getElementById('delete-section-modal').style.display = 'none';
+        sectionToDeleteIndex = null;
+    };
+
+    document.getElementById('btn-confirm-delete-section').addEventListener('click', function() {
+        if(sectionToDeleteIndex !== null) {
+            const form = document.getElementById('grid-form');
+            
+            const sInput = document.createElement('input');
+            sInput.type = 'hidden';
+            sInput.name = 'delete_whole_section';
+            sInput.value = sectionToDeleteIndex;
+            form.appendChild(sInput);
+            
+            form.action = "{{ url_for('salva_righe_edili', quote_id=p.numero) }}";
+            form.submit();
+        }
+    });
 
     // --- CAMBIO STATO SMART (Preso da Editor Standard) ---
     function handleStateChangeAndSave(event, targetActionUrlName) {
@@ -976,31 +1023,45 @@ async function triggerUpload(index) {
             });
     };
 
-    // 2. Funzione Cambio Stato Intelligente
-    window.handleStateChangeAndSave = function(event, targetActionUrlName) {
-        event.preventDefault();
-        const form = document.getElementById('grid-form');
-        const btn = event.currentTarget;
+    // 2. Funzione Cambio Stato (Condivisa con Clona)
+    window.handleStatusChange = function(ev) {
+        ev.preventDefault();
+        const btn = ev.currentTarget;
         const originalHtml = btn.innerHTML;
-        
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvo...';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Attendere...';
         btn.disabled = true;
 
+        const targetActionUrlName = btn.getAttribute('data-action-url-name');
+        const quoteId = btn.closest('form').getAttribute('data-quote-id');
+
+        // Salvataggio preventivo dei dati correnti PRIMA di cambiare stato/clonare
+        const form = document.getElementById('grid-form');
         const formData = new FormData(form);
         formData.append('is_ajax', '1');
-        const quoteId = form.dataset.quoteId;
 
-        // Prima salviamo i dati, poi cambiamo lo stato
-        fetch(form.action, { method: 'POST', body: formData })
-        .then(res => res.json())
-        .then(saveData => {
-            if (!saveData.success) throw new Error('Errore nel salvataggio');
+        fetch(form.action, {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => {
+            if(!res.ok) throw new Error('Errore nel salvataggio preliminare');
             
-            btn.innerHTML = '<i class="fas fa-cog fa-spin"></i> Cambio Stato...';
+            // --- FIX CLONAZIONE ---
+            if (targetActionUrlName === 'clona_preventivo') {
+                // Reindirizza il browser in modo classico così Flask genera il clone 
+                // e ti porta automaticamente sulla pagina del nuovo preventivo
+                window.location.href = "{{ url_for('clona_preventivo', quote_id=p.numero) }}";
+                return null; // Interrompe l'esecuzione della catena (Promise) per questo caso
+            }
+            // ----------------------
+            
+            // Altrimenti, prosegue con la chiamata in background per Vinto, Perso, ecc.
             const targetUrl = "{{ url_for('dashboard') }}" + `preventivo/${quoteId}/${targetActionUrlName.replace('_preventivo', '')}`;
             return fetch(targetUrl, { method: 'POST' });
         })
         .then(res => {
+            if(!res) return; // Se era una clonazione, si ferma in attesa del redirect
+            
             if(!res.ok) throw new Error('Errore cambio stato');
             window.location.reload();
         })
@@ -1035,6 +1096,108 @@ async function triggerUpload(index) {
                 btn.innerHTML = original;
             });
     };
+
+// =================================================================
+    // --- FUNZIONI MODALI E CLONAZIONE (Replicate da editor.html) ---
+    // =================================================================
+
+    function showNotification(title, message, onOk) {
+        const modal = document.getElementById('notification-modal');
+        if (!modal) {
+            alert(title + "\n" + message.replace(/<br>/g, "\n").replace(/<strong>/g, "").replace(/<\/strong>/g, ""));
+            if(onOk) onOk();
+            return;
+        }
+        modal.querySelector('#notification-modal-title').textContent = title;
+        modal.querySelector('#notification-modal-text').innerHTML = message; 
+        modal.style.display = 'flex';
+        const okBtn = modal.querySelector('#notification-modal-ok');
+        const newOkBtn = okBtn.cloneNode(true); 
+        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+        newOkBtn.addEventListener('click', () => {
+            modal.style.display = 'none';
+            if (onOk) onOk();
+        }, { once: true });
+    }
+
+    function showConfirmation(title, message, onConfirm) {
+        const modal = document.getElementById('confirm-modal');
+         if (!modal) {
+            if (confirm(title + "\n" + message.replace(/<br>/g, "\n").replace(/<strong>/g, "").replace(/<\/strong>/g, ""))) {
+                if (onConfirm) onConfirm();
+            }
+            return;
+        }
+        modal.querySelector('#confirm-modal-title').textContent = title;
+        modal.querySelector('#confirm-modal-text').innerHTML = message;
+        modal.style.display = 'flex';
+        const okBtn = modal.querySelector('#confirm-modal-ok');
+        const cancelBtn = modal.querySelector('#confirm-modal-cancel');
+
+        const newOkBtn = okBtn.cloneNode(true);
+        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+        const newCancelBtn = cancelBtn.cloneNode(true);
+        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+        const closeModal = () => { modal.style.display = 'none'; };
+
+        newOkBtn.addEventListener('click', () => {
+            closeModal();
+            if (onConfirm) onConfirm();
+        }, { once: true });
+        newCancelBtn.addEventListener('click', closeModal, { once: true });
+    }
+
+    const clonaBtn = document.getElementById('clona-btn');
+    if (clonaBtn) {
+        clonaBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            const originalQuoteId = "{{ p.numero }}"; 
+
+            showConfirmation(
+                'Conferma Clonazione',
+                `Sei sicuro di voler clonare il preventivo <strong>${originalQuoteId}</strong>?<br>Verrà creata una nuova bozza.`,
+                () => {
+                    const originalButtonHtml = clonaBtn.innerHTML;
+                    clonaBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvataggio e Clonazione...';
+                    clonaBtn.disabled = true;
+
+                    // 1. Salva i dati correnti prima di clonare
+                    const form = document.getElementById('grid-form');
+                    const formData = new FormData(form);
+                    formData.append('is_ajax', '1');
+
+                    fetch(form.action, { method: 'POST', body: formData })
+                        .then(res => {
+                            if(!res.ok) throw new Error('Errore nel salvataggio preliminare');
+                            
+                            // 2. Chiama l'API di clonazione che risponde in JSON
+                            return fetch("{{ url_for('clona_preventivo', quote_id=p.numero) }}");
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                showNotification(
+                                    'Clonazione Riuscita!',
+                                    'Preventivo clonato con successo.\n\nOriginale: ' + data.vecchio_id + '\nNuova Bozza: ' + data.nuovo_id,
+                                    () => {
+                                        // 3. Reindirizza al nuovo preventivo visuale
+                                        window.location.href = data.new_url; 
+                                    }
+                                );
+                            } else {
+                                throw new Error(data.error || 'Errore sconosciuto');
+                            }
+                        })
+                        .catch(err => {
+                            clonaBtn.innerHTML = originalButtonHtml;
+                            clonaBtn.disabled = false;
+                            showNotification('Errore', 'Impossibile clonare il preventivo: ' + err.message, null);
+                        });
+                }
+            );
+        });
+    }    
 </script>
 
 {% endblock %}
