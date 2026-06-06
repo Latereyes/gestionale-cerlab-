@@ -70,9 +70,13 @@
         {% for s_idx, sezione in enumerate(p.sezioni_edili) %}
         <div class="card section-card" data-section-index="{{ s_idx }}">
             <div class="card-header">
+                <input type="hidden" id="json-costi-vivi-{{ s_idx }}" name="s[{{s_idx}}][costi_vivi_json]" value='{{ sezione.costi_vivi_json | default("[]") | safe }}'>
                 <input type="text" name="s[{{s_idx}}][titolo]" value="{{ sezione.titolo }}" 
                        class="header-title-input" placeholder="Titolo Sezione (es. Demolizioni)">
                 <div class="header-actions" style="display: flex; align-items: center; gap: 12px;">
+                    <button type="button" class="btn btn-outline btn-costi-vivi" style="padding: 6px 12px; font-size: 12px;" onclick="openCostiViviModal({{ s_idx }})" title="Spalma costi su lavorazioni">
+                        <i class="fas fa-coins text-warning"></i> Costi Vivi
+                    </button>
                     <span class="badge">Sezione {{ s_idx + 1 }}</span>
                     <button type="button" class="btn icon-btn delete-section-btn" onclick="confirmDeleteSection({{ s_idx }})" title="Elimina intera sezione">
                         <i class="fas fa-trash-alt" style="color: #ef4444;"></i>
@@ -88,7 +92,7 @@
                         <div class="rt-col col-money text-right">Prezzo Vendita</div>
                         <div class="rt-col col-iva text-center">IVA</div>
                         <div class="rt-col col-costo text-right">Costi Vivi</div>
-                        <div class="rt-col col-totals text-right">Riepilogo</div>
+                        <div class="rt-col col-totals text-right">Tot. +IVA</div>
                         <div class="rt-col col-actions"></div>
                     </div>
 
@@ -117,13 +121,16 @@
                             </div>
 
                             <div class="rt-col col-costo">
+                                <input type="hidden" name="s[{{s_idx}}][r][{{i}}][hide_cost]" class="hidden-costo calc-trigger" value="{{ r.hide_cost | default('0') }}">
                                 <input type="text" name="s[{{s_idx}}][r][{{i}}][costo_stimato]" value="{{ r.costo_stimato }}" 
                                        class="cell-input right input-money-costo calc-trigger" data-type="currency">
+                                
+                                <div class="row-hide-cost-indicator" id="hide-cost-ind-{{s_idx}}-{{i}}" style="font-size: 11px; color: #f59e0b; text-align: right; margin-top: 4px; font-weight: 600;" title="Quota Costi Vivi"></div>
+                                
                                 <div class="row-margin-indicator" id="margin-{{s_idx}}-{{i}}"></div>
                             </div>
 
                             <div class="rt-col col-totals">
-                                <div class="row-imponibile"><span id="row-imp-{{s_idx}}-{{i}}">0,00 €</span></div>
                                 <div class="total-ivato"><span id="row-tot-{{s_idx}}-{{i}}">0,00 €</span></div>
                             </div>
 
@@ -481,7 +488,7 @@ body { padding-bottom: 90px; }
 .col-totals { width: 150px; text-align: right; background-color: #f8fafc; padding: 12px; border-radius: 8px; }
 .col-totals label { font-size: 10px; color: #64748b; text-transform: uppercase; display: block; }
 .col-totals span { font-weight: 600; font-size: 14px; display: block; }
-.col-totals .total-ivato { color: #4f46e5; font-size: 15px; border-top: 1px solid #e2e8f0; margin-top: 4px; padding-top: 4px; }
+.col-totals .total-ivato { color: #4f46e5; font-size: 15px;  }
 
 .main-actions { display: flex; gap: 12px; align-items: center; }
 .icon-btn.large-icon { font-size: 20px; padding: 10px; width: 48px; height: 48px; background: #f1f5f9; border: 1px solid #e2e8f0; }
@@ -533,6 +540,41 @@ input:checked + .slider:before { transform: translateX(18px); }
     </div>
 </div>
 
+<div id="costi-vivi-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+        <h3><i class="fas fa-coins" style="color: #f59e0b; margin-bottom: 8px;"></i> Ripartizione Costi Vivi</h3>
+        <p style="font-size: 14px; color: #475569;">Inserisci costi generali (es. Furgone, Materiale vario). Il totale verrà spalmato in modo occulto sulle lavorazioni della sezione.</p>
+        
+        <div style="max-height: 280px; overflow-y: auto; margin: 20px 0; border-bottom: 1px solid #e2e8f0; padding-right: 8px;">
+            <table style="width: 100%; border-collapse: collapse;" id="modal-costi-table">
+                <thead style="position: sticky; top: 0; background: white; z-index: 1;">
+                    <tr style="border-bottom: 1px solid #e2e8f0; font-size: 12px; color: #64748b; text-align: left;">
+                        <th style="padding-bottom: 8px;">Descrizione</th>
+                        <th style="padding-bottom: 8px; width: 120px; text-align: right;">Importo (€)</th>
+                        <th style="padding-bottom: 8px; width: 40px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="modal-costi-tbody">
+                </tbody>
+            </table>
+        </div>
+        
+        <button type="button" id="btn-add-modal-cost" class="btn btn-outline btn-sm" style="font-size: 13px;" onclick="addModalCostoRow()">
+            <i class="fas fa-plus"></i> Aggiungi Voce
+        </button>
+
+        <div style="margin-top: 24px; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px dashed #cbd5e1;">
+            <span style="font-weight: 600; color: #64748b; font-size: 13px;">TOTALE DA RIPARTIRE:</span>
+            <strong id="modal-costi-total" style="font-size: 20px; color: #0f172a;">0,00 €</strong>
+        </div>
+        
+        <div class="modal-actions" style="margin-top: 24px;">
+            <button type="button" class="btn btn-outline" onclick="closeCostiViviModal()">Annulla</button>
+            <button type="button" id="btn-save-modal-cost" class="btn primary" onclick="saveCostiViviModal()">Ripartisci e Applica</button>
+        </div>
+    </div>
+</div>
+
 
 <script>
     // --- SISTEMA DI BLOCCO VISIVO SPECIFICO PER EDILE ---
@@ -552,7 +594,7 @@ input:checked + .slider:before { transform: translateX(18px); }
         });
 
         // Nasconde controlli riga e drag
-        document.querySelectorAll('.drag-handle, .delete-row-btn, .delete-section-btn, .btn-outline, .btn-row-attach').forEach(el => {
+        document.querySelectorAll('.drag-handle, .delete-row-btn, .delete-section-btn, .btn-outline:not(.btn-costi-vivi), .btn-row-attach').forEach(el => {
             el.style.display = shouldBeLocked ? 'none' : 'flex';
         });
 
@@ -596,70 +638,105 @@ input:checked + .slider:before { transform: translateX(18px); }
     }
 
 
-    // --- CALCOLO TOTALI EDILI ---
-function updateTotalsEdile() {
-    let totalVendita = 0;
-    let totalCosti = 0;
+// --- CALCOLO TOTALI EDILI ---
+    function updateTotalsEdile() {
+        let totalVendita = 0;
+        let totalCosti = 0;
 
-    document.querySelectorAll('.section-card').forEach(section => {
-        const sIdx = section.dataset.sectionIndex;
-        let sectionTotal = 0; 
-        let sectionCosts = 0; // Inizializzazione corretta del costo di sezione
+        document.querySelectorAll('.section-card').forEach(section => {
+            const sIdx = section.dataset.sectionIndex;
+            let sectionTotal = 0; 
+            let sectionCosts = 0;
 
-        section.querySelectorAll('.rt-row.item').forEach(row => {
-            const rIdx = row.dataset.index;
-            const vendita = parseNum(row.querySelector(`[name="s[${sIdx}][r][${rIdx}][prezzo_vendita]"]`).value);
-            const costo = parseNum(row.querySelector(`[name="s[${sIdx}][r][${rIdx}][costo_stimato]"]`).value);
-            const ivaPct = parseNum(row.querySelector(`[name="s[${sIdx}][r][${rIdx}][iva_pct]"]`).value);
+            // NUOVO: Ripartizione "live" dei costi vivi di sezione
+            let hiddenCostiTotal = 0;
+            const jsonCostiEl = document.getElementById(`json-costi-vivi-${sIdx}`);
+            if (jsonCostiEl) {
+                try {
+                    const costiList = JSON.parse(jsonCostiEl.value || "[]");
+                    costiList.forEach(c => { hiddenCostiTotal += parseNum(c.importo); });
+                } catch(e) {}
+            }
             
-            totalVendita += vendita;
-            totalCosti += costo;
-            sectionTotal += vendita; 
-            sectionCosts += costo; // Accumulo dei costi vivi di sezione
+            const rowItems = section.querySelectorAll('.rt-row.item');
+            const numRighe = rowItems.length;
+            const quotaEsatta = numRighe > 0 ? (hiddenCostiTotal / numRighe) : 0;
 
-            const totIvato = vendita * (1 + ivaPct / 100);
-            
-            const elImp = document.getElementById(`row-imp-${sIdx}-${rIdx}`);
-            if (elImp) elImp.textContent = fmtMoney(vendita);
-            
-            const elTot = document.getElementById(`row-tot-${sIdx}-${rIdx}`);
-            if (elTot) elTot.textContent = fmtMoney(totIvato);
+            rowItems.forEach(row => {
+                const rIdx = row.dataset.index;
+                const vendita = parseNum(row.querySelector(`[name="s[${sIdx}][r][${rIdx}][prezzo_vendita]"]`).value);
+                
+                // Assegna live la quota calcolata al campo hidden
+                const hiddenCostInput = row.querySelector(`[name="s[${sIdx}][r][${rIdx}][hide_cost]"]`);
+                if (hiddenCostInput) hiddenCostInput.value = quotaEsatta;
+                
+                const hideCost = quotaEsatta;
+                const costoBase = parseNum(row.querySelector(`[name="s[${sIdx}][r][${rIdx}][costo_stimato]"]`).value);
+                const costo = costoBase + hideCost;
+                
+                const ivaPct = parseNum(row.querySelector(`[name="s[${sIdx}][r][${rIdx}][iva_pct]"]`).value);
+                
+                totalVendita += vendita;
+                totalCosti += costo;
+                sectionTotal += vendita; 
+                sectionCosts += costo;
 
-            const margine = vendita - costo;
-            const mEl = document.getElementById(`margin-${sIdx}-${rIdx}`);
-            if(mEl) {
-                mEl.textContent = (margine >= 0 ? '+' : '') + fmtMoney(margine);
-                mEl.style.color = margine < 0 ? '#dc2626' : '#10b981';
+                const totIvato = vendita * (1 + ivaPct / 100);
+                
+                const elImp = document.getElementById(`row-imp-${sIdx}-${rIdx}`);
+                if (elImp) elImp.textContent = fmtMoney(vendita);
+                
+                const elTot = document.getElementById(`row-tot-${sIdx}-${rIdx}`);
+                if (elTot) elTot.textContent = fmtMoney(totIvato);
+
+                // Mostra il testo sotto la casella costi
+                const hideCostInd = document.getElementById(`hide-cost-ind-${sIdx}-${rIdx}`);
+                if(hideCostInd) {
+                    if(hideCost > 0) {
+                        hideCostInd.textContent = `+ ${fmtMoney(hideCost)} (costi sezione)`;
+                    } else {
+                        hideCostInd.textContent = '';
+                    }
+                }
+
+                // Aggiorna il margine per riga
+                const margine = vendita - costo;
+                const mEl = document.getElementById(`margin-${sIdx}-${rIdx}`);
+                if(mEl) {
+                    const marginePct = vendita > 0 ? Math.round((margine / vendita) * 100) : 0;
+                    mEl.textContent = (margine >= 0 ? '+' : '') + fmtMoney(margine) + ` (${marginePct}%)`;
+                    mEl.style.color = margine < 0 ? '#dc2626' : '#10b981';
+                }
+            });
+
+            // Aggiorna il totale vendita per questa sezione
+            const sectionTotalEl = document.getElementById(`section-total-${sIdx}`);
+            if(sectionTotalEl) {
+                sectionTotalEl.textContent = fmtMoney(sectionTotal);
+            }
+            
+            // Aggiorna il totale costi per questa sezione
+            const sectionCostsEl = document.getElementById(`section-costs-${sIdx}`);
+            if(sectionCostsEl) {
+                sectionCostsEl.textContent = fmtMoney(sectionCosts);
             }
         });
 
-        // Aggiorna il totale vendita per questa sezione
-        const sectionTotalEl = document.getElementById(`section-total-${sIdx}`);
-        if(sectionTotalEl) {
-            sectionTotalEl.textContent = fmtMoney(sectionTotal);
-        }
+        // Aggiorna Footer Globale a piè di pagina
+        const sumVenditaEl = document.getElementById('sum-vendita');
+        if(sumVenditaEl) sumVenditaEl.textContent = fmtMoney(totalVendita);
         
-        // Aggiorna il totale costi vivi per questa sezione
-        const sectionCostsEl = document.getElementById(`section-costs-${sIdx}`);
-        if(sectionCostsEl) {
-            sectionCostsEl.textContent = fmtMoney(sectionCosts);
+        const sumCostiEl = document.getElementById('sum-costi');
+        if(sumCostiEl) sumCostiEl.textContent = fmtMoney(totalCosti);
+        
+        const totMargine = totalVendita - totalCosti;
+        const mSum = document.getElementById('sum-margine');
+        if(mSum) {
+            const margineTotPct = totalVendita > 0 ? Math.round((totMargine / totalVendita) * 100) : 0;
+            mSum.textContent = fmtMoney(totMargine) + ` (${margineTotPct}%)`;
+            mSum.style.color = totMargine < 0 ? '#dc2626' : '#10b981';
         }
-    });
-
-    // Aggiorna Footer Globale a piè di pagina
-    const sumVenditaEl = document.getElementById('sum-vendita');
-    if(sumVenditaEl) sumVenditaEl.textContent = fmtMoney(totalVendita);
-    
-    const sumCostiEl = document.getElementById('sum-costi');
-    if(sumCostiEl) sumCostiEl.textContent = fmtMoney(totalCosti);
-    
-    const totMargine = totalVendita - totalCosti;
-    const mSum = document.getElementById('sum-margine');
-    if(mSum) {
-        mSum.textContent = fmtMoney(totMargine);
-        mSum.style.color = totMargine < 0 ? '#dc2626' : '#10b981';
     }
-}
 
 // Inizializzazione Sortable per ogni sezione
 document.addEventListener('DOMContentLoaded', () => {
@@ -702,6 +779,10 @@ function updateAllInputIndices() {
         // Aggiorna l'indice della sezione stessa
         section.dataset.sectionIndex = sIdx;
         
+        // Aggiorna l'ID input json costi di sezione
+        const jsonInput = section.querySelector('[id^="json-costi-vivi-"]');
+        if (jsonInput) jsonInput.id = `json-costi-vivi-${sIdx}`;
+        
         section.querySelectorAll('.rt-row.item').forEach((row, rIdx) => {
             row.dataset.index = rIdx;
             row.querySelectorAll('[name]').forEach(input => {
@@ -711,6 +792,8 @@ function updateAllInputIndices() {
                     name = name.replace(/s\[\d+\]\[r\]\[\d+\]/, `s[${sIdx}][r][${rIdx}]`);
                     // Gestisce anche il titolo sezione s[index][titolo]
                     name = name.replace(/s\[\d+\]\[titolo\]/, `s[${sIdx}][titolo]`);
+                    // Gestisce il JSON costi sezione
+                    name = name.replace(/s\[\d+\]\[costi_vivi_json\]/, `s[${sIdx}][costi_vivi_json]`);
                     input.setAttribute('name', name);
                 }
             });
@@ -722,6 +805,9 @@ function updateAllInputIndices() {
             const totSpan = row.querySelector('.total-ivato span');
             if(totSpan) totSpan.id = `row-tot-${sIdx}-${rIdx}`;
             
+            const hideCostInd = row.querySelector('.row-hide-cost-indicator');
+            if(hideCostInd) hideCostInd.id = `hide-cost-ind-${sIdx}-${rIdx}`;
+
             const marginInd = row.querySelector('.row-margin-indicator');
             if(marginInd) marginInd.id = `margin-${sIdx}-${rIdx}`;
 
@@ -1198,6 +1284,115 @@ async function triggerUpload(index) {
             );
         });
     }    
+// =================================================================
+    // --- LOGICA MODALE RIPARTIZIONE COSTI VIVI ---
+    // =================================================================
+
+    let currentCostiSIdx = null;
+
+function openCostiViviModal(sIdx) {
+        currentCostiSIdx = sIdx;
+        const jsonInput = document.getElementById(`json-costi-vivi-${sIdx}`);
+        let costiList = [];
+        try {
+            costiList = JSON.parse(jsonInput.value || "[]");
+        } catch(e) { }
+
+        const tbody = document.getElementById('modal-costi-tbody');
+        tbody.innerHTML = '';
+        
+        if (costiList.length === 0) {
+            addModalCostoRow();
+        } else {
+            costiList.forEach(c => addModalCostoRow(c.desc, c.importo));
+        }
+        
+        calcModalTotalCosti();
+
+        // Controllo stato di blocco per UI Modale
+        const isLocked = document.querySelector('input[name="is_locked"]').value === 'true';
+        document.getElementById('btn-add-modal-cost').style.display = isLocked ? 'none' : 'inline-flex';
+        document.getElementById('btn-save-modal-cost').style.display = isLocked ? 'none' : 'inline-flex';
+        
+        if (isLocked) {
+            document.querySelectorAll('.calc-modal-cost, #modal-costi-tbody .cell-input').forEach(inp => inp.disabled = true);
+            document.querySelectorAll('.btn-remove-modal-cost').forEach(btn => btn.style.display = 'none');
+        }
+
+        document.getElementById('costi-vivi-modal').style.display = 'flex';
+    }
+
+    function addModalCostoRow(desc = '', importo = '') {
+        const tbody = document.getElementById('modal-costi-tbody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="padding-right: 8px; padding-bottom: 8px;">
+                <input type="text" class="cell-input" placeholder="Es. Noleggio Piattaforma" value="${desc}">
+            </td>
+            <td style="padding-right: 8px; padding-bottom: 8px;">
+                <input type="text" class="cell-input right calc-modal-cost" placeholder="0,00" value="${importo}">
+            </td>
+            <td style="padding-bottom: 8px;">
+                <button type="button" class="btn icon-btn btn-remove-modal-cost" onclick="this.closest('tr').remove(); calcModalTotalCosti();">
+                    <i class="fas fa-times text-danger"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+        tr.querySelector('.calc-modal-cost').addEventListener('input', calcModalTotalCosti);
+    }
+
+    function calcModalTotalCosti() {
+        let tot = 0;
+        document.querySelectorAll('.calc-modal-cost').forEach(input => {
+            tot += parseNum(input.value);
+        });
+        document.getElementById('modal-costi-total').textContent = fmtMoney(tot);
+        return tot;
+    }
+
+ function closeCostiViviModal() {
+        document.getElementById('costi-vivi-modal').style.display = 'none';
+        currentCostiSIdx = null;
+    }
+
+    function saveCostiViviModal() {
+        if (currentCostiSIdx === null) return;
+        
+        let costiToSave = [];
+        
+        document.querySelectorAll('#modal-costi-tbody tr').forEach(tr => {
+            const desc = tr.querySelector('td:nth-child(1) input').value.trim();
+            const impStr = tr.querySelector('td:nth-child(2) input').value;
+            const impNum = parseNum(impStr);
+            if (desc || impNum > 0) {
+                costiToSave.push({ desc: desc, importo: impStr });
+            }
+        });
+        
+        // 1. Salva la struttura nel JSON nascosto di sezione
+        document.getElementById(`json-costi-vivi-${currentCostiSIdx}`).value = JSON.stringify(costiToSave);
+        
+        // 2. Ricalcola totali e margini operativi
+        updateTotalsEdile();
+        
+        // Salviamo l'indice in una variabile locale per l'ancora prima di resettare la modale
+        const sectionToAnchor = currentCostiSIdx;
+        closeCostiViviModal();
+        
+        // 3. Salva automaticamente il preventivo simulando il click sul tasto "Salva Modifiche"
+        const saveBtn = document.getElementById('save-quote-btn');
+        if (saveBtn && !saveBtn.disabled) {
+            // Iniettiamo dinamicamente l'ancora nell'azione del form
+            const form = document.getElementById('grid-form');
+            const baseUrl = form.action.split('#')[0]; // Pulisce eventuali vecchie ancore
+            form.action = baseUrl + '#section-footer-' + sectionToAnchor;
+            
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvataggio...';
+            saveBtn.click();
+        }
+    }
 </script>
 
 {% endblock %}
+

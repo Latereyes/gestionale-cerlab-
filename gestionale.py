@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.3.1"  
+APP_VERSION = "2.4.0"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -2093,19 +2093,22 @@ def salva_righe_edili(quote_id):
         p["no_iva"] = True if form.get("no_iva") else False 
 
     nuove_sezioni = []
-    pat = re.compile(r"^s\[(\d+)\](?:\[titolo\]|\[r\]\[(\d+)\]\[(.+)\])$")
+    pat = re.compile(r"^s\[(\d+)\](?:\[titolo\]|\[costi_vivi_json\]|\[r\]\[(\d+)\]\[(.+)\])$")
     
     sez_map = {}
     for key, val in form.items():
         m = pat.match(key)
         if m:
             s_idx = int(m.group(1))
+            sez_map.setdefault(s_idx, {"titolo": "", "costi_vivi_json": "[]", "righe": {}})
+            
             if "[titolo]" in key:
-                sez_map.setdefault(s_idx, {"titolo": val, "righe": {}})
+                sez_map[s_idx]["titolo"] = val
+            elif "[costi_vivi_json]" in key:
+                sez_map[s_idx]["costi_vivi_json"] = val
             else:
                 r_idx = int(m.group(2))
                 field = m.group(3)
-                sez_map.setdefault(s_idx, {"titolo": "", "righe": {}})
                 sez_map[s_idx]["righe"].setdefault(r_idx, {})[field] = val
 
     if sez_map:
@@ -2114,7 +2117,7 @@ def salva_righe_edili(quote_id):
             righe_dic = sez_map[s_i]["righe"]
             for r_i in sorted(righe_dic.keys()):
                 r_list.append(righe_dic[r_i])
-            nuove_sezioni.append({"titolo": sez_map[s_i]["titolo"], "righe": r_list})
+            nuove_sezioni.append({"titolo": sez_map[s_i]["titolo"], "costi_vivi_json": sez_map[s_i].get("costi_vivi_json", "[]"), "righe": r_list})
         p["sezioni_edili"] = nuove_sezioni
 
     # 1. Recupera azioni di AGGIUNTA dall'URL (Query String via formaction)
