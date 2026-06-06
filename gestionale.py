@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.4.0"  
+APP_VERSION = "2.4.1"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -137,6 +137,22 @@ def restart_app(icon, menu_item):
     os.execl(sys.executable, sys.executable, *sys.argv)
 # --- CLASSE DEL LAUNCHER (MODIFICATA PER ESSERE THREAD-SAFE) ---
 # Sostituisci la vecchia classe AppLauncher e le funzioni esterne con questo blocco corretto
+
+def login_or_local_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        client_ip = request.remote_addr
+        is_local_internal = (
+            client_ip in ["127.0.0.1", "::1"] or 
+            client_ip.startswith("192.168.") or 
+            client_ip.startswith("10.") or 
+            client_ip.startswith("172.")
+        )
+        if not session.get("logged_in") and not is_local_internal:
+            flash("Effettua il login per accedere.", "error")
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
 
 class AppLauncher(Tk):
     def skip_update_check(self):
@@ -4439,7 +4455,7 @@ def get_new_bolla_id(preventivo_data):
 
 
 @app.route("/consegna/<quote_id>/crea-bolla", methods=["POST"])
-@login_required
+@login_or_local_required
 def crea_bolla(quote_id):
     allowed_roles = ['segreteria', 'amministratore', 'ceo']
     if session.get("user_role") not in allowed_roles:
@@ -4851,13 +4867,13 @@ def modifica_pagamento_programmato(quote_id):
     return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
 
 @app.route("/export-bolla-pdf/<quote_id>/<bolla_id>")
-@login_required
+@login_or_local_required
 def export_bolla_pdf(quote_id, bolla_id):
     """Pagina di attesa per la generazione del PDF della bolla."""
     return render_template("loading_bolla.html", quote_id=quote_id, bolla_id=bolla_id)
 
 @app.route("/generate-bolla-task/<quote_id>/<bolla_id>")
-@login_required
+@login_or_local_required
 def generate_bolla_task(quote_id, bolla_id):
     import subprocess, shutil
     log_id = f"{quote_id}/{bolla_id}"
@@ -5219,7 +5235,7 @@ def toggle_stato_fattura_iva(quote_id):
 
 
 @app.route("/stampa-bolla-html/<quote_id>/<bolla_id>")
-@login_required
+@login_or_local_required
 def stampa_bolla_html(quote_id, bolla_id):
     """Renderizza il template HTML per la stampa della bolla o consegna lavori."""
     p = load_quote(quote_id)
@@ -5244,7 +5260,7 @@ def stampa_bolla_html(quote_id, bolla_id):
 
     return render_template(template_name, p=p, bolla=bolla, righe_bolla=righe_bolla, indirizzo_consegna=indirizzo_consegna)
 @app.route("/stampa-html/<quote_id>")
-@login_required
+@login_or_local_required
 def stampa_html(quote_id):
     p = load_quote(quote_id)
     if not p: return "Preventivo non trovato", 404
@@ -5255,7 +5271,7 @@ def stampa_html(quote_id):
     return render_template("stampa.html", p=p)
 
 @app.route("/stampa-semplice-html/<quote_id>")
-@login_required
+@login_or_local_required
 def stampa_semplice_html(quote_id):
     """Renderizza il template HTML per la stampa SEMPLICE (senza totali di riga)."""
     p = load_quote(quote_id)
@@ -5263,7 +5279,7 @@ def stampa_semplice_html(quote_id):
     # Fai attenzione al nome del nuovo template che creeremo tra poco:
     return render_template("stampa_semplice.html", p=p)
 @app.route("/export-pdf/<quote_id>")
-@login_required
+@login_or_local_required
 def export_pdf(quote_id):
     return render_template("loading.html", quote_id=quote_id)
 def get_new_revisione_id(preventivo_data):
@@ -5273,7 +5289,7 @@ def get_new_revisione_id(preventivo_data):
     return len(preventivo_data["storico_pdf"]) + 1
 
 @app.route("/generate-pdf-task/<quote_id>")
-@login_required
+@login_or_local_required
 def generate_pdf_task(quote_id):
     import subprocess, shutil 
     log_pdf_event(quote_id, "INFO", "Inizio generazione PDF preventivo.") 
