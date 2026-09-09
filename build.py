@@ -1,6 +1,7 @@
 # In build.py
 
 import os
+import sys
 import re
 import subprocess
 import shutil
@@ -12,11 +13,14 @@ INNO_SETUP_FILE = "crea_installer.iss"
 FOLDERS_TO_CLEAN = ["dist", "build", "userdesktop"]
 
 def clean_previous_builds():
-    # ...
     print("--- Pulizia delle build precedenti ---")
     for folder in FOLDERS_TO_CLEAN:
         if os.path.exists(folder):
-            shutil.rmtree(folder)
+            try:
+                shutil.rmtree(folder)
+            except Exception as e:
+                print(f"Avviso durante la rimozione di {folder}: {e}")
+                shutil.rmtree(folder, ignore_errors=True)
 
 def get_current_version():
     with open(VERSION_FILE, "r") as f: return f.read().strip()
