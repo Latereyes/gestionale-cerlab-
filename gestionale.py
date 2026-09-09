@@ -45,7 +45,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.4.4"  
+APP_VERSION = "2.4.5"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -703,10 +703,25 @@ def get_new_quote_id(venditore_sigla):
 def load_quote(quote_id):
     quote_file = QUOTES_DIR / f"{quote_id}.json";
     if quote_file.exists():
-        with quote_file.open("r", encoding="utf-8") as f: return json.load(f)
+        with quote_file.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            if data and data.get("tipo_preventivo") == "edile" and "sezioni_edili" in data:
+                if "righe_edili" not in data or not data["righe_edili"]:
+                    flat = []
+                    for s in data.get("sezioni_edili", []):
+                        for r in s.get("righe", []):
+                            flat.append(r)
+                    data["righe_edili"] = flat
+            return data
     return None
 def save_quote(quote_id, data):
     data = aggiorna_stato_pagamento_globale(data)
+    if data and data.get("tipo_preventivo") == "edile" and "sezioni_edili" in data:
+        flat = []
+        for s in data.get("sezioni_edili", []):
+            for r in s.get("righe", []):
+                flat.append(r)
+        data["righe_edili"] = flat
     quote_file = QUOTES_DIR / f"{quote_id}.json";
     with quote_file.open("w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -720,7 +735,7 @@ def aggiorna_stato_consegna_globale(preventivo_data):
     is_edile = preventivo_data.get("tipo_preventivo") == "edile"
     
     if is_edile:
-        righe = preventivo_data.get("righe_edili", [])
+        righe = get_flat_righe_edili(preventivo_data)
         if not righe:
             preventivo_data["stato_consegna_globale"] = "N/D"
             return
@@ -1600,7 +1615,7 @@ def dashboard_clienti():
         
         # Individua la sorgente delle righe in base al tipo
         is_edile = p.get("tipo_preventivo") == "edile"
-        righe_preventivo = p.get("righe_edili", []) if is_edile else p.get("righe", [])
+        righe_preventivo = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
         
         cliente_nome = p.get("cliente", "Senza Nome")
         if cliente_nome not in clienti_preventivi:
@@ -1691,7 +1706,7 @@ def dashboard_clienti():
         if p.get("stato") in stati_ordine_validi:
             # --- MODIFICA PER EDILIZIA ---
             if is_edile:
-                righe_lavorazione = p.get("righe_edili", [])
+                righe_lavorazione = get_flat_righe_edili(p)
                 p["articoli_da_consegnare_totale"] = len(righe_lavorazione)
                 p["articoli_da_consegnare_count"] = sum(
                     1 for r in righe_lavorazione if r.get("stato_consegna") != "Consegnato"
@@ -4945,10 +4960,10 @@ def generate_bolla_task(quote_id, bolla_id):
 
     # Determina sorgente righe e template in base al tipo
     is_edile = p.get("tipo_preventivo") == "edile"
-    target_list = "righe_edili" if is_edile else "righe"
     template_name = "stampa_consegna_lavori.html" if is_edile else "stampa_bolla.html"
+    righe_sorgente = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
     
-    righe_bolla = [p[target_list][i] for i in bolla.get("indici_righe", []) if 0 <= i < len(p[target_list])]
+    righe_bolla = [righe_sorgente[i] for i in bolla.get("indici_righe", []) if 0 <= i < len(righe_sorgente)]
     
     indirizzo_consegna = None
     indirizzo_id = bolla.get("indirizzo_cantiere_id")
@@ -5318,10 +5333,10 @@ def stampa_bolla_html(quote_id, bolla_id):
 
     # Determina sorgente righe e template in base al tipo
     is_edile = p.get("tipo_preventivo") == "edile"
-    target_list = "righe_edili" if is_edile else "righe"
     template_name = "stampa_consegna_lavori.html" if is_edile else "stampa_bolla.html"
+    righe_sorgente = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
 
-    righe_bolla = [p[target_list][i] for i in bolla.get("indici_righe", []) if 0 <= i < len(p[target_list])]
+    righe_bolla = [righe_sorgente[i] for i in bolla.get("indici_righe", []) if 0 <= i < len(righe_sorgente)]
 
     indirizzo_consegna = None
     indirizzo_id = bolla.get("indirizzo_cantiere_id")
