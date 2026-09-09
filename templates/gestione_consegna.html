@@ -85,9 +85,17 @@
                             <td class="center muted">{{ item.data_consegna or '...' }}</td>
                             <td class="row-actions">
                                 {% if item.bolla_id %}
-                                <a href="{{ url_for('export_bolla_pdf', quote_id=p.numero, bolla_id=item.bolla_id) }}" target="_blank" class="btn icon-btn" title="Ristampa Bolla {{ item.bolla_id }}">
-                                    <i class="fas fa-print"></i>
-                                </a>
+                                    {% set bolle_match = p.bolle | default([]) | selectattr('id', 'equalto', item.bolla_id) | list %}
+                                    {% set bolla_fallita = bolle_match[0].pdf_fallito if bolle_match and bolle_match[0].pdf_fallito is defined else false %}
+                                    {% if bolla_fallita %}
+                                    <a href="{{ url_for('rigenera_bolla_pdf', quote_id=p.numero, bolla_id=item.bolla_id) }}" target="_blank" class="btn icon-btn btn-warning" title="PDF non generato — Clicca per rigenerare {{ item.bolla_id }}">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                    </a>
+                                    {% else %}
+                                    <a href="{{ url_for('export_bolla_pdf', quote_id=p.numero, bolla_id=item.bolla_id) }}" target="_blank" class="btn icon-btn" title="Ristampa Bolla {{ item.bolla_id }}">
+                                        <i class="fas fa-print"></i>
+                                    </a>
+                                    {% endif %}
                                 {% endif %}
                             </td>
                         </tr>
@@ -259,6 +267,8 @@
 .btn.warning { background-color: #ffc107; color: #000; }
 .btn.success { background-color: #198754; color: #fff; }
 .btn.icon-btn { background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; }
+.btn.icon-btn.btn-warning { background: #fff3cd; border-color: #ffc107; color: #856404; animation: pulse-warning 2s infinite; }
+@keyframes pulse-warning { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
 
 /* Stili Modale */

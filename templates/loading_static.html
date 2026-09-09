@@ -2,19 +2,72 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>Preparazione pagina...</title>
+    <title>Generazione documento in corso...</title>
     <style>
-        body { font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f0f0; color: #333; text-align: center; }
-        .container { padding: 40px; background-color: #fff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        body {
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            padding: 40px 50px;
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 480px;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-bar-wrap {
+            background: #e0e0e0;
+            border-radius: 8px;
+            height: 6px;
+            margin: 15px auto;
+            max-width: 280px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            background: #3498db;
+            height: 100%;
+            width: 30%;
+            animation: progressPulse 2s ease-in-out infinite;
+            border-radius: 8px;
+        }
+        @keyframes progressPulse {
+            0% { width: 15%; margin-left: 0; }
+            50% { width: 70%; margin-left: 15%; }
+            100% { width: 15%; margin-left: 85%; }
+        }
+        p {
+            color: #666;
+            font-size: 0.95em;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="spinner"></div>
-        <h2>Caricamento in corso...</h2>
-        <p>Questa operazione potrebbe richiedere alcuni secondi.</p>
+        <h2>Generazione documento in corso...</h2>
+        <div class="progress-bar-wrap"><div class="progress-bar"></div></div>
+        <p>Il file si aprirà automaticamente non appena completato.</p>
     </div>
 </body>
 </html>

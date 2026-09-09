@@ -2,7 +2,6 @@
 
 import os
 import re
-import uuid
 import subprocess
 import shutil
 
@@ -42,13 +41,10 @@ if __name__ == "__main__":
         if bump in ['major', 'minor', 'patch']: break
     new_version = get_next_version(current_version, bump)
     print(f"Nuova versione sarà: {new_version}")
-    new_guid = str(uuid.uuid4())
-    print(f"Nuovo GUID generato: {new_guid}")
     print("\n--- Aggiornamento dei file di progetto ---")
     for py_file in PYTHON_FILES_TO_UPDATE:
         update_file(py_file, r'APP_VERSION\s*=\s*".*?"', f'APP_VERSION = "{new_version}"')
     update_file(INNO_SETUP_FILE, r'(#define\s+MyAppVersion\s+)".*?"', f'\\1"{new_version}"')
-    update_file(INNO_SETUP_FILE, r'(AppId\s*=\s*\{\{).*?(\}\})', fr'\g<1>{new_guid}\g<2>')
     with open(VERSION_FILE, "w") as f: f.write(new_version)
     print("\n✅ Tutti i file sono stati aggiornati con successo!")
 

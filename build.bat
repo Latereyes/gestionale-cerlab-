@@ -11,6 +11,11 @@ echo.
 :: Questo garantisce che tutti i file vengano trovati correttamente.
 cd /d "%~dp0"
 
+:: Attiva l'ambiente virtuale se presente
+if exist ".venv\Scripts\activate.bat" (
+    call .venv\Scripts\activate.bat
+)
+
 :: Esegui lo script Python che fa tutto il lavoro pesante
 python build.py
 

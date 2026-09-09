@@ -37,7 +37,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.4.1"  
+APP_VERSION = "2.4.2"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -533,6 +533,33 @@ def log_pdf_event(quote_id, message_type, message):
             f.write(log_line)
     except Exception as e:
         print(f"ERRORE: Impossibile scrivere nel log PDF: {e}")
+
+def get_browser_executable():
+    """Trova il percorso dell'eseguibile di Chrome o Edge su Windows o Linux."""
+    import shutil
+    # 1. Controlla nel PATH
+    for name in ["msedge", "chrome", "google-chrome", "chromium", "brave"]:
+        found = shutil.which(name)
+        if found:
+            return found
+
+    # 2. Percorsi standard di installazione su Windows
+    standard_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"),
+    ]
+    for p in standard_paths:
+        if os.path.isfile(p):
+            return p
+    return None
 
 def load_margini_config():
     """Carica la configurazione dei margini da file, unendo i default per sicurezza."""
@@ -4484,11 +4511,29 @@ def crea_bolla(quote_id):
 
     p["bolle"].append(nuova_bolla)
 
-    # --- MODIFICA IMPORTANTE ---
-    # ABBIAMO RIMOSSO IL CICLO CHE IMPOSTAVA "In Bolla" QUI.
-    # Lo stato verrà aggiornato solo se il PDF viene generato con successo.
-    # ---------------------------
+    # --- AGGIORNAMENTO STATO IMMEDIATO ---
+    # Impostiamo "In Bolla" GIÀ QUI, così anche se il PDF fallisce
+    # le righe risultano correttamente associate alla bolla.
+    # Il PDF può essere rigenerato in seguito senza creare bolle duplicate.
+    is_edile = p.get("tipo_preventivo") == "edile"
+    if is_edile:
+        for idx_assoluto in indici_righe_bolla:
+            curr_idx = 0
+            for sezione in p.get("sezioni_edili", []):
+                for riga in sezione.get("righe", []):
+                    if curr_idx == idx_assoluto:
+                        riga["stato_consegna"] = "In Bolla"
+                        riga["bolla_id"] = bolla_id
+                    curr_idx += 1
+    else:
+        target_list = "righe"
+        for index in indici_righe_bolla:
+            if 0 <= index < len(p[target_list]):
+                p[target_list][index]["stato_consegna"] = "In Bolla"
+                p[target_list][index]["bolla_id"] = bolla_id
 
+    aggiorna_stato_consegna_globale(p)
+    aggiorna_stato_avanzamento(p)
     save_quote(quote_id, p)
 
     return jsonify({
@@ -4875,6 +4920,7 @@ def export_bolla_pdf(quote_id, bolla_id):
 @app.route("/generate-bolla-task/<quote_id>/<bolla_id>")
 @login_or_local_required
 def generate_bolla_task(quote_id, bolla_id):
+    """Genera il PDF della bolla con gestione robusta di timeout e retry."""
     import subprocess, shutil
     log_id = f"{quote_id}/{bolla_id}"
     log_pdf_event(log_id, "INFO", "Inizio generazione PDF bolla.")
@@ -4909,62 +4955,80 @@ def generate_bolla_task(quote_id, bolla_id):
     out_path = (QUOTES_DIR / pdf_name).resolve()
 
     url = url_for("stampa_bolla_html", quote_id=quote_id, bolla_id=bolla_id, _external=True)
-    browser_exe = next((exe for exe in [shutil.which("msedge"), shutil.which("chrome"), shutil.which("google-chrome")] if exe), None)
+    browser_exe = get_browser_executable()
 
     ok = False
-    # --- TENTATIVO BROWSER ---
-    if browser_exe:
-        try:
-            cmd = [browser_exe, "--headless=new", "--disable-gpu", f"--print-to-pdf={out_path}", url]
-            subprocess.run(cmd, check=True, timeout=60, capture_output=True, text=True, encoding='utf-8', errors='ignore')
-            ok = out_path.exists() and out_path.stat().st_size > 1000 
-            if ok: log_pdf_event(log_id, "SUCCESSO", f"PDF generato con browser. Size: {out_path.stat().st_size}")
-        except Exception as e:
-            log_pdf_event(log_id, "ERRORE", f"Errore browser: {e}")
 
-    # --- TENTATIVO WEASYPRINT ---
+    # --- 1. TENTATIVO CON BROWSER (max 2 tentativi) ---
+    if browser_exe:
+        log_pdf_event(log_id, "INFO", f"Browser trovato: {browser_exe}. Tentativo headless.")
+        for attempt in range(1, 3):
+            timeout_secs = 45 if attempt == 1 else 30
+            try:
+                cmd = [browser_exe, "--headless=new", "--disable-gpu", "--no-sandbox",
+                       "--disable-extensions", "--disable-dev-shm-usage",
+                       f"--print-to-pdf={out_path}", url]
+                log_pdf_event(log_id, "DEBUG", f"Tentativo {attempt}/2 - Comando: {' '.join(cmd)}")
+                
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout_secs)
+                    if stderr:
+                        stderr_text = stderr.decode('utf-8', errors='ignore')[:500]
+                        log_pdf_event(log_id, "DEBUG", f"Stderr browser: {stderr_text}")
+                except subprocess.TimeoutExpired:
+                    log_pdf_event(log_id, "ERRORE", f"Tentativo {attempt}/2 - Timeout ({timeout_secs}s). Terminazione forzata del processo.")
+                    proc.kill()
+                    proc.communicate()  # Rilascio risorse
+                    continue
+
+                ok = out_path.exists() and out_path.stat().st_size > 1000
+                if ok:
+                    log_pdf_event(log_id, "SUCCESSO", f"PDF generato con browser (tentativo {attempt}). Dimensione: {out_path.stat().st_size} bytes.")
+                    break
+                else:
+                    size_info = out_path.stat().st_size if out_path.exists() else "file assente"
+                    log_pdf_event(log_id, "ERRORE", f"Tentativo {attempt}/2 - File troppo piccolo o assente ({size_info}).")
+            except Exception as e:
+                log_pdf_event(log_id, "ERRORE", f"Tentativo {attempt}/2 - Errore imprevisto browser: {e}")
+
+    # --- 2. TENTATIVO CON WEASYPRINT (Fallback) ---
     if not ok:
+        log_pdf_event(log_id, "INFO", "Browser fallito. Tentativo con WeasyPrint.")
         try:
             from weasyprint import HTML
             html_string = render_template(template_name, p=p, bolla=bolla, righe_bolla=righe_bolla, indirizzo_consegna=indirizzo_consegna)
             HTML(string=html_string, base_url=request.url_root).write_pdf(out_path)
             ok = out_path.exists() and out_path.stat().st_size > 1000
-            if ok: log_pdf_event(log_id, "SUCCESSO", f"PDF generato con WeasyPrint.")
+            if ok:
+                log_pdf_event(log_id, "SUCCESSO", f"PDF generato con WeasyPrint. Dimensione: {out_path.stat().st_size} bytes.")
+            else:
+                log_pdf_event(log_id, "ERRORE", "WeasyPrint ha prodotto un file troppo piccolo.")
         except Exception as e:
             log_pdf_event(log_id, "ERRORE", f"Errore WeasyPrint: {e}")
 
+    # --- 3. ESITO FINALE ---
     if not ok:
-        log_pdf_event(log_id, "FALLIMENTO", "Generazione fallita.")
-        return jsonify({"error": "Impossibile generare il PDF."}), 500
-
-    # === AGGIORNAMENTO DI STATO SULLA LISTA CORRETTA ===
-    made_changes = False
-    is_edile = p.get("tipo_preventivo") == "edile"
-    if is_edile:
-        for idx_assoluto in bolla.get("indici_righe", []):
-            curr_idx = 0
-            for sezione in p.get("sezioni_edili", []):
-                for riga in sezione.get("righe", []):
-                    if curr_idx == idx_assoluto:
-                        riga["stato_consegna"] = "In Bolla"
-                        riga["bolla_id"] = bolla_id
-                        made_changes = True
-                    curr_idx += 1
-    else:
-        for index in bolla.get("indici_righe", []):
-            if 0 <= index < len(p[target_list]):
-                p[target_list][index]["stato_consegna"] = "In Bolla"
-                p[target_list][index]["bolla_id"] = bolla_id
-                made_changes = True
-
-    if made_changes:
-        aggiorna_stato_consegna_globale(p)
-        aggiorna_stato_avanzamento(p)
+        log_pdf_event(log_id, "FALLIMENTO", "Tutti i metodi di generazione PDF hanno fallito.")
+        # Salva flag nel JSON per segnalare che il PDF non è stato generato
+        bolla["pdf_fallito"] = True
         save_quote(quote_id, p)
-        log_pdf_event(log_id, "INFO", f"Stato righe {target_list} aggiornato.")
+        return jsonify({"error": "Impossibile generare il PDF della bolla. Potrai rigenerarlo dalla pagina consegna."}), 500
 
+    # PDF generato con successo: rimuovi eventuali flag di fallimento precedente
+    bolla.pop("pdf_fallito", None)
+    bolla["pdf_filename"] = pdf_name
+    save_quote(quote_id, p)
+
+    log_pdf_event(log_id, "COMPLETATO", f"Processo terminato. File: {pdf_name}")
     pdf_url = url_for("pdf_inline", filename=pdf_name)
     return jsonify({"pdf_url": pdf_url})
+
+@app.route("/rigenera-bolla-pdf/<quote_id>/<bolla_id>")
+@login_or_local_required
+def rigenera_bolla_pdf(quote_id, bolla_id):
+    """Rigenera il PDF di una bolla esistente senza creare una bolla duplicata."""
+    return render_template("loading_bolla.html", quote_id=quote_id, bolla_id=bolla_id)
 
 @app.route("/fatture")
 @login_required
@@ -5281,7 +5345,13 @@ def stampa_semplice_html(quote_id):
 @app.route("/export-pdf/<quote_id>")
 @login_or_local_required
 def export_pdf(quote_id):
-    return render_template("loading.html", quote_id=quote_id)
+    """Pagina di attesa per la generazione del PDF del preventivo."""
+    template_choice = request.args.get('template', 'standard')
+    p = load_quote(quote_id)
+    is_edile = p.get("tipo_preventivo") == "edile" if p else False
+    back_url = url_for("editor_preventivo_edile" if is_edile else "editor_preventivo", quote_id=quote_id)
+    return render_template("loading.html", quote_id=quote_id, template_choice=template_choice, back_url=back_url)
+
 def get_new_revisione_id(preventivo_data):
     """Calcola il prossimo numero di revisione per un preventivo."""
     if "storico_pdf" not in preventivo_data or not preventivo_data["storico_pdf"]:
@@ -5291,6 +5361,7 @@ def get_new_revisione_id(preventivo_data):
 @app.route("/generate-pdf-task/<quote_id>")
 @login_or_local_required
 def generate_pdf_task(quote_id):
+    """Genera il PDF del preventivo con gestione robusta di timeout, retry e fallback."""
     import subprocess, shutil 
     log_pdf_event(quote_id, "INFO", "Inizio generazione PDF preventivo.") 
 
@@ -5303,7 +5374,7 @@ def generate_pdf_task(quote_id):
         log_pdf_event(quote_id, "ERRORE", "Tentativo di generare PDF per preventivo in Bozza.") 
         return jsonify({"error": "Non è possibile generare un PDF per un preventivo in stato di Bozza."}), 400
 
-    # Scelta del Template (Aggiornato per supportare Edile)
+    # Scelta del Template (supporto Standard, Semplice, Edile)
     template_choice = request.args.get('template', 'standard')
     is_edile = p.get("tipo_preventivo") == "edile"
 
@@ -5326,53 +5397,63 @@ def generate_pdf_task(quote_id):
     log_pdf_event(quote_id, "INFO", f"Percorso output PDF: {out_path}")
 
     url = url_for(html_endpoint, quote_id=quote_id, _external=True) 
-    browser_exe = next((exe for exe in [shutil.which("msedge"), shutil.which("chrome"), shutil.which("google-chrome")] if exe), None)
+    browser_exe = get_browser_executable()
 
     ok = False
     
-    # --- 1. TENTATIVO CON BROWSER ---
+    # --- 1. TENTATIVO CON BROWSER (max 2 tentativi) ---
     if browser_exe:
-        log_pdf_event(quote_id, "INFO", f"Trovato browser: {browser_exe}. Tentativo con metodo Headless.") 
-        try:
-            cmd = [browser_exe, "--headless=new", "--disable-gpu", f"--print-to-pdf={out_path}", url]
-            log_pdf_event(quote_id, "DEBUG", f"Comando browser: {' '.join(cmd)}") 
-            result = subprocess.run(cmd, check=True, timeout=60, capture_output=True, text=True, encoding='utf-8', errors='ignore') 
-            
-            # --- CONTROLLO RIGOROSO (Novità) ---
-            # Il file deve esistere ed essere più grande di 1KB (1000 byte)
-            ok = out_path.exists() and out_path.stat().st_size > 1000 
-            
-            if ok:
-                 log_pdf_event(quote_id, "SUCCESSO", f"PDF generato con browser. Dimensione: {out_path.stat().st_size} bytes.") 
-            else:
-                 log_pdf_event(quote_id, "ERRORE", f"Browser ha finito ma file troppo piccolo o assente.") 
-        except subprocess.TimeoutExpired:
-             log_pdf_event(quote_id, "ERRORE", "Timeout durante la generazione PDF con browser.") 
-        except Exception as e:
-            log_pdf_event(quote_id, "ERRORE", f"Errore durante l'esecuzione del browser: {e}") 
+        log_pdf_event(quote_id, "INFO", f"Browser trovato: {browser_exe}. Tentativo headless.") 
+        for attempt in range(1, 3):
+            timeout_secs = 45 if attempt == 1 else 30
+            try:
+                cmd = [browser_exe, "--headless=new", "--disable-gpu", "--no-sandbox",
+                       "--disable-extensions", "--disable-dev-shm-usage",
+                       f"--print-to-pdf={out_path}", url]
+                log_pdf_event(quote_id, "DEBUG", f"Tentativo {attempt}/2 - Comando: {' '.join(cmd)}")
+                
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout_secs)
+                    if stderr:
+                        stderr_text = stderr.decode('utf-8', errors='ignore')[:500]
+                        log_pdf_event(quote_id, "DEBUG", f"Stderr browser: {stderr_text}")
+                except subprocess.TimeoutExpired:
+                    log_pdf_event(quote_id, "ERRORE", f"Tentativo {attempt}/2 - Timeout ({timeout_secs}s). Terminazione forzata del processo.")
+                    proc.kill()
+                    proc.communicate()  # Rilascio risorse
+                    continue
+
+                ok = out_path.exists() and out_path.stat().st_size > 1000
+                if ok:
+                    log_pdf_event(quote_id, "SUCCESSO", f"PDF generato con browser (tentativo {attempt}). Dimensione: {out_path.stat().st_size} bytes.")
+                    break
+                else:
+                    size_info = out_path.stat().st_size if out_path.exists() else "file assente"
+                    log_pdf_event(quote_id, "ERRORE", f"Tentativo {attempt}/2 - File troppo piccolo o assente ({size_info}).")
+            except Exception as e:
+                log_pdf_event(quote_id, "ERRORE", f"Tentativo {attempt}/2 - Errore imprevisto browser: {e}")
 
     # --- 2. TENTATIVO CON WEASYPRINT (Fallback) ---
     if not ok:
-        log_pdf_event(quote_id, "INFO", "Metodo browser fallito o non disponibile. Tentativo con WeasyPrint.") 
+        log_pdf_event(quote_id, "INFO", "Browser fallito o non disponibile. Tentativo con WeasyPrint.") 
         try:
             from weasyprint import HTML
             html_string = render_template(html_template_file, p=p) 
             HTML(string=html_string, base_url=request.url_root).write_pdf(out_path)
             
-            # Anche qui controllo rigoroso
             ok = out_path.exists() and out_path.stat().st_size > 1000
-            
             if ok:
-                log_pdf_event(quote_id, "SUCCESSO", f"PDF generato con WeasyPrint.") 
+                log_pdf_event(quote_id, "SUCCESSO", f"PDF generato con WeasyPrint. Dimensione: {out_path.stat().st_size} bytes.") 
             else:
-                 log_pdf_event(quote_id, "ERRORE", "WeasyPrint ha fallito (file troppo piccolo).")
+                log_pdf_event(quote_id, "ERRORE", "WeasyPrint ha prodotto un file troppo piccolo.")
         except Exception as e:
             log_pdf_event(quote_id, "ERRORE", f"Errore generico WeasyPrint: {e}") 
 
     # --- 3. ESITO FINALE ---
     if not ok:
-        log_pdf_event(quote_id, "FALLIMENTO", "Tutti i metodi hanno fallito. Nessuna revisione salvata.") 
-        return jsonify({"error": "Impossibile generare il PDF."}), 500
+        log_pdf_event(quote_id, "FALLIMENTO", "Tutti i metodi di generazione PDF hanno fallito. Nessuna revisione salvata.") 
+        return jsonify({"error": "Impossibile generare il PDF del preventivo."}), 500
 
     # Se arriviamo qui, il PDF esiste ed è valido. 
     # SOLO ORA salviamo la revisione nel JSON.

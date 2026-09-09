@@ -12,7 +12,11 @@ echo =======================================================
 echo.
 
 :: Avvia lo script usando il file presente nella cartella corrente
-python gestionale.py
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" gestionale.py
+) else (
+    py -3.13 gestionale.py 2>nul || python gestionale.py
+)
 
 echo.
 echo Il processo del launcher e' terminato.
