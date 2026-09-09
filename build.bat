@@ -16,6 +16,9 @@ if exist ".venv\Scripts\activate.bat" (
     call .venv\Scripts\activate.bat
 )
 
+:: Chiude eventuali istanze in esecuzione di Gestionale per liberare i file in dist
+taskkill /f /im Gestionale.exe 2>nul
+
 :: Esegui lo script Python che fa tutto il lavoro pesante
 python build.py
 

@@ -52,8 +52,8 @@ if __name__ == "__main__":
     if run_compilers == 's':
         try:
             print("\n--- 1/2: Compilazione di Gestionale.exe ---")
-            # Compiliamo un solo eseguibile che contiene tutto
-            subprocess.run(["pyinstaller", "gestionale.spec", "--noconfirm"], check=True)
+            # Compiliamo un solo eseguibile che contiene tutto usando lo stesso interprete Python corrente
+            subprocess.run([sys.executable, "-m", "PyInstaller", "gestionale.spec", "--noconfirm"], check=True)
 
             print("\n--- 2/2: Creazione dell'installer con Inno Setup ---")
             inno_compiler_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"

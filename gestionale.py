@@ -28,7 +28,15 @@ from tkinter import Tk, Label, PhotoImage
 from tkinter.ttk import Progressbar, Style
 import queue
 from tkinter import Tk, Label, PhotoImage, Button
-from flask import send_file
+# Fix di sicurezza per incompatibilità pyarrow residuo / namespace package orfano
+import sys
+try:
+    import pyarrow
+    if not hasattr(pyarrow, '__version__'):
+        sys.modules['pyarrow'] = None
+except Exception:
+    sys.modules['pyarrow'] = None
+
 import pandas as pd
 import io
 from flask import send_file
@@ -37,7 +45,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.4.2"  
+APP_VERSION = "2.4.3"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"

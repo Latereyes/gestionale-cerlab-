@@ -1,4 +1,4 @@
-#define MyAppVersion "2.4.2"
+#define MyAppVersion "2.4.3"
 ; Script Inno Setup per Gestionale Preventivi
 
 [Setup]
@@ -140,5 +140,10 @@ begin
     // Eseguito prima della copia dei nuovi file e della registrazione dell'uninstaller
     CleanAllOldUninstallKeys();
     CleanOldUninstallerFiles();
+    // Pulisce la cartella _internal precedente per eliminare file/librerie orfane o incompatibili
+    if DirExists(ExpandConstant('{app}\_internal')) then
+    begin
+      DelTree(ExpandConstant('{app}\_internal'), True, True, True);
+    end;
   end;
 end;
