@@ -45,7 +45,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "2.4.5"  
+APP_VERSION = "2.4.6"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -716,6 +716,8 @@ def load_quote(quote_id):
     return None
 def save_quote(quote_id, data):
     data = aggiorna_stato_pagamento_globale(data)
+    aggiorna_stato_consegna_globale(data)
+    aggiorna_stato_avanzamento(data)
     if data and data.get("tipo_preventivo") == "edile" and "sezioni_edili" in data:
         flat = []
         for s in data.get("sezioni_edili", []):
@@ -1308,7 +1310,7 @@ def allert_page():
     active_client_ids = set()
 
     # 1. Scansione Preventivi per Pagamenti Scaduti, Merce e Identificazione Clienti Attivi
-    for quote_file in QUOTES_DIR.glob("P*.json"):
+    for quote_file in QUOTES_DIR.glob("*.json"):
         try:
             with quote_file.open("r", encoding="utf-8") as f:
                 p = json.load(f)
@@ -1437,7 +1439,7 @@ def refresh_all_quotes():
     Questo corregge i dati "stale" (non aggiornati) nei vecchi file JSON.
     """
     print("--- INIZIO: Aggiornamento stati globali di tutti i preventivi ---")
-    all_quote_files = list(QUOTES_DIR.glob("P*.json"))
+    all_quote_files = list(QUOTES_DIR.glob("*.json"))
     processed_count = 0
     updated_count = 0
     
@@ -1468,6 +1470,32 @@ def refresh_all_quotes():
     print(f"--- FINE: Elaborati {processed_count}. Aggiornati {updated_count}. ---")
     flash(f"Aggiornamento completato. Elaborati {processed_count}/{len(all_quote_files)} preventivi. Aggiornati {updated_count} file.", "success")
     return redirect(url_for("dashboard"))
+
+def sincronizza_stati_tutti_preventivi():
+    """
+    Allinea in background gli stati globali di tutti i preventivi (pagamento, consegna, avanzamento).
+    Eseguito all'avvio dell'applicazione per garantire che nessun preventivo resti bloccato con stati obsoleti.
+    """
+    try:
+        updated_count = 0
+        for quote_file in QUOTES_DIR.glob("*.json"):
+            try:
+                p = load_quote(quote_file.stem)
+                if not p:
+                    continue
+                p_original = copy.deepcopy(p)
+                aggiorna_stato_pagamento_globale(p)
+                aggiorna_stato_consegna_globale(p)
+                aggiorna_stato_avanzamento(p)
+                if p != p_original:
+                    save_quote(p.get("numero", quote_file.stem), p)
+                    updated_count += 1
+            except Exception as e:
+                pass
+        if updated_count > 0:
+            print(f"INFO: Sincronizzazione automatica: aggiornati stati di {updated_count} preventivi.")
+    except Exception as e:
+        print(f"Avviso durante sincronizzazione automatica preventivi: {e}")
 
 @app.route("/admin/margini", methods=["GET", "POST"])
 @login_required
@@ -1549,7 +1577,7 @@ def anagrafica_clienti():
     active_client_ids = set()
 
     # 1. Scansiona i preventivi per trovare i clienti con pratiche attive
-    for quote_file in QUOTES_DIR.glob("P*.json"):
+    for quote_file in QUOTES_DIR.glob("*.json"):
         try:
             with quote_file.open("r", encoding="utf-8") as f:
                 q_data = json.load(f)
@@ -5554,8 +5582,11 @@ def run_server():
     # Esegui l'annuncio prima di far partire il server
     verifica_e_annuncia_aggiornamento()
     
-    print(SERVER_ADDRESS_INFO)
     is_debug_mode = "--debug" in sys.argv
+    if not is_debug_mode or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        threading.Thread(target=sincronizza_stati_tutti_preventivi, daemon=True).start()
+    
+    print(SERVER_ADDRESS_INFO)
     if is_debug_mode:
         app.run(host=HOST_BIND, port=PORT, debug=True)
     else:
