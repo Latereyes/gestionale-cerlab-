@@ -6545,6 +6545,10 @@ def print_url_to_pdf(log_id, url, out_path, attempts_per_browser=2):
                    "--no-first-run", "--no-default-browser-check", "--disable-sync",
                    "--disable-background-networking", "--disable-component-update",
                    "--no-pdf-header-footer", "--run-all-compositor-stages-before-draw",
+                   # Se il gestionale gira come amministratore (es. avviato dall'installer), Chrome/Edge
+                   # si "de-elevano" rilanciandosi in un altro processo: quello avviato da qui esce
+                   # subito con codice 0 senza creare il PDF. Questo flag lo impedisce.
+                   "--do-not-de-elevate",
                    f"--user-data-dir={profile_dir}",
                    f"--print-to-pdf={tmp_path}", url]
             label = f"{os.path.basename(browser_exe)} tentativo {attempt}/{attempts_per_browser}"
@@ -6561,7 +6565,9 @@ def print_url_to_pdf(log_id, url, out_path, attempts_per_browser=2):
                     continue
 
                 # Il file a volte compare con un leggero ritardo dopo la chiusura del processo
-                for _ in range(10):
+                # (più a lungo se il browser ha passato il lavoro a un altro processo: nessun output)
+                attese = 10 if (stderr or b"").strip() else 40
+                for _ in range(attese):
                     if tmp_path.exists() and tmp_path.stat().st_size > 1000:
                         break
                     time.sleep(0.3)

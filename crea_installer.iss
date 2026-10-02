@@ -67,7 +67,7 @@ Filename: "{app}\Gestionale.exe"; Parameters: "--fix-pagamenti"; \
   WorkingDir: "{app}"
 
 ; --- STEP 3: Avvio applicazione (opzionale, post-install) ---
-Filename: "{app}\Gestionale.exe"; Description: "{cm:LaunchProgram,Gestionale Preventivi}"; Flags: nowait postinstall
+Filename: "{app}\Gestionale.exe"; Description: "{cm:LaunchProgram,Gestionale Preventivi}"; Flags: nowait postinstall runasoriginaluser
 
 [Code]
 // GUID univoco e permanente del programma
