@@ -2014,6 +2014,19 @@ window.parseMessage = function(text) {
     chatFab.onclick = (e) => { e.preventDefault(); chatModal.classList.toggle('active'); if (chatModal.classList.contains('active')) loadChatUsers(); else clearInterval(chatRefreshInterval); };
     document.getElementById('closeChat').onclick = () => { chatModal.classList.remove('active'); clearInterval(chatRefreshInterval); };
     chatBack.onclick = () => window.loadChatUsers();
+
+    // Apertura diretta di una conversazione da link (es. clic su una notifica del widget: ?chat=<utente>)
+    (async () => {
+        const params = new URLSearchParams(location.search);
+        const chatWith = params.get('chat');
+        if (!chatWith) return;
+        params.delete('chat');
+        history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash);
+        chatModal.classList.add('active');
+        await window.loadChatUsers();
+        const u = chatContacts.find(c => c.username === chatWith);
+        if (u) openConversation(u);
+    })();
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && chatModal.classList.contains('active') && chatMentionList.style.display !== 'block') {
             if (activeChatUser) window.loadChatUsers(); else document.getElementById('closeChat').click();

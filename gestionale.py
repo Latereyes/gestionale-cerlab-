@@ -144,7 +144,7 @@ _ATTIVITA_RECENTI = deque(maxlen=300)
 _ATTIVITA_LOCK = threading.Lock()
 _ATTIVITA_ULTIMO_ID = 0
 
-def registra_attivita(testo, tipo="attivita"):
+def registra_attivita(testo, tipo="attivita", link=""):
     """Registra un evento (azione di un collega, PDF generato/fallito) per le notifiche sugli altri PC."""
     global _ATTIVITA_ULTIMO_ID
     try:
@@ -154,13 +154,13 @@ def registra_attivita(testo, tipo="attivita"):
     with _ATTIVITA_LOCK:
         _ATTIVITA_ULTIMO_ID += 1
         _ATTIVITA_RECENTI.append({"id": _ATTIVITA_ULTIMO_ID, "ts": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                  "testo": testo, "tipo": tipo, "ip": ip})
+                                  "testo": testo, "tipo": tipo, "ip": ip, "link": link})
 
-def annuncia(testo, tipo="attivita"):
+def annuncia(testo, tipo="attivita", link=""):
     """Registra l'evento per gli altri PC e lo mostra anche nel widget del PC server.
     Sul PC server: gli errori PDF sempre; il resto solo con 'Notifiche attività colleghi' attivo
     e se l'azione non è stata fatta proprio dal PC server."""
-    registra_attivita(testo, tipo)
+    registra_attivita(testo, tipo, link)
     w = _TRAY_WIDGET
     if not w:
         return
@@ -1816,16 +1816,28 @@ def notifica_attivita_nel_widget(response):
         if any(cat == "error" for cat, _ in session.get("_flashes", [])):
             return response
         q = (request.view_args or {}).get("quote_id", "")
-        cliente = ""
+        cliente, link = "", "/"
         if q:
             db = _DBSession()
             try:
                 prev = db.query(_Preventivo).filter_by(numero=q).first()
                 cliente = f" - {prev.cliente}" if prev and prev.cliente else ""
+                edile = bool(prev and prev.tipo_preventivo == "edile")
             finally:
                 db.close()
+            ep = request.endpoint
+            if ep in ("aggiungi_pagamento", "conferma_incasso", "rettifica_pagamento"):
+                link = url_for("gestione_pagamenti", quote_id=q)
+            elif ep in ("crea_bolla", "marca_pronto", "marca_consegnato"):
+                link = url_for("gestione_consegna", quote_id=q)
+            elif ep in ("salva_ordine", "aggiungi_a_ordine"):
+                link = url_for("conferma_ordine", quote_id=q)
+            elif ep == "allega_fattura":
+                link = url_for("editor_fattura", quote_id=q)
+            else:
+                link = url_for("editor_preventivo_edile" if edile else "editor_preventivo", quote_id=q)
         importo = request.form.get("importo", "").strip() if request.endpoint == "aggiungi_pagamento" else ""
-        annuncia(testo.format(chi=_chi(), q=q, cliente=cliente, importo=f" di {importo} €" if importo else ""))
+        annuncia(testo.format(chi=_chi(), q=q, cliente=cliente, importo=f" di {importo} €" if importo else ""), link=link)
     except Exception as e:
         print(f"[tray] Errore notifica attività: {e}")
     return response
@@ -1866,6 +1878,118 @@ def scarica_programma_notifiche():
         flash("Il programma notifiche non è incluso in questa installazione.", "error")
         return redirect(request.referrer or url_for("dashboard"))
     return send_from_directory(exe.parent, exe.name, as_attachment=True)
+
+# --- API per il programma "Gestionale Notifiche" (widget sui PC): accesso con token personale ---
+WIDGET_TOKENS_FILE = DATA_DIR / "widget_tokens.json"
+_WIDGET_TOKENS_LOCK = threading.Lock()
+
+def _widget_tokens():
+    try:
+        return json.loads(WIDGET_TOKENS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _widget_user():
+    """Utente collegato al widget (header X-Widget-Token), oppure None."""
+    token = request.headers.get("X-Widget-Token", "")
+    if not token:
+        return None
+    info = _widget_tokens().get(hashlib.sha256(token.encode()).hexdigest())
+    if not info:
+        return None
+    return next((u for u in load_users() if u["username"] == info["user"]), None)
+
+@app.route("/api/widget/login", methods=["POST"])
+def api_widget_login():
+    """Il widget si collega una volta con utente e password e riceve un token personale (salvato solo su quel PC)."""
+    if not _ip_rete_locale(request.remote_addr):
+        return jsonify({"ok": False, "error": "Accesso consentito solo dalla rete locale"}), 403
+    data = request.get_json(silent=True) or {}
+    username, password = data.get("username", ""), data.get("password", "")
+    user = next((u for u in load_users() if u["username"].lower() == username.strip().lower()), None)
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"ok": False, "error": "Utente o password non validi"}), 401
+    import secrets
+    token = secrets.token_urlsafe(32)
+    with _WIDGET_TOKENS_LOCK:
+        tokens = _widget_tokens()
+        tokens[hashlib.sha256(token.encode()).hexdigest()] = {
+            "user": user["username"], "pc": str(data.get("pc", ""))[:60], "ip": request.remote_addr,
+            "creato": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+        WIDGET_TOKENS_FILE.write_text(json.dumps(tokens, indent=1), encoding="utf-8")
+    return jsonify({"ok": True, "token": token, "username": user["username"], "full_name": user["full_name"]})
+
+@app.route("/api/widget/feed")
+def api_widget_feed():
+    """Novità per l'utente del widget: messaggi chat ricevuti e notifiche non lette.
+    ?msg=<ultimo id messaggio visto>; senza parametro restituisce solo il punto di partenza (niente arretrati)."""
+    user = _widget_user()
+    if not user:
+        return jsonify({"ok": False, "error": "non_autorizzato"}), 401
+    me = user["username"]
+    db = _DBSession()
+    try:
+        from sqlalchemy import func
+        ultimo = db.query(func.max(_Message.id)).scalar() or 0
+        messaggi = []
+        if "msg" in request.args:
+            try:
+                dopo = int(request.args.get("msg", "0"))
+            except ValueError:
+                dopo = ultimo
+            rows = db.query(_Message).filter(_Message.to_user == me, _Message.id > dopo, _Message.read == False  # noqa: E712
+                                             ).order_by(_Message.id).limit(20).all()
+            messaggi = [{"id": m.id, "from": m.from_user, "from_name": m.from_name or m.from_user,
+                         "text": m.text or "", "allegato": m.original_filename or "", "ts": m.timestamp} for m in rows]
+        non_letti = db.query(_Message).filter(_Message.to_user == me, _Message.read == False).count()  # noqa: E712
+        notifiche = [{"id": n.id, "text": n.text or "", "link": n.link or "/", "ts": n.timestamp}
+                     for n in db.query(_Notification).filter(_Notification.target_user == me, _Notification.read == False  # noqa: E712
+                                                             ).limit(30).all()]
+    finally:
+        db.close()
+    return jsonify({"ok": True, "username": me, "full_name": user["full_name"], "ultimo_msg_id": ultimo,
+                    "messaggi": messaggi, "messaggi_non_letti": non_letti, "notifiche": notifiche})
+
+@app.route("/api/widget/rispondi", methods=["POST"])
+def api_widget_rispondi():
+    """Risposta rapida dal widget: invia un messaggio chat e segna come letti quelli ricevuti da quel collega."""
+    user = _widget_user()
+    if not user:
+        return jsonify({"ok": False, "error": "non_autorizzato"}), 401
+    data = request.get_json(silent=True) or {}
+    to_user, text = str(data.get("to", "")), str(data.get("text", "")).strip()
+    if not to_user or not text:
+        return jsonify({"ok": False, "error": "Messaggio vuoto"}), 400
+    db = _DBSession()
+    try:
+        db.query(_Message).filter(_Message.to_user == user["username"], _Message.from_user == to_user,
+                                  _Message.read == False).update({_Message.read: True}, synchronize_session=False)  # noqa: E712
+        db.add(_Message(from_user=user["username"], from_name=user["full_name"], to_user=to_user, text=text,
+                        attachment="", original_filename="",
+                        timestamp=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), read=False))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[widget] Errore risposta: {e}")
+        return jsonify({"ok": False, "error": "Errore durante l'invio"}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/widget/notifica-letta", methods=["POST"])
+def api_widget_notifica_letta():
+    user = _widget_user()
+    if not user:
+        return jsonify({"ok": False, "error": "non_autorizzato"}), 401
+    nid = str((request.get_json(silent=True) or {}).get("id", ""))
+    db = _DBSession()
+    try:
+        db.query(_Notification).filter(_Notification.id == nid, _Notification.target_user == user["username"]
+                                       ).update({_Notification.read: True}, synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+    return jsonify({"ok": True})
 
 @app.route("/health")
 def health():
@@ -6008,7 +6132,7 @@ def generate_bolla_task(quote_id, bolla_id):
     save_quote(quote_id, p)
 
     log_pdf_event(log_id, "COMPLETATO", f"Processo terminato. File: {pdf_name}")
-    annuncia(f"✅ PDF generato: bolla {bolla_id} del preventivo {quote_id} ({_chi()})", "pdf")
+    annuncia(f"✅ PDF generato: bolla {bolla_id} del preventivo {quote_id} ({_chi()})", "pdf", url_for("pdf_inline", filename=pdf_name))
     pdf_url = url_for("pdf_inline", filename=pdf_name)
     return jsonify({"pdf_url": pdf_url})
 
@@ -6575,7 +6699,7 @@ def _generate_pdf_task_locked(quote_id):
     pdf_url = url_for("pdf_inline", filename=pdf_name)
     log_pdf_event(quote_id, "COMPLETATO", f"Processo terminato. URL PDF: {pdf_url}")
     annuncia(f"✅ PDF generato: preventivo {quote_id} REV-{rev_num} ({_chi()})"
-             + (" - segnato come Inviato" if invia else ""), "pdf")
+             + (" - segnato come Inviato" if invia else ""), "pdf", url_for("pdf_inline", filename=pdf_name))
     return jsonify({"pdf_url": pdf_url})
 
 @app.route("/loading-static")
@@ -7338,7 +7462,7 @@ def verifica_e_annuncia_aggiornamento():
 def get_notifications():
     all_n = load_notifications()
     # Filtra per l'utente corrente
-    my_n = [n for n in all_n if n["user_id"] == session["user_id"]]
+    my_n = [n for n in all_n if (n.get("target_user") or n.get("user_id")) == session["user_id"]]
     unread = sum(1 for n in my_n if not n["read"])
     return jsonify({"notifications": my_n[:20], "unread_count": unread})
 
@@ -7347,7 +7471,7 @@ def get_notifications():
 def mark_notifications_read():
     all_n = load_notifications()
     for n in all_n:
-        if n["user_id"] == session["user_id"]:
+        if (n.get("target_user") or n.get("user_id")) == session["user_id"]:
             n["read"] = True
     save_notifications(all_n)
     return jsonify({"success": True})    
