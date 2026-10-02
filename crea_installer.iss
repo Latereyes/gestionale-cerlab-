@@ -34,8 +34,9 @@ Source: "version.txt"; DestDir: "{userappdata}\gestionalepreventivi"; Flags: ign
 Source: "modello cashflow.xlsx"; DestDir: "{userappdata}\gestionalepreventivi\templates"; Flags: ignoreversion
 Source: "template_analisi.xlsx"; DestDir: "{userappdata}\gestionalepreventivi\templates"; Flags: ignoreversion
 
-; La migrazione dei dati utente rimane identica, ed e' corretta
-Source: "data\*"; DestDir: "{userappdata}\GestionalePreventivi"; Excludes: "users.json, tasks.json, comuni.json, preventivi, allegati, clienti, gh_token.txt,tagbox.json,notifications.json,messages.json,pdf_generation.log"; Flags: recursesubdirs createallsubdirs uninsneveruninstall
+; La cartella data\ dello sviluppo NON viene piu' copiata in AppData: conteneva il DB di prova,
+; i flag di migrazione e file di configurazione che sovrascrivevano quelli del cliente.
+; comuni.json e changelog.json sono gia' inclusi nell'eseguibile (gestionale.spec).
 
 ; Script di migrazione e fix dati
 Source: "migrate_v3_installer.py"; DestDir: "{app}"; Flags: ignoreversion
@@ -48,7 +49,9 @@ Name: "{group}\Avvia Gestionale Preventivi"; Filename: "{app}\Gestionale.exe"
 Name: "{autodesktop}\Avvia Gestionale Preventivi"; Filename: "{app}\Gestionale.exe"; Tasks: desktopicon
 
 [Run]
-; --- STEP 1: Migrazione dati V2 -> V3 (one-shot, idempotente) ---
+; --- STEP 1: Migrazione dati V2 -> V3 (una sola volta: scrive migration_v3_done.flag in AppData) ---
+; Il DB viene creato in AppData\GestionalePreventivi\gestionale_v3.db, fuori da {app}\_internal
+; (che viene cancellata a ogni aggiornamento). Log: AppData\GestionalePreventivi\migration_installer.log
 ; Usa il python.exe embedded nell'eseguibile PyInstaller (nella cartella _internal)
 Filename: "{app}\Gestionale.exe"; Parameters: "--run-migration"; \
   Description: "Migrazione dati al nuovo formato V3..."; \
@@ -56,7 +59,7 @@ Filename: "{app}\Gestionale.exe"; Parameters: "--run-migration"; \
   Flags: runhidden waituntilterminated; \
   WorkingDir: "{app}"
 
-; --- STEP 2: Fix pagamenti retrocompatibilita' V2 (one-shot, idempotente) ---
+; --- STEP 2: Fix pagamenti retrocompatibilita' V2 (una sola volta, solo dopo migrazione riuscita) ---
 Filename: "{app}\Gestionale.exe"; Parameters: "--fix-pagamenti"; \
   Description: "Allineamento stato pagamenti..."; \
   StatusMsg: "Verifica e correzione stato pagamenti..."; \

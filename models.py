@@ -3,9 +3,12 @@ from sqlalchemy import create_engine, Column, String, Boolean, ForeignKey, JSON,
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from sqlalchemy.types import Float
 
-# Path al database
+# Path al database.
+# In produzione gestionale.py imposta GESTIONALE_DB_PATH nella cartella dati utente (AppData),
+# cosi' il DB non sta dentro la cartella del programma, che l'installer cancella a ogni aggiornamento.
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-DB_PATH = os.path.join(BASE_DIR, "data", "gestionale.db")
+DB_PATH = os.environ.get("GESTIONALE_DB_PATH") or os.path.join(BASE_DIR, "data", "gestionale.db")
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 # Configurazione Engine per SQLite
 # check_same_thread=False e necessario per SQLite con Waitress (multithreading)
@@ -16,6 +19,17 @@ engine = create_engine(
 )
 
 Base = declarative_base()
+
+
+def campi_extra(data, campi_noti):
+    """Restituisce le chiavi di 'data' che non hanno una colonna dedicata.
+    Vengono salvate nella colonna JSON 'extra', cosi' nessun campo del JSON V2 va perso."""
+    return {k: v for k, v in (data or {}).items() if k not in campi_noti}
+
+
+def _con_extra(extra, base):
+    """Unisce i campi extra al dict del record; le colonne dedicate hanno la precedenza."""
+    return {**(extra or {}), **base}
 
 class Cliente(Base):
     __tablename__ = "clienti"
@@ -41,6 +55,9 @@ class Cliente(Base):
     # Note interne libere sul cliente (pannello "Note Cliente", visibili da tutti i suoi preventivi)
     note_interne = Column(Text, default="")
 
+    # Campi del JSON senza colonna dedicata (es. codice_univoco, regione, indirizzi_cantiere)
+    extra = Column(JSON, default=dict)
+
     # Relazione con i preventivi
     preventivi = relationship("Preventivo", back_populates="cliente_rel")
 
@@ -48,7 +65,7 @@ class Cliente(Base):
         return f"<Cliente(id_cliente='{self.id_cliente}', cliente='{self.cliente}')>"
 
     def to_dict(self):
-        return {
+        return _con_extra(self.extra, {
             "id_cliente": self.id_cliente,
             "cliente": self.cliente,
             "telefono": self.telefono,
@@ -64,7 +81,7 @@ class Cliente(Base):
             "has_privacy": self.has_privacy or False,
             "has_contratto": self.has_contratto or False,
             "documenti_anagrafici": self.documenti_anagrafici or []
-        }
+        })
 
 
 class Preventivo(Base):
@@ -125,11 +142,15 @@ class Preventivo(Base):
     pagamenti = Column(JSON, default=list)
     fatture_allegate = Column(JSON, default=list)
 
+    # Campi del JSON senza colonna dedicata (es. allegati, fatture_per_iva, stati_fattura_iva,
+    # data_annullamento, pdf_attivo, indirizzi_cantiere)
+    extra = Column(JSON, default=dict)
+
     def __repr__(self):
         return f"<Preventivo(numero='{self.numero}', cliente='{self.cliente}')>"
 
     def to_dict(self):
-        return {
+        return _con_extra(self.extra, {
             "numero": self.numero,
             "data": self.data,
             "venditore": self.venditore,
@@ -173,7 +194,7 @@ class Preventivo(Base):
             "pagamenti": self.pagamenti or [],
             "bolle": [b.to_dict() for b in self.bolle_rel] if self.bolle_rel else [],
             "fatture_allegate": self.fatture_allegate or []
-        }
+        })
 
 class Ordine(Base):
     __tablename__ = "ordini"
@@ -190,11 +211,13 @@ class Ordine(Base):
     data_arrivo = Column(String)
     indici_righe = Column(JSON, default=list)
     allegati = Column(JSON, default=list)
+    # Campi del JSON senza colonna dedicata (es. trasporto_incluso)
+    extra = Column(JSON, default=dict)
 
     preventivo_rel = relationship("Preventivo", back_populates="ordini_rel")
 
     def to_dict(self):
-        return {
+        return _con_extra(self.extra, {
             "ordine_id": self.ordine_id,
             "preventivo_id": self.preventivo_id,
             "data_ordine": self.data_ordine,
@@ -207,7 +230,7 @@ class Ordine(Base):
             "data_arrivo": self.data_arrivo,
             "indici_righe": self.indici_righe or [],
             "allegati": self.allegati or []
-        }
+        })
 
 class Bolla(Base):
     __tablename__ = "bolle"
@@ -218,17 +241,19 @@ class Bolla(Base):
     data = Column(String)
     indirizzo_cantiere_id = Column(String)
     indici_righe = Column(JSON, default=list)
+    # Campi del JSON senza colonna dedicata (es. pdf_filename)
+    extra = Column(JSON, default=dict)
 
     preventivo_rel = relationship("Preventivo", back_populates="bolle_rel")
 
     def to_dict(self):
-        return {
+        return _con_extra(self.extra, {
             "id": self.id,
             "preventivo_id": self.preventivo_id,
             "data": self.data,
             "indirizzo_cantiere_id": self.indirizzo_cantiere_id,
             "indici_righe": self.indici_righe or []
-        }
+        })
 
 
 # ============================================================
@@ -477,7 +502,11 @@ def _apply_schema_migrations():
             ("has_contratto",        "INTEGER DEFAULT 0"),
             ("documenti_anagrafici", "TEXT DEFAULT '[]'"),
             ("note_interne",         "TEXT DEFAULT ''"),
-        ]
+            ("extra",                "TEXT DEFAULT '{}'"),
+        ],
+        "preventivi": [("extra", "TEXT DEFAULT '{}'")],
+        "ordini":     [("extra", "TEXT DEFAULT '{}'")],
+        "bolle":      [("extra", "TEXT DEFAULT '{}'")],
     }
 
     for table, columns in migrations.items():

@@ -890,27 +890,15 @@ def setup_first_run():
 
 def _run_auto_migration_if_needed():
     """
-    Esegue migrate_v3_installer.py una sola volta se:
-    1. Il file sentinel 'migration_v3_done.flag' NON esiste (mai eseguita), E
-    2. Il DB risulta vuoto (0 utenti) — segnale che i dati sono ancora nei JSON V2, E
-    3. Esiste almeno un file JSON di clienti o preventivi in AppData.
-    In tutti gli altri casi, non fa nulla.
+    Esegue migrate_v3_installer.py se:
+    1. Il file sentinel 'migration_v3_done.flag' NON esiste (mai completata), E
+    2. Esiste almeno un file JSON di clienti o preventivi in AppData.
+    Se la migrazione dell'installer si e' interrotta a meta' viene ripresa: i record gia'
+    presenti nel DB vengono saltati. Il sentinel lo scrive lo script solo a migrazione riuscita.
     """
     sentinel = DATA_DIR / "migration_v3_done.flag"
     if sentinel.exists():
         return  # Gia' eseguita, skip
-
-    # Controlla se il DB ha già utenti (migrazione già avvenuta o install fresh V3)
-    try:
-        db = _DBSession()
-        user_count = db.query(_Utente).count()
-        db.close()
-        if user_count > 0:
-            # DB già popolato: segna come done e esci
-            sentinel.touch()
-            return
-    except Exception:
-        pass
 
     # Controlla se ci sono dati JSON V2 da migrare
     has_json_data = (
@@ -935,9 +923,11 @@ def _run_auto_migration_if_needed():
             _original_argv = _sys.argv[:]
             _sys.argv = ["migrate_v3_installer.py", str(DATA_DIR)]
             try:
-                run_migration()
-                sentinel.touch()
-                print("INFO: Migrazione V2 -> V3 completata con successo.")
+                # Il flag di fine migrazione lo scrive migrate_v3_installer solo se tutto e' andato a buon fine
+                if run_migration() == 0:
+                    print("INFO: Migrazione V2 -> V3 completata con successo.")
+                else:
+                    print("ATTENZIONE: Migrazione V2 -> V3 incompleta, verra' ritentata al prossimo avvio.")
             finally:
                 _sys.argv = _original_argv
         except Exception as e:
@@ -968,7 +958,14 @@ try:
     with open(resource_path("data/comuni.json"), "r", encoding="utf-8") as f: GEO_DATA = json.load(f)
 except FileNotFoundError: GEO_DATA = []; print("ATTENZIONE: File 'data/comuni.json' non trovato.")
 # === A3/A4/A5: Import modelli SQLAlchemy ===
+# Il DB sta nella cartella dati utente, non in quella del programma (cancellata dall'installer a ogni update).
+# Nome diverso da "gestionale.db" per non riusare il vecchio DB di prova presente in alcune AppData.
+os.environ.setdefault(
+    "GESTIONALE_DB_PATH",
+    str(DATA_DIR / ("gestionale.db" if "--debug" in sys.argv else "gestionale_v3.db"))
+)
 from models import (
+    campi_extra as _campi_extra,
     SessionLocal as _DBSession,
     Preventivo as _Preventivo, Ordine as _Ordine, Bolla as _Bolla,
     Cliente as _Cliente,
@@ -979,6 +976,12 @@ from models import (
     init_db as _init_db
 )
 _init_db()  # Assicura che tutte le tabelle V3 esistano
+
+# Chiavi che hanno una colonna dedicata (o una tabella collegata): tutto il resto finisce in 'extra'
+_CAMPI_PREVENTIVO = set(_Preventivo.__table__.columns.keys()) | {"ordini_fornitore", "bolle"}
+_CAMPI_ORDINE = set(_Ordine.__table__.columns.keys())
+_CAMPI_BOLLA = set(_Bolla.__table__.columns.keys())
+_CAMPI_CLIENTE = set(_Cliente.__table__.columns.keys())
 
 def load_users():
     """Carica gli utenti dalla tabella SQLite 'utenti'."""
@@ -1172,6 +1175,7 @@ def save_quote(quote_id, data):
         prev.storico_pdf = data.get("storico_pdf", [])
         prev.pagamenti = data.get("pagamenti", [])
         prev.fatture_allegate = data.get("fatture_allegate", [])
+        prev.extra = _campi_extra(data, _CAMPI_PREVENTIVO)
         db.flush()
 
         # --- Sync Ordini ---
@@ -1197,6 +1201,7 @@ def save_quote(quote_id, data):
                 existing_o.data_arrivo = ordine.get("data_arrivo", "")
                 existing_o.indici_righe = ordine.get("indici_righe", [])
                 existing_o.allegati = ordine.get("allegati", [])
+                existing_o.extra = _campi_extra(ordine, _CAMPI_ORDINE)
             else:
                 db.add(_Ordine(
                     ordine_id=oid, preventivo_id=quote_id,
@@ -1209,7 +1214,8 @@ def save_quote(quote_id, data):
                     iva_ordine=float(ordine.get("iva_ordine", 0) or 0),
                     data_arrivo=ordine.get("data_arrivo", ""),
                     indici_righe=ordine.get("indici_righe", []),
-                    allegati=ordine.get("allegati", [])
+                    allegati=ordine.get("allegati", []),
+                    extra=_campi_extra(ordine, _CAMPI_ORDINE)
                 ))
         # Rimuovi ordini cancellati
         for oid in ordini_db_ids - ordini_json_ids:
@@ -1229,12 +1235,14 @@ def save_quote(quote_id, data):
                 b.data = bolla.get("data", "")
                 b.indirizzo_cantiere_id = bolla.get("indirizzo_cantiere_id", "")
                 b.indici_righe = bolla.get("indici_righe", [])
+                b.extra = _campi_extra(bolla, _CAMPI_BOLLA)
             else:
                 db.add(_Bolla(
                     id=bid, preventivo_id=quote_id,
                     data=bolla.get("data", ""),
                     indirizzo_cantiere_id=bolla.get("indirizzo_cantiere_id", ""),
-                    indici_righe=bolla.get("indici_righe", [])
+                    indici_righe=bolla.get("indici_righe", []),
+                    extra=_campi_extra(bolla, _CAMPI_BOLLA)
                 ))
         # Rimuovi bolle cancellate
         for bid, b in bolle_db.items():
@@ -1544,6 +1552,7 @@ def save_client(client_id, data):
             existing.has_privacy = bool(data.get("has_privacy", False))
             existing.has_contratto = bool(data.get("has_contratto", False))
             existing.documenti_anagrafici = data.get("documenti_anagrafici", [])
+            existing.extra = _campi_extra(data, _CAMPI_CLIENTE)
         else:
             db.add(_Cliente(
                 id_cliente=client_id,
@@ -1560,7 +1569,8 @@ def save_client(client_id, data):
                 has_ci=bool(data.get("has_ci", False)),
                 has_privacy=bool(data.get("has_privacy", False)),
                 has_contratto=bool(data.get("has_contratto", False)),
-                documenti_anagrafici=data.get("documenti_anagrafici", [])
+                documenti_anagrafici=data.get("documenti_anagrafici", []),
+                extra=_campi_extra(data, _CAMPI_CLIENTE)
             ))
         db.commit()
     except Exception as e:
@@ -3363,7 +3373,11 @@ def clona_preventivo(quote_id):
     # 5. Pulizia dati specifici del vecchio preventivo
     campi_da_rimuovere = [
         "pdf_attivo", "storico_pdf", "pagamenti", "bolle", 
-        "fatture_allegate", "ordini_fornitore", "data_conferma", "data_chiusura"
+        "fatture_allegate", "ordini_fornitore", "data_conferma", "data_chiusura",
+        # Campi conservati dalla migrazione V2 (colonna 'extra'): non vanno ereditati dal clone.
+        # Gli allegati sono file nella cartella del vecchio preventivo, nel clone sarebbero link rotti.
+        "fatture_per_iva", "stati_fattura_iva", "stato_fattura", "data_annullamento",
+        "allegati", "totale_pagato", "totale_da_saldare"
     ]
     for campo in campi_da_rimuovere:
         p_clonato.pop(campo, None)
@@ -4214,7 +4228,6 @@ def dashboard_ceo():
                     iva_ord = _to_float(ordine.get("iva_ordine", 0))
                     c_ord_netto = (imp_lordo - iva_ord) if iva_ord else imp_lordo / 1.22
                     c_reale += c_ord_netto
-                    cashflow["iva_ordini"] += iva_ord
 
                 fee_val = imponibile * (fee_pct / 100.0) if fee_pct > 0 else 0.0
                 c_rif = c_reale if c_reale > 0 else c_presunto
@@ -4321,6 +4334,8 @@ def dashboard_ceo():
                     iva_ord = _to_float(ordine.get("iva_ordine", 0))
                     imp_ord_netto = (imp_lordo - iva_ord) if iva_ord else imp_lordo / 1.22
                     cashflow["costi_preventivi_in_corso"] += imp_ord_netto
+                    # IVA ordini per cassa: data conferma ordine (allegato) o arrivo, come in V2
+                    cashflow["iva_ordini"] += iva_ord
 
         # Conteggio preventivi inviati per tasso conversione venditore
         elif st == "Inviato" and in_periodo:
@@ -7292,8 +7307,12 @@ if __name__ == "__main__":
             _original_argv = sys.argv[:]
             sys.argv = ["migrate_v3_installer.py", str(DATA_DIR)]
             try:
-                _run_mig()
-                _log("[--run-migration] Completata con successo.")
+                # L'installer gira nascosto: il riepilogo della migrazione va nel log
+                import contextlib
+                with open(log_path, "a", encoding="utf-8") as _f, contextlib.redirect_stdout(_f):
+                    _esito = _run_mig()
+                _log("[--run-migration] Completata con successo." if not _esito
+                     else "[--run-migration] INCOMPLETA: verra' ritentata al prossimo avvio.")
             finally:
                 sys.argv = _original_argv
         except Exception as _e:
@@ -7317,10 +7336,20 @@ if __name__ == "__main__":
                 pass
         _log(f"[--fix-pagamenti] Avvio alle {__import__('datetime').datetime.now()}")
         try:
-            # Importa ed esegue il fix inline (senza subprocess)
-            from fix_pagamenti_v2 import main as _run_fix
-            _run_fix()
-            _log("[--fix-pagamenti] Completato con successo.")
+            # One-shot: va eseguito solo subito dopo la migrazione, non a ogni aggiornamento
+            _fix_flag = DATA_DIR / "fix_pagamenti_v2_done.flag"
+            if _fix_flag.exists():
+                _log("[--fix-pagamenti] Gia' eseguito in precedenza, skip.")
+            elif not (DATA_DIR / "migration_v3_done.flag").exists():
+                _log("[--fix-pagamenti] Migrazione non completata, skip (verra' ritentato).")
+            else:
+                # Importa ed esegue il fix inline (senza subprocess)
+                from fix_pagamenti_v2 import main as _run_fix
+                import contextlib
+                with open(log_path, "a", encoding="utf-8") as _f, contextlib.redirect_stdout(_f):
+                    _run_fix()
+                _fix_flag.write_text("ok", encoding="utf-8")
+                _log("[--fix-pagamenti] Completato con successo.")
         except Exception as _e:
             _log(f"[--fix-pagamenti] ERRORE: {_e}")
             _log(traceback.format_exc())

@@ -2,22 +2,27 @@
 """
 migrate_v3_installer.py
 =======================
-Script di migrazione ONE-SHOT per GESTIONALE CERLAB V3.
-Viene eseguito dal primo installer sul PC del cliente per migrare
-tutti i dati da file JSON flat al database SQLite unificato.
+Migrazione ONE-SHOT dei dati da file JSON (V2) al database SQLite (V3).
+Viene eseguita dall'installer (Gestionale.exe --run-migration) e, in mancanza, all'avvio dell'app.
 
-Percorso sorgente dati: %APPDATA%\Roaming\gestionalepreventivi\
-Percorso DB destinazione: stesso percorso / gestionale.db
+Percorso sorgente dati: %APPDATA%\\GestionalePreventivi\\
+Percorso DB destinazione: variabile GESTIONALE_DB_PATH (impostata da gestionale.py),
+altrimenti <cartella dati>\\gestionale_v3.db
 
-IDEMPOTENTE: se un record esiste gia, viene saltato (safe to re-run).
+UNA SOLA VOLTA: a migrazione riuscita scrive 'migration_v3_done.flag' nella cartella dati.
+Le esecuzioni successive (es. aggiornamenti futuri) non fanno nulla, cosi' i JSON V2 ormai
+vecchi non possono reintrodurre preventivi cancellati o modificati in V3.
+
+Non migrati per scelta: messages.json e tagbox.json (azzerati in V3).
 """
 
 import os
 import sys
 import json
-import glob
-import uuid
 from pathlib import Path
+
+SENTINEL_NAME = "migration_v3_done.flag"
+
 
 # =============================================
 # RILEVAMENTO PERCORSO DATI CLIENTE
@@ -35,16 +40,10 @@ def get_data_dir() -> Path:
 
     # Priorita 2: AppData standard Windows
     appdata = os.environ.get("APPDATA", "")
-    standard_path = Path(appdata) / "gestionalepreventivi"
+    standard_path = Path(appdata) / "GestionalePreventivi"
     if standard_path.exists():
         print(f"INFO: Percorso dati rilevato: {standard_path}")
         return standard_path
-
-    # Priorita 3: cartella data/ locale (per sviluppo/test)
-    local_path = Path(__file__).parent / "data"
-    if local_path.exists():
-        print(f"INFO: Uso cartella data/ locale (modalita test): {local_path}")
-        return local_path
 
     raise FileNotFoundError(
         f"Cartella dati non trovata. Controlla che il gestionale sia stato installato correttamente."
@@ -53,27 +52,13 @@ def get_data_dir() -> Path:
 
 
 # =============================================
-# SETUP DB (usa models.py dello stesso progetto)
-# =============================================
-# Aggiungiamo la directory dello script al path per importare models.py
-script_dir = Path(__file__).parent
-sys.path.insert(0, str(script_dir))
-
-from models import (
-    SessionLocal, init_db,
-    Cliente, Preventivo, Ordine, Bolla,
-    Utente, Task, AdminTask, Message, TagboxEntry,
-    Notification, ConfigMargini
-)
-
-
-# =============================================
 # CONTATORI E LOG
 # =============================================
 class MigrationReport:
     def __init__(self):
         self.counts = {}
-        self.errors = []
+        self.errors = []      # problemi su singoli file/record: la migrazione prosegue
+        self.fatal = []       # un intero passo e' fallito: la migrazione non va considerata completa
         self.skipped = {}
 
     def add(self, entity: str, n: int = 1):
@@ -87,88 +72,116 @@ class MigrationReport:
         print(f"  [ERRORE] {msg}")
 
     def print_summary(self):
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("RIEPILOGO MIGRAZIONE")
-        print("="*60)
-        for entity, count in sorted(self.counts.items()):
-            skipped = self.skipped.get(entity, 0)
-            print(f"  {entity:30s} +{count:4d} inseriti  ({skipped} gia presenti)")
+        print("=" * 60)
+        for entity in sorted(set(self.counts) | set(self.skipped)):
+            print(f"  {entity:30s} +{self.counts.get(entity, 0):4d} inseriti  ({self.skipped.get(entity, 0)} gia presenti)")
         if self.errors:
-            print(f"\n  ERRORI: {len(self.errors)}")
-            for e in self.errors[:10]:
+            print(f"\n  Record non migrati / avvisi: {len(self.errors)}")
+            for e in self.errors:
                 print(f"    - {e}")
-            if len(self.errors) > 10:
-                print(f"    ... e altri {len(self.errors)-10} errori")
-        else:
+        if self.fatal:
+            print(f"\n  PASSI FALLITI: {len(self.fatal)}")
+            for e in self.fatal:
+                print(f"    - {e}")
+        if not self.errors and not self.fatal:
             print("\n  Nessun errore riscontrato.")
-        print("="*60)
+        print("=" * 60)
 
 
 report = MigrationReport()
 
 
+def load_json(path: Path, default):
+    """Legge un file JSON. File assente -> None; file vuoto -> default; JSON rovinato -> errore e None."""
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        report.error(f"{path.name}: lettura fallita ({e})")
+        return None
+    if not text.strip():
+        print(f"  {path.name} vuoto, nulla da migrare.")
+        return default
+    try:
+        return json.loads(text)
+    except Exception as e:
+        report.error(f"{path.parent.name}/{path.name}: JSON illeggibile ({e})")
+        return None
+
+
 # =============================================
 # 1. CLIENTI
 # =============================================
-def migrate_clienti(session, data_dir: Path):
-    print("\n[1/9] Migrazione Clienti...")
+def migrate_clienti(session, data_dir: Path, M):
+    print("\n[1/7] Migrazione Clienti...")
     clienti_dir = data_dir / "clienti"
     if not clienti_dir.exists():
         print("  Cartella clienti/ non trovata, skip.")
         return
 
-    files = list(clienti_dir.glob("*.json"))
+    files = sorted(clienti_dir.glob("*.json"))
     print(f"  Trovati {len(files)} file JSON clienti.")
+    campi_cliente = set(M.Cliente.__table__.columns.keys())
 
     for file_path in files:
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            id_cliente = data.get("id_cliente")
-            if not id_cliente:
-                report.error(f"clienti/{file_path.name}: id_cliente mancante")
-                continue
-            if session.query(Cliente).filter_by(id_cliente=id_cliente).first():
-                report.skip("clienti")
-                continue
-            session.add(Cliente(
-                id_cliente=id_cliente,
-                cliente=data.get("cliente", ""),
-                telefono=data.get("telefono", ""),
-                email=data.get("email", ""),
-                regione_nome=data.get("regione_nome", ""),
-                provincia=data.get("provincia", ""),
-                comune=data.get("comune", ""),
-                cap=data.get("cap", ""),
-                indirizzo=data.get("indirizzo", ""),
-                p_iva=data.get("p_iva", ""),
-                rag_sociale=data.get("rag_sociale", ""),
-                has_ci=bool(data.get("has_ci", False)),
-                has_privacy=bool(data.get("has_privacy", False)),
-                has_contratto=bool(data.get("has_contratto", False)),
-                documenti_anagrafici=data.get("documenti_anagrafici", [])
-            ))
-            report.add("clienti")
-        except Exception as e:
-            report.error(f"clienti/{file_path.name}: {e}")
+        data = load_json(file_path, None)
+        if not data:
+            continue
+        id_cliente = data.get("id_cliente")
+        if not id_cliente:
+            report.error(f"clienti/{file_path.name}: id_cliente mancante")
+            continue
+        if session.query(M.Cliente).filter_by(id_cliente=id_cliente).first():
+            report.skip("clienti")
+            continue
+        session.add(M.Cliente(
+            id_cliente=id_cliente,
+            cliente=data.get("cliente", ""),
+            telefono=data.get("telefono", ""),
+            email=data.get("email", ""),
+            regione_nome=data.get("regione_nome", ""),
+            provincia=data.get("provincia", ""),
+            comune=data.get("comune", ""),
+            cap=data.get("cap", ""),
+            indirizzo=data.get("indirizzo", ""),
+            p_iva=data.get("p_iva", ""),
+            rag_sociale=data.get("rag_sociale", ""),
+            has_ci=bool(data.get("has_ci", False)),
+            has_privacy=bool(data.get("has_privacy", False)),
+            has_contratto=bool(data.get("has_contratto", False)),
+            documenti_anagrafici=data.get("documenti_anagrafici", []),
+            note_interne=data.get("note_interne", ""),
+            extra=M.campi_extra(data, campi_cliente)
+        ))
+        report.add("clienti")
 
     session.commit()
-    print(f"  OK: {report.counts.get('clienti', 0)} clienti migrati.")
 
 
 # =============================================
-# 2. PREVENTIVI (PREV-* e EDIL-*)
+# 2. PREVENTIVI (PREV-* e EDIL-*) con ordini e bolle
 # =============================================
-def _extract_ordini_bolle(session, data: dict, numero: str):
-    """Estrae e migra ordini e bolle embedded nel JSON del preventivo."""
-    # Ordini (ordini_fornitore)
-    for ordine in data.get("ordini_fornitore", []):
+def _extract_ordini_bolle(session, data: dict, numero: str, M):
+    """Migra ordini e bolle contenuti nel JSON del preventivo."""
+    campi_ordine = set(M.Ordine.__table__.columns.keys())
+    campi_bolla = set(M.Bolla.__table__.columns.keys())
+
+    for idx, ordine in enumerate(data.get("ordini_fornitore", []) or [], start=1):
         ordine_id = ordine.get("ordine_id")
         if not ordine_id:
-            ordine_id = str(uuid.uuid4())[:8].upper()
-        if session.query(Ordine).filter_by(ordine_id=ordine_id).first():
-            continue
-        session.add(Ordine(
+            # Id stabile (non casuale), cosi' una seconda esecuzione produce lo stesso risultato
+            ordine_id = f"{numero}-ORD{idx}"
+        existing = session.get(M.Ordine, ordine_id)
+        if existing is not None:
+            if existing.preventivo_id == numero:
+                report.skip("ordini")
+                continue
+            report.error(f"ordine {ordine_id} di {numero}: id gia usato da {existing.preventivo_id}, rinominato")
+            ordine_id = f"{ordine_id}-{numero}"
+        session.add(M.Ordine(
             ordine_id=ordine_id,
             preventivo_id=numero,
             data_ordine=ordine.get("data_ordine", ""),
@@ -180,61 +193,59 @@ def _extract_ordini_bolle(session, data: dict, numero: str):
             iva_ordine=float(ordine.get("iva_ordine", 0) or 0),
             data_arrivo=ordine.get("data_arrivo", ""),
             indici_righe=ordine.get("indici_righe", []),
-            allegati=ordine.get("allegati", [])
+            allegati=ordine.get("allegati", []),
+            extra=M.campi_extra(ordine, campi_ordine)
         ))
+        session.flush()
+        report.add("ordini")
 
-    # Bolle
-    for bolla in data.get("bolle", []):
+    for bolla in data.get("bolle", []) or []:
         bolla_id = bolla.get("id")
         if not bolla_id:
+            report.error(f"bolla senza id in {numero}: non migrata")
             continue
-        # Le bolle non hanno una PK univoca naturale, usiamo combinazione preventivo+id
-        existing = session.query(Bolla).filter_by(
-            preventivo_id=numero, id=bolla_id
-        ).first()
-        if existing:
+        if session.query(M.Bolla).filter_by(preventivo_id=numero, id=bolla_id).first():
+            report.skip("bolle")
             continue
-        session.add(Bolla(
+        session.add(M.Bolla(
             id=bolla_id,
             preventivo_id=numero,
             data=bolla.get("data", ""),
             indirizzo_cantiere_id=bolla.get("indirizzo_cantiere_id", ""),
-            indici_righe=bolla.get("indici_righe", [])
+            indici_righe=bolla.get("indici_righe", []),
+            extra=M.campi_extra(bolla, campi_bolla)
         ))
+        report.add("bolle")
 
 
-def migrate_preventivi(session, data_dir: Path):
-    print("\n[2/9] Migrazione Preventivi (PREV + EDIL)...")
+def migrate_preventivi(session, data_dir: Path, M):
+    print("\n[2/7] Migrazione Preventivi (PREV + EDIL)...")
     prev_dir = data_dir / "preventivi"
     if not prev_dir.exists():
         print("  Cartella preventivi/ non trovata, skip.")
         return
 
-    files = list(prev_dir.glob("*.json"))
+    files = sorted(prev_dir.glob("*.json"))
     print(f"  Trovati {len(files)} file JSON preventivi.")
+    campi_preventivo = set(M.Preventivo.__table__.columns.keys()) | {"ordini_fornitore", "bolle"}
 
     for file_path in files:
+        data = load_json(file_path, None)
+        if not data:
+            continue
+        numero = data.get("numero")
+        if not numero:
+            report.error(f"preventivi/{file_path.name}: campo 'numero' mancante")
+            continue
+        if session.get(M.Preventivo, numero) is not None:
+            report.skip("preventivi")
+            continue
+
+        raw_no_iva = data.get("no_iva", False)
+        no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
+
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            numero = data.get("numero")
-            if not numero:
-                report.error(f"preventivi/{file_path.name}: campo 'numero' mancante")
-                continue
-
-            if session.query(Preventivo).filter_by(numero=numero).first():
-                report.skip("preventivi")
-                continue
-
-            # Determina tipo
-            tipo = data.get("tipo_preventivo", "standard")
-
-            # Gestione no_iva: puo essere bool o stringa
-            raw_no_iva = data.get("no_iva", False)
-            no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
-
-            prev = Preventivo(
+            session.add(M.Preventivo(
                 numero=numero,
                 data=data.get("data", ""),
                 venditore=data.get("venditore", ""),
@@ -253,17 +264,15 @@ def migrate_preventivi(session, data_dir: Path):
                 p_iva=data.get("p_iva", ""),
                 cap=data.get("cap", ""),
                 stato=data.get("stato", "Bozza"),
-                is_locked=data.get("is_locked", False),
+                is_locked=bool(data.get("is_locked", False)),
                 id_cliente=data.get("id_cliente"),
-                # V3
                 data_conferma=data.get("data_conferma"),
                 no_iva=no_iva,
-                tipo_preventivo=tipo,
+                tipo_preventivo=data.get("tipo_preventivo", "standard"),
                 codice_univoco=data.get("codice_univoco", ""),
                 iva_pct=data.get("iva_pct", ""),
                 righe_edili=data.get("righe_edili", []),
                 sezioni_edili=data.get("sezioni_edili", []),
-                # Calcolati
                 tot_imponibile_negozio=str(data.get("tot_imponibile_negozio", "")),
                 tot_imponibile_cliente=str(data.get("tot_imponibile_cliente", "")),
                 tot_iva=str(data.get("tot_iva", "")),
@@ -272,49 +281,36 @@ def migrate_preventivi(session, data_dir: Path):
                 stato_pagamento_globale=data.get("stato_pagamento_globale", ""),
                 stato_fattura=data.get("stato_fattura", ""),
                 data_chiusura=data.get("data_chiusura", ""),
-                # JSON annidati
                 righe=data.get("righe", []),
                 imponibili_iva=data.get("imponibili_iva", {}),
                 tot_iva_dettaglio=data.get("tot_iva_dettaglio", {}),
                 storico_pdf=data.get("storico_pdf", []),
                 pagamenti=data.get("pagamenti", []),
-                fatture_allegate=data.get("fatture_allegate", [])
-            )
-            session.add(prev)
-            session.flush()  # Ottieni l'ID per le FK
-
-            # Migra ordini e bolle embedded
-            _extract_ordini_bolle(session, data, numero)
-
+                fatture_allegate=data.get("fatture_allegate", []),
+                extra=M.campi_extra(data, campi_preventivo)
+            ))
+            session.flush()
+            _extract_ordini_bolle(session, data, numero, M)
+            session.commit()
             report.add("preventivi")
         except Exception as e:
+            session.rollback()
             report.error(f"preventivi/{file_path.name}: {e}")
 
-    session.commit()
-    print(f"  OK: {report.counts.get('preventivi', 0)} preventivi migrati.")
-
 
 # =============================================
-# 3. UTENTI (users.json)
+# 3-7. FILE SINGOLI (utenti, task, admin task, notifiche, margini)
 # =============================================
-def migrate_utenti(session, data_dir: Path):
-    print("\n[3/9] Migrazione Utenti (users.json)...")
-    users_file = data_dir / "users.json"
-    if not users_file.exists():
-        print("  users.json non trovato, skip.")
-        return
-
-    with open(users_file, "r", encoding="utf-8") as f:
-        users = json.load(f)
-
-    for u in users:
+def migrate_utenti(session, data_dir: Path, M):
+    print("\n[3/7] Migrazione Utenti (users.json)...")
+    for u in load_json(data_dir / "users.json", []) or []:
         username = u.get("username")
         if not username:
             continue
-        if session.query(Utente).filter_by(username=username).first():
+        if session.get(M.Utente, username) is not None:
             report.skip("utenti")
             continue
-        session.add(Utente(
+        session.add(M.Utente(
             username=username,
             password_hash=u.get("password_hash", ""),
             full_name=u.get("full_name", ""),
@@ -324,32 +320,19 @@ def migrate_utenti(session, data_dir: Path):
             last_seen_version=u.get("last_seen_version", "")
         ))
         report.add("utenti")
-
     session.commit()
-    print(f"  OK: {report.counts.get('utenti', 0)} utenti migrati.")
 
 
-# =============================================
-# 4. TASKS (tasks.json)
-# =============================================
-def migrate_tasks(session, data_dir: Path):
-    print("\n[4/9] Migrazione Tasks (tasks.json)...")
-    tasks_file = data_dir / "tasks.json"
-    if not tasks_file.exists():
-        print("  tasks.json non trovato, skip.")
-        return
-
-    with open(tasks_file, "r", encoding="utf-8") as f:
-        tasks = json.load(f)
-
-    for t in tasks:
+def migrate_tasks(session, data_dir: Path, M):
+    print("\n[4/7] Migrazione Tasks (tasks.json)...")
+    for t in load_json(data_dir / "tasks.json", []) or []:
         tid = t.get("id")
         if not tid:
             continue
-        if session.query(Task).filter_by(id=tid).first():
+        if session.get(M.Task, tid) is not None:
             report.skip("tasks")
             continue
-        session.add(Task(
+        session.add(M.Task(
             id=tid,
             created_by=t.get("created_by", ""),
             created_by_name=t.get("created_by_name", ""),
@@ -361,32 +344,19 @@ def migrate_tasks(session, data_dir: Path):
             comments=t.get("comments", [])
         ))
         report.add("tasks")
-
     session.commit()
-    print(f"  OK: {report.counts.get('tasks', 0)} tasks migrati.")
 
 
-# =============================================
-# 5. ADMIN TASKS (admin_tasks.json)
-# =============================================
-def migrate_admin_tasks(session, data_dir: Path):
-    print("\n[5/9] Migrazione Admin Tasks (admin_tasks.json)...")
-    admin_file = data_dir / "admin_tasks.json"
-    if not admin_file.exists():
-        print("  admin_tasks.json non trovato, skip.")
-        return
-
-    with open(admin_file, "r", encoding="utf-8") as f:
-        tasks = json.load(f)
-
-    for t in tasks:
+def migrate_admin_tasks(session, data_dir: Path, M):
+    print("\n[5/7] Migrazione Admin Tasks (admin_tasks.json)...")
+    for t in load_json(data_dir / "admin_tasks.json", []) or []:
         tid = t.get("id")
         if not tid:
             continue
-        if session.query(AdminTask).filter_by(id=tid).first():
+        if session.get(M.AdminTask, tid) is not None:
             report.skip("admin_tasks")
             continue
-        session.add(AdminTask(
+        session.add(M.AdminTask(
             id=tid,
             user_id=t.get("user_id"),
             user_name=t.get("user_name"),
@@ -400,98 +370,19 @@ def migrate_admin_tasks(session, data_dir: Path):
             comments=t.get("comments", [])
         ))
         report.add("admin_tasks")
-
     session.commit()
-    print(f"  OK: {report.counts.get('admin_tasks', 0)} admin tasks migrati.")
 
 
-# =============================================
-# 6. MESSAGGI (messages.json)
-# =============================================
-def migrate_messages(session, data_dir: Path):
-    print("\n[6/9] Migrazione Messaggi (messages.json)...")
-    msg_file = data_dir / "messages.json"
-    if not msg_file.exists():
-        print("  messages.json non trovato, skip.")
-        return
-
-    with open(msg_file, "r", encoding="utf-8") as f:
-        messages = json.load(f)
-
-    for m in messages:
-        session.add(Message(
-            from_user=m.get("from", ""),
-            from_name=m.get("from_name", ""),
-            to_user=m.get("to", ""),
-            text=m.get("text", ""),
-            attachment=m.get("attachment", ""),
-            original_filename=m.get("original_filename", ""),
-            timestamp=m.get("timestamp", ""),
-            read=m.get("read", False)
-        ))
-        report.add("messages")
-
-    session.commit()
-    print(f"  OK: {report.counts.get('messages', 0)} messaggi migrati.")
-
-
-# =============================================
-# 7. TAGBOX (tagbox.json)
-# =============================================
-def migrate_tagbox(session, data_dir: Path):
-    print("\n[7/9] Migrazione Tagbox (tagbox.json)...")
-    tag_file = data_dir / "tagbox.json"
-    if not tag_file.exists():
-        print("  tagbox.json non trovato, skip.")
-        return
-
-    with open(tag_file, "r", encoding="utf-8") as f:
-        entries = json.load(f)
-
-    for e in entries:
-        eid = e.get("id")
-        if not eid:
-            continue
-        if session.query(TagboxEntry).filter_by(id=eid).first():
-            report.skip("tagbox")
-            continue
-        session.add(TagboxEntry(
-            id=eid,
-            user=e.get("user", ""),
-            user_id=e.get("user_id", ""),
-            text=e.get("text", ""),
-            timestamp=e.get("timestamp", ""),
-            pinned=e.get("pinned", False)
-        ))
-        report.add("tagbox")
-
-    session.commit()
-    print(f"  OK: {report.counts.get('tagbox', 0)} voci tagbox migrate.")
-
-
-# =============================================
-# 8. NOTIFICHE (notifications.json)
-# =============================================
-def migrate_notifications(session, data_dir: Path):
-    print("\n[8/9] Migrazione Notifiche (notifications.json)...")
-    notif_file = data_dir / "notifications.json"
-    if not notif_file.exists():
-        print("  notifications.json non trovato, skip.")
-        return
-
-    with open(notif_file, "r", encoding="utf-8") as f:
-        notifs = json.load(f)
-
-    for n in notifs:
-        nid = n.get("id")
-        if not nid:
-            nid = str(uuid.uuid4())[:8]
-        if session.query(Notification).filter_by(id=nid).first():
+def migrate_notifications(session, data_dir: Path, M):
+    print("\n[6/7] Migrazione Notifiche (notifications.json)...")
+    for idx, n in enumerate(load_json(data_dir / "notifications.json", []) or [], start=1):
+        nid = n.get("id") or f"MIG-NOTIF-{idx}"
+        if session.get(M.Notification, nid) is not None:
             report.skip("notifications")
             continue
-        session.add(Notification(
+        session.add(M.Notification(
             id=nid,
-            target_user=n.get("target_user", n.get("user", "all")),
+            target_user=n.get("target_user", n.get("user", n.get("user_id", "all"))),
             text=n.get("text", ""),
             link=n.get("link", ""),
             timestamp=n.get("timestamp", ""),
@@ -499,34 +390,22 @@ def migrate_notifications(session, data_dir: Path):
             notif_type=n.get("type", "info")
         ))
         report.add("notifications")
-
     session.commit()
-    print(f"  OK: {report.counts.get('notifications', 0)} notifiche migrate.")
 
 
-# =============================================
-# 9. CONFIG MARGINI (config_margini.json)
-# =============================================
-def migrate_config_margini(session, data_dir: Path):
-    print("\n[9/9] Migrazione Configurazione Margini (config_margini.json)...")
-    cfg_file = data_dir / "config_margini.json"
-    if not cfg_file.exists():
-        print("  config_margini.json non trovato, skip.")
-        return
-
-    with open(cfg_file, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-
+def migrate_config_margini(session, data_dir: Path, M):
+    print("\n[7/7] Migrazione Configurazione Margini (config_margini.json)...")
+    cfg = load_json(data_dir / "config_margini.json", {}) or {}
     for fascia in cfg.get("fasce", []):
         key = fascia.get("key")
         if not key:
             continue
-        if session.query(ConfigMargini).filter_by(key=key).first():
+        if session.get(M.ConfigMargini, key) is not None:
             report.skip("config_margini")
             continue
         pallini = fascia.get("pallini", {})
         regole = fascia.get("regole_colore", {})
-        session.add(ConfigMargini(
+        session.add(M.ConfigMargini(
             key=key,
             descrizione=fascia.get("descrizione", ""),
             max_costo=float(fascia.get("max_costo", 0)),
@@ -541,15 +420,14 @@ def migrate_config_margini(session, data_dir: Path):
             arancione_max2=float(regole.get("arancione_max2", 0))
         ))
         report.add("config_margini")
-
     session.commit()
-    print(f"  OK: {report.counts.get('config_margini', 0)} fasce margini migrate.")
 
 
 # =============================================
 # MAIN
 # =============================================
-def main():
+def main() -> int:
+    """Esegue la migrazione. Ritorna 0 se completata (o gia' fatta), 1 se un passo e' fallito."""
     print("=" * 60)
     print("GESTIONALE CERLAB V3 - Script di Migrazione Dati")
     print("=" * 60)
@@ -558,36 +436,46 @@ def main():
         data_dir = get_data_dir()
     except FileNotFoundError as e:
         print(f"\nERRORE FATALE: {e}")
-        sys.exit(1)
+        return 1
+
+    sentinel = data_dir / SENTINEL_NAME
+    if sentinel.exists():
+        print(f"\nMigrazione gia eseguita ({sentinel}). Nulla da fare.")
+        return 0
+
+    # Il DB va nella cartella dati, salvo che il chiamante (gestionale.py) l'abbia gia' indicato
+    os.environ.setdefault("GESTIONALE_DB_PATH", str(data_dir / "gestionale_v3.db"))
+    sys.path.insert(0, str(Path(__file__).parent))
+    import models as M
 
     print(f"\nPercorso sorgente: {data_dir}")
+    print(f"Database: {M.DB_PATH}")
+    M.init_db()
 
-    # Inizializza DB (crea tabelle se non esistono)
-    print("\nInizializzazione database...")
-    init_db()
-    print("OK: Schema DB pronto.")
+    print("\nmessages.json e tagbox.json: non migrati (azzerati in V3).")
 
-    session = SessionLocal()
+    session = M.SessionLocal()
     try:
-        migrate_clienti(session, data_dir)
-        migrate_preventivi(session, data_dir)
-        migrate_utenti(session, data_dir)
-        migrate_tasks(session, data_dir)
-        migrate_admin_tasks(session, data_dir)
-        migrate_messages(session, data_dir)
-        migrate_tagbox(session, data_dir)
-        migrate_notifications(session, data_dir)
-        migrate_config_margini(session, data_dir)
-    except Exception as e:
-        session.rollback()
-        report.error(f"Errore critico durante la migrazione: {e}")
-        raise
+        for step in (migrate_clienti, migrate_preventivi, migrate_utenti, migrate_tasks,
+                     migrate_admin_tasks, migrate_notifications, migrate_config_margini):
+            try:
+                step(session, data_dir, M)
+            except Exception as e:
+                session.rollback()
+                report.fatal.append(f"{step.__name__}: {e}")
+                print(f"  [PASSO FALLITO] {step.__name__}: {e}")
     finally:
         session.close()
 
     report.print_summary()
+    if report.fatal:
+        print("\nMigrazione INCOMPLETA: verra' ritentata al prossimo avvio/installazione.")
+        return 1
+
+    sentinel.write_text("ok", encoding="utf-8")
     print("\nMigrazione completata.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
