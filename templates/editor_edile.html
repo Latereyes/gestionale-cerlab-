@@ -960,9 +960,7 @@ async function triggerUpload(index) {
             if (targetActionUrlName === 'invia_preventivo') {
                 btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Genero PDF...';
                 return fetch(`/generate-pdf-task/${quoteId}?invia=1`).then(r => r.json().then(d => {
-                    if (!d.pdf_url) throw new Error("Il PDF non è stato generato, quindi il preventivo NON è stato segnato come Inviato.
-
-" + (d.error || ''));
+                    if (!d.pdf_url) throw new Error("Il PDF non è stato generato, quindi il preventivo NON è stato segnato come Inviato.\n\n" + (d.error || ''));
                     window.open(d.pdf_url, '_blank');
                     return { ok: true };
                 }));

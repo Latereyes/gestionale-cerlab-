@@ -992,9 +992,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         })
                         .catch(err => {
                             // Gestisce l'errore della generazione PDF
-                            alert("Il PDF non è stato generato, quindi il preventivo NON è stato segnato come Inviato.
-
-" + err.message);
+                            alert("Il PDF non è stato generato, quindi il preventivo NON è stato segnato come Inviato.\n\n" + err.message);
                             if(newTab) newTab.close();
                             stateChangeButton.innerHTML = originalButtonHtml; // Resetta il bottone originale
                             stateChangeButton.disabled = false;
