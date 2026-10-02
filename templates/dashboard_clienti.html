@@ -93,7 +93,7 @@
                         </td>
 
                         <td>
-                            <strong>{{ p.numero }}</strong>
+                            <strong title="{{ p.numero }}">{{ p.numero[:8] + '…' + p.numero[-5:] if p.numero|length > 16 else p.numero }}</strong>
                         </td>
                         
                         <td>
@@ -299,203 +299,110 @@
     </div>
 
 <style>
-    /* In dashboard_clienti.html, aggiungi questo dentro <style> */
-
-/* --- STILI PER FILTRO STATO --- */
-.filter-bar {
-    margin-bottom: 24px;
-    display: flex;
-    justify-content: center;
-}
+/* --- FILTRO SWITCH --- */
+.filter-bar { margin-bottom: 20px; display: flex; justify-content: center; }
 .multi-switch {
     position: relative;
     display: flex;
-    background-color: #e9ecef; /* Sfondo grigio */
-    border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     padding: 3px;
-    height: 36px; /* Altezza fissa */
-    width: 450px; /* 5 stati * 90px */
+    height: 36px;
+    width: 450px;
     cursor: pointer;
     user-select: none;
 }
 .switch-thumb {
     position: absolute;
-    top: 3px;
-    bottom: 3px;
-    width: 20%; /* 1/5 della larghezza */
-    background-color: #ffffff; /* Cursore bianco */
-    border-radius: 6px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    transition: transform 0.25s ease-out; /* Animazione fluida */
+    top: 3px; bottom: 3px;
+    width: 20%;
+    background: var(--surface);
+    border-radius: calc(var(--radius-sm) - 2px);
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.25s ease-out;
     z-index: 1;
 }
 .switch-label {
-    flex: 1; /* Occupa 1/5 dello spazio */
+    flex: 1;
     text-align: center;
     font-size: 12px;
     font-weight: 600;
-    color: #495057;
-    line-height: 30px; /* Allineamento verticale */
+    color: var(--text-muted);
+    line-height: 30px;
     position: relative;
-    z-index: 2; /* Sta sopra il cursore */
+    z-index: 2;
 }
-.switch-label.active {
-    color: #000;
-}
-@media (max-width: 768px) {
-    .multi-switch {
-        width: 100%;
-    }
-}
-/* --- FINE STILI FILTRO --- */
-/* Stili presi da altre pagine per coerenza */
+.switch-label.active { color: var(--text); }
+@media (max-width: 768px) { .multi-switch { width: 100%; } }
+
+/* --- LAYOUT --- */
 .editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
-.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; flex-wrap: wrap; gap: 16px; }
-.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+
+/* --- TABELLA --- */
 .table-wrap { overflow-x: auto; }
 .styled-table { width: 100%; border-collapse: collapse; }
-.styled-table th, .styled-table td { padding: 14px 18px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); white-space: nowrap; vertical-align: middle; }
-.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table th, .styled-table td { padding: 14px 18px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; vertical-align: middle; }
+.styled-table thead th { background: var(--surface-2); font-size: 11px; text-transform: uppercase; color: var(--text-muted); }
+.styled-table tbody tr { transition: background var(--transition); }
 .styled-table tbody tr:last-child td { border-bottom: none; }
 .actions-column { text-align: right; width: 1%; }
 .row-actions { text-align: right; display: flex; gap: 8px; }
-.empty-state { text-align: center; padding: 40px; color: var(--muted); }
-.empty-state i { font-size: 32px; color: #ced4da; margin-bottom: 12px; }
-.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; }
-.empty-state p { margin: 0; font-size: 14px; }
-.muted { color: #64748b; }
 .right { text-align: right; }
 .center { text-align: center; }
 
-/* Intestazione Card Cliente */
+/* --- EMPTY STATE --- */
+.empty-state { text-align: center; padding: 40px; color: var(--text-muted); }
+.empty-state i { font-size: 32px; color: var(--border-strong, #ced4da); margin-bottom: 12px; display: block; }
+.empty-state h4 { margin: 0 0 8px; font-size: 18px; }
+.empty-state p { margin: 0; font-size: 14px; }
+
+/* --- CARD CLIENTE --- */
 .client-info { display: flex; flex-direction: column; gap: 4px; }
 .client-info h3 { margin: 0; }
-.client-total {
-    font-size: 14px;
-    font-weight: 600;
-    color: #198754; /* Verde */
-}
-.header-actions-wrapper {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
+.client-total { font-size: 14px; font-weight: 600; color: var(--success-text); }
+.header-actions-wrapper { display: flex; align-items: center; gap: 8px; }
 
-/* Stili Badge di Stato (Inclusi i nuovi per Fattura) */
-.status-badge { display: inline-block; padding: 4px 10px; font-size: 11px; font-weight: 600; border-radius: 20px; color: #fff; min-width: 80px; text-align: center; text-transform: capitalize; }
-.status-badge.status-principale {
-  border-radius: 6px; /* Questo lo rende più squadrato */
-  font-weight: 700;   /* Già che ci siamo, lo rendiamo più evidente */
-  font-size: 12px;
-}
-.status-bozza { background-color: #6c757d; }
-.status-inviato { background-color: #0d6efd; }
-.status-confermato, .status-chiuso, .status-completato, .status-saldato { background-color: #198754; }
-.status-in-lavorazione, .status-parziale { background-color: #ffc107; color: #000; }
-.status-annullato, .status-da-saldare { background-color: #dc3545; }
-.status-nd { background-color: #e9ecef; color: #495057; }
-.status-in-attesa-di-fattura { background-color: #ffc107; color: #000; }
-.status-fatturato-parziale { background-color: #0d6efd; }
-.status-fattura-emessa { background-color: #198754; }
-.status-non-disponibile { 
-    background-color: #3f4348; 
-}
+/* --- ICON-BTN --- */
+.btn.icon-btn { padding: 0; width: 34px; height: 34px; justify-content: center; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
+.btn.icon-btn:hover { background: var(--accent-light); color: var(--accent); }
+.btn.icon-btn.primary { background: var(--accent-light); color: var(--accent); border-color: transparent; }
+.btn.icon-btn.primary:hover { background: var(--accent); color: #fff; }
 
-/* Stile per pulsante icona */
-.btn.icon-btn {
-    padding: 8px; line-height: 1; border-radius: 8px; background-color: var(--bg-light, #f8f9fa);
-    color: var(--muted, #6c757d); border: 1px solid var(--border-color, #e2e8f0);
-}
-.btn.icon-btn:hover { background-color: var(--bg-hover, #f1f5f9); color: var(--text-primary); }
-.btn.icon-btn.primary {
-    background-color: #e7f0fe; color: #0d6efd; border-color: transparent;
-}
-.btn.icon-btn.primary:hover { background-color: #0d6efd; color: #fff; }
+/* --- RIGHE ESPANDIBILI --- */
+.main-row { cursor: pointer; transition: background 0.15s; }
+.main-row:hover { background: var(--accent-light) !important; }
+.expand-cell { text-align: center; }
+.expand-btn { transition: transform 0.2s ease-in-out; }
+.main-row.is-open .expand-btn { transform: rotate(180deg); }
+.main-row.is-open td { border-bottom: none; }
 
-/* --- Stili per Righe Espandibili --- */
-.main-row {
-    cursor: pointer;
-    transition: background-color 0.1s;
-}
-.main-row:hover {
-    background-color: #f8f9fa; /* Leggero hover */
-}
-.expand-cell {
-    text-align: center;
-}
-.expand-btn {
-    transition: transform 0.2s ease-in-out;
-}
-.main-row.is-open .expand-btn {
-    transform: rotate(180deg);
-}
+.details-row { display: none; background: var(--surface-2); }
+.details-row.is-open { display: table-row; }
+.details-row td { padding: 16px 24px; border-bottom: 1px solid var(--border); }
 
-.details-row {
-    display: none; /* Nascosta di default */
-    background-color: #fdfdfe;
-}
-/* Stile per non avere il doppio bordo quando è aperta */
-.main-row.is-open td {
-    border-bottom: none;
-}
-.details-row.is-open {
-    display: table-row; /* Mostra la riga */
-}
-.details-row td {
-    padding: 16px 24px;
-    border-bottom: 1px solid #e2e8f0;
-}
-
-/* Griglia per il Riepilogo */
-.kpi-riepilogo-grid {
-    display: flex;
-    gap: 24px;
-    flex-wrap: wrap;
-    align-items: flex-start;
-}
-.kpi-group {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 170px;
-}
+/* --- KPI DETTAGLIO --- */
+.kpi-riepilogo-grid { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+.kpi-group { display: flex; flex-direction: column; gap: 8px; min-width: 170px; }
 .kpi-title {
     font-size: 11px;
     font-weight: 700;
-    color: #0d6efd;
+    color: var(--accent);
     text-transform: uppercase;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--border);
     padding-bottom: 4px;
     margin-bottom: 4px;
+    letter-spacing: 0.5px;
 }
-.kpi-item {
-    font-size: 13px;
-}
-.kpi-item span {
-    color: var(--muted);
-    margin-right: 4px;
-}
-.kpi-item strong {
-    font-weight: 600;
-    color: #1a202c;
-}
-.kpi-item a {
-    font-weight: 600;
-    text-decoration: none;
-}
-.kpi-item.success strong { color: #198754; }
-.kpi-item.danger strong { color: #dc3545; }
-/* In dashboard_clienti.html, aggiungi questo dentro <style> */
+.kpi-item { font-size: 13px; }
+.kpi-item span { color: var(--text-muted); margin-right: 4px; }
+.kpi-item strong { font-weight: 600; color: var(--text); }
+.kpi-item a { font-weight: 600; text-decoration: none; }
+.kpi-item.success strong { color: var(--success-text); }
+.kpi-item.danger strong { color: var(--danger-text); }
 
-.kpi-item a.btn.icon-btn {
-    padding: 6px 10px; /* Un po' più piccolo dei bottoni normali */
-    font-size: 12px;
-    font-weight: 600;
-}
-.kpi-item a.btn.icon-btn i {
-    font-size: 11px;
-}
+.kpi-item a.btn.icon-btn { padding: 6px 10px; font-size: 12px; font-weight: 600; width: auto; height: auto; }
+.kpi-item a.btn.icon-btn i { font-size: 11px; }
 </style>
 
 <script>
@@ -603,6 +510,11 @@ document.addEventListener('DOMContentLoaded', () => {
             applyFilters();
         });
     });
+
+    // Apertura diretta su "I Miei Preventivi" (es. dal pulsante in home: ?miei=1)
+    if (new URLSearchParams(window.location.search).get('miei') === '1') {
+        ownershipSwitch?.querySelector('[data-ownership="miei"]')?.click();
+    }
 
     // 4. Logica per espandere le righe
     contentContainer?.addEventListener('click', (e) => {

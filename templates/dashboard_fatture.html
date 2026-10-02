@@ -21,7 +21,45 @@
     </div>
 
     {% set grouped_preventivi = preventivi | groupby('cliente') %}
-    
+
+    {% if preventivi %}
+    {% set pronti = preventivi | selectattr('pronto_fattura') | list %}
+    <div class="kpi-strip">
+        <div class="kpi-tile">
+            <div class="kpi-icon"><i class="fas fa-file-invoice"></i></div>
+            <div>
+                <div class="kpi-label">Da fatturare</div>
+                <div class="kpi-value">{{ preventivi | length }}</div>
+                <div class="kpi-sub">{{ grouped_preventivi | length }} clienti</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon success"><i class="fas fa-check-double"></i></div>
+            <div>
+                <div class="kpi-label">Pronti da fatturare</div>
+                <div class="kpi-value">{{ pronti | length }}</div>
+                <div class="kpi-sub">consegna completata</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon info"><i class="fas fa-receipt"></i></div>
+            <div>
+                <div class="kpi-label">Imponibile da fatturare</div>
+                <div class="kpi-value">{{ money_ui(preventivi | sum(attribute='imponibile_num')) }}</div>
+                <div class="kpi-sub">IVA {{ money_ui(preventivi | sum(attribute='iva_num')) }}</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon warning"><i class="fas fa-euro-sign"></i></div>
+            <div>
+                <div class="kpi-label">Totale documenti</div>
+                <div class="kpi-value">{{ money_ui(preventivi | sum(attribute='totale_num')) }}</div>
+                <div class="kpi-sub">di cui pronti {{ money_ui(pronti | sum(attribute='totale_num')) }}</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% if not grouped_preventivi %}
     <div class="card">
         <div class="empty-state">
@@ -33,16 +71,27 @@
     {% endif %}
 
     {% for cliente, items in grouped_preventivi %}
+    {% set pronti_cliente = items | selectattr('pronto_fattura') | list | length %}
     <div class="card">
         <div class="card-header">
-            <h3><strong>{{ cliente }}</strong></h3>
+            <h3><i class="fas fa-user"></i><strong>{{ cliente }}</strong></h3>
+            <div class="client-meta">
+                <span class="chip neutral">{{ items | length }} {{ 'preventivo' if items | length == 1 else 'preventivi' }}</span>
+                {% if pronti_cliente %}<span class="chip success"><strong>{{ pronti_cliente }}</strong> pronti</span>{% endif %}
+                <span class="chip info">Imponibile <strong>{{ money_ui(items | sum(attribute='imponibile_num')) }}</strong></span>
+            </div>
         </div>
         <div class="table-wrap">
             <table class="styled-table">
+                <colgroup><col style="width: 18%"><col style="width: 12%"><col style="width: 11%"><col style="width: 9%"><col style="width: 20%"><col style="width: 11%"><col style="width: 9%"><col style="width: 10%"></colgroup>
                 <thead>
                     <tr>
                         <th>Preventivo</th>
-                        <th class="center">Stato Fattura</th>
+                        <th>Stato Fattura</th>
+                        <th class="right">Imponibile</th>
+                        <th class="right">IVA</th>
+                        <th>Aliquote</th>
+                        <th>Consegna / Saldo</th>
                         <th class="right">Totale</th>
                         <th class="actions-column"></th>
                     </tr>
@@ -51,22 +100,42 @@
                     {% for p in items %}
                     <tr class="main-row" data-tipo="{{ p.tipo_preventivo | default('commerciale') }}">
                         <td>
-                            <strong>{{ p.numero }}</strong><br>
-                            <small class="muted">{{ p.data }}</small>
+                            <div class="cell-main">{{ p.numero }}{% if p.tipo_preventivo == 'edile' %}<span class="type-badge edile">Edile</span>{% endif %}</div>
+                            <div class="cell-sub"><i class="far fa-calendar"></i>{{ (p.data_conferma or p.data) | data_it }}{% if p.giorni_da_conferma is not none %} · {{ p.giorni_da_conferma }} gg{% endif %}</div>
                         </td>
-                        <td class="center">
-                        {% if p.stato in ['Bozza', 'Inviato'] %}
-                            <div class="status-badge status-nd"><i class="fas fa-minus-circle"></i> N/D</div>
-                        {% elif p.stato_fattura == 'Fatturato' %}
-                            <span class="status-badge status-fattura-emessa">Fattura Emessa</span>
-                        {% else %}
-                            <span class="status-badge status-in-attesa-di-fattura">In Attesa</span>
-                        {% endif %}
+                        <td>
+                            {% if p.pronto_fattura %}
+                                <span class="chip success"><i class="fas fa-check"></i> Pronto</span>
+                            {% elif p.stato_fattura == 'Fatturato Parziale' %}
+                                <span class="chip warning">Parziale</span>
+                            {% else %}
+                                <span class="chip neutral">In attesa</span>
+                            {% endif %}
+                            {% if p.num_fatture %}<div class="cell-sub"><i class="fas fa-paperclip"></i>{{ p.num_fatture }} {{ 'fattura' if p.num_fatture == 1 else 'fatture' }} allegate</div>{% endif %}
                         </td>
-                        <td class="right"><strong>{{ money_ui(p.totale) }}</strong></td>
+                        <td class="right cell-money">{{ money_ui(p.imponibile_num) }}</td>
+                        <td class="right nowrap muted">{{ money_ui(p.iva_num) }}</td>
+                        <td>
+                            <div class="chip-list">
+                                {% for a in p.aliquote %}
+                                <span class="chip {{ 'success' if a.fatturato else 'info' }}" title="Imponibile {{ money_ui(a.imponibile) }}{{ ' · fatturato' if a.fatturato }}">
+                                    {% if a.fatturato %}<i class="fas fa-check"></i>{% endif %}IVA {{ a.aliquota }}% · {{ money_ui(a.imponibile) }}
+                                </span>
+                                {% else %}
+                                <span class="muted">-</span>
+                                {% endfor %}
+                            </div>
+                        </td>
+                        <td>
+                            {% set sc = p.stato_consegna_globale or 'N/D' %}
+                            <div class="cell-line"><i class="fas fa-truck"></i><span class="{{ 'text-success' if sc == 'Completato' else ('text-warning' if sc in ['Parziale', 'Da Consegnare'] else 'muted') }}">{{ sc }}</span></div>
+                            {% set sp = p.stato_pagamento_globale or 'N/D' %}
+                            <div class="cell-line"><i class="fas fa-coins"></i><span class="{{ 'text-success' if sp == 'Saldato' else ('text-danger' if sp == 'Da Saldare' else 'muted') }}">{{ sp }}</span></div>
+                        </td>
+                        <td class="right cell-money total-main">{{ money_ui(p.totale_num) }}</td>
                         <td class="row-actions">
-                            <a href="{{ url_for('editor_fattura', quote_id=p.numero) }}" class="btn icon-btn primary" title="Gestisci Fattura">
-                                <i class="fas fa-arrow-right"></i>
+                            <a href="{{ url_for('editor_fattura', quote_id=p.numero) }}" class="btn primary" title="Gestisci Fattura">
+                                <i class="fas fa-file-invoice"></i> Fattura
                             </a>
                         </td>
                     </tr>
@@ -78,50 +147,12 @@
     {% endfor %}
 </div>
 
+{% include '_workflow_dashboard_styles.html' %}
 <style>
-    /* ... stili ... */
-    .editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-    .card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 24px; }
-    .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
-    .card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
-    .card-body { padding: 24px; }
-    .table-wrap { overflow-x: auto; }
-    .styled-table { width: 100%; border-collapse: collapse; table-layout: fixed;}
-    .styled-table th, .styled-table td { padding: 14px 18px; text-align: left; border-bottom: 1px solid #e2e8f0; overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap; }
-    /* Classi di larghezza per allineamento universale */
-    .col-num { width: 15%; }
-    .col-date { width: 12%; }
-    .col-client { width: 25%; } /* Usata se non raggruppata, altrimenti distribuire */
-    .col-status { width: 20%; }
-    .col-money { width: 12%; text-align: right; }
-    .col-actions { width: 10%; text-align: right; }
-    .styled-table thead th { background-color: #f8f9fa; font-size: 11px; text-transform: uppercase; color: #64748b; }
-    .actions-column, .row-actions { text-align: right; }
-    .center { text-align: center; }
-    .right { text-align: right; }
-    
-    .status-badge { display: inline-block; padding: 4px 12px; font-size: 11px; font-weight: 600; border-radius: 20px; color: #fff; min-width: 100px; text-align: center; }
-    .status-in-attesa-di-fattura { background-color: #ffc107; color: #000; }
-    .status-fattura-emessa { background-color: #198754; }
-    .status-non-disponibile { 
-    background-color: #3f4348; 
-}
-
-    /* Stile per pulsante icona (copiato da dashboard_pagamenti) */
-    .btn.icon-btn { padding: 8px; line-height: 1; border-radius: 8px; }
-    .btn.icon-btn.primary { background-color: #e7f0fe; color: #0d6efd; border-color: transparent; }
-    .btn.icon-btn.primary:hover { background-color: #0d6efd; color: #fff; }
-
-    /* --- STILI PER FILTRO STATO --- */
-.filter-bar { margin-bottom: 24px; display: flex; justify-content: flex-start; }
-.multi-switch { position: relative; display: flex; background-color: #e9ecef; border-radius: 8px; padding: 3px; height: 36px; cursor: pointer; user-select: none; }
-.switch-thumb { position: absolute; top: 3px; bottom: 3px; width: 33.33%; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.25s ease-out; z-index: 1; }
-.switch-label { flex: 1; text-align: center; font-size: 12px; font-weight: 600; color: #495057; line-height: 30px; position: relative; z-index: 2; }
-.switch-label.active { color: #000; }
-@media (max-width: 768px) { .multi-switch { width: 100% !important; } }
-/* --- FINE STILI FILTRO --- */
+.cell-line { font-size: 12.5px; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.cell-line + .cell-line { margin-top: 4px; }
+.cell-line i { width: 13px; text-align: center; color: var(--text-subtle); }
+.total-main { color: var(--accent); }
 </style>
 <script>
 document.addEventListener('DOMContentLoaded', () => {

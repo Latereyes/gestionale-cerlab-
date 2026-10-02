@@ -133,145 +133,143 @@
             </div>
         </form>
     </div>
-</div>
-
-<style>
-    .editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-    .card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 24px; }
-    .card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
-    .card-header h3 { margin: 0; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-    .card-body { padding: 24px; }
-    .client-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+</div><style>
+    .editor-container { max-width: 960px; margin: 24px auto; padding: 0 20px; }
     .table-wrap { overflow-x: auto; }
     .styled-table { width: 100%; border-collapse: collapse; }
-    .styled-table th, .styled-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
-    .styled-table thead th { background-color: #f8f9fa; font-size: 11px; text-transform: uppercase; color: #64748b; }
+    .styled-table th, .styled-table td { padding: 11px 16px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .styled-table thead th { background: var(--surface-2); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); }
+    .styled-table tbody tr { transition: background var(--transition); }
+    .styled-table tbody tr:hover { background: var(--surface-2); }
     .styled-table th, .styled-table td { white-space: nowrap; }
     .styled-table .article-text { white-space: normal; min-width: 300px; }
     .center { text-align: center; }
     .right { text-align: right; }
-    .btn.icon-btn { background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; }
-    .card-footer { padding: 16px 24px; background-color: #fdfdfe; border-top: 1px solid #e2e8f0; }
-    
-    /* Stili Badge Stato (Globali e Fattura) */
-    .status-badge { padding: 6px 14px; border-radius: 20px; font-size: 14px; font-weight: 600; text-transform: uppercase; color: #fff; display: inline-flex; align-items: center; gap: 8px; }
-    .status-bozza{background-color:#6c757d;} 
-    .status-inviato{background-color:#0d6efd;} 
-    .status-confermato, .status-chiuso {background-color:#198754;}
-    .status-in-lavorazione{background-color:#ffc107;color:#000;} 
-    .status-annullato{background-color:#dc3545;}
-    .status-in-attesa-di-fattura { background-color: #ffc107; color: #000; }
-    .status-fatturato-parziale { background-color: #0d6efd; }
-    .status-fattura-emessa { background-color: #198754; } 
-    .status-non-disponibile, .status-nd { background-color: #6c757d; }
-    
-    /* Stili per la Card IVA specifica */
-    .iva-card .card-header { background-color: #f8f9fa; }
-    .header-totals-iva { display: flex; gap: 20px; font-size: 14px; }
-    .header-totals-iva span { color: #6c757d; }
-    .header-totals-iva strong { color: #212529; }
-    .header-totals-iva .total-iva-card { font-weight: 700; font-size: 16px; color: #212529; border-left: 2px solid #0d6efd; padding-left: 20px; }
+    .btn.icon-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); }
+    .btn.icon-btn:hover { background: var(--border); color: var(--text); }
+    .card-footer { padding: 16px 24px; background: var(--surface-2); border-top: 1px solid var(--border); }
 
-    /* Stili per la sezione Azioni e Allegati */
+    /* .status-badge definito globalmente in base.html */
+    .page-title-header .status-badge { font-size: 12px; padding: 5px 14px; }
+
+    /* Card IVA */
+    .iva-card .card-header { background: var(--surface-2); }
+    .header-totals-iva { display: flex; gap: 20px; font-size: 14px; flex-wrap: wrap; }
+    .header-totals-iva span { color: var(--text-muted); }
+    .header-totals-iva strong { color: var(--text); }
+    .header-totals-iva .total-iva-card {
+        font-weight: 700;
+        font-size: 16px;
+        color: var(--text);
+        border-left: 2px solid var(--accent);
+        padding-left: 20px;
+    }
+
+    /* Azioni e Allegati */
     .actions-grid { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
-    .attachments-section { padding: 16px 24px; background-color: #f8f9fa; border-top: 1px solid #e2e8f0; }
-    .attachments-section h5 { margin: 0 0 10px 0; font-size: 13px; color: #495057; }
-    .document-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background-color: #fff; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 8px; }
-    .document-item i { margin-right: 8px; color: #6c757d; }
+    .attachments-section { padding: 16px 24px; background: var(--surface-2); border-top: 1px solid var(--border); }
+    .attachments-section h5 { margin: 0 0 10px 0; font-size: 13px; color: var(--text-muted); }
+    .document-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        margin-bottom: 8px;
+        transition: background var(--transition);
+    }
+    .document-item:hover { background: var(--surface-2); }
+    .document-item i { margin-right: 8px; color: var(--text-muted); }
     .document-actions { display: flex; gap: 4px; }
-    
-    /* Stili Riepilogo Totali in fondo */
-    .totals-recap { display: flex; justify-content: flex-end; align-items: center; gap: 24px; padding: 24px; background-color: #fff; border: 1px solid #e2e8f0; border-radius: 12px; }
-    .total-item span { display: block; font-size: 13px; color: #6c757d; text-align: right; }
-    .total-item strong { display: block; font-size: 18px; font-weight: 700; text-align: right; }
-    .total-item.grand-total strong { font-size: 24px; color: #000; }
-    
-    /* Stili Modale */
-    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-    .modal-content { background: #fff; padding: 24px; border-radius: 12px; width: 90%; max-width: 500px; }
+
+    /* Riepilogo Totali */
+    .totals-recap {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 24px;
+        padding: 20px 24px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+    }
+    .total-item span { display: block; font-size: 13px; color: var(--text-muted); text-align: right; }
+    .total-item strong { display: block; font-size: 18px; font-weight: 700; text-align: right; color: var(--text); }
+    .total-item.grand-total strong { font-size: 24px; color: var(--accent); }
+
+    /* Modale */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15,23,42,0.6); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: center; z-index: 9999; }
+    .modal-content { background: var(--surface); padding: 28px; border-radius: var(--radius-lg); width: 90%; max-width: 500px; border: 1px solid var(--border); box-shadow: var(--shadow-lg); }
     .modal-content h3 { margin: 0 0 12px 0; }
     .modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
-    .form-group { margin-bottom: 16px; }
-    .form-group label { display: block; font-size: 12px; margin-bottom: 4px; }
-    .form-group input { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
-    /* --- NUOVI STILI PER FOOTER AZIONI --- */
-    /* --- Intorno alla riga 160 in editor_fattura.html --- */
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 5px; }
+    .form-group input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+    .form-group input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+
+    /* Footer Azioni */
     .sticky-footer .footer-layout {
         display: flex;
-        justify-content: flex-start; /* Cambiato da space-between a flex-start */
+        justify-content: flex-start;
         align-items: center;
         width: 100%;
-        max-width: 1400px;
+        max-width: 1100px;
         margin: 0 auto;
-        gap: 40px; /* Aggiunto spazio tra il workflow e i tasti IVA */
+        gap: 40px;
     }
-    .footer-right-actions {
-        display: flex;
-        gap: 20px;
-        align-items: center;
-    }
+    .footer-right-actions { display: flex; gap: 20px; align-items: center; }
 
-    /* --- NUOVO LAYOUT FOOTER (Stile Consegna) --- */
+    /* Footer IVA (override sticky-footer base) */
     .sticky-footer {
         position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: #fff;
-        border-top: 1px solid #e2e8f0;
+        bottom: 0; left: 0; right: 0;
+        background: var(--surface);
+        border-top: 1px solid var(--border);
         padding: 12px 40px;
-        box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 -4px 12px rgba(0,0,0,0.06);
         z-index: 1000;
         display: flex;
-        justify-content: space-between; /* Separa i due gruppi ai lati */
+        justify-content: space-between;
         align-items: center;
-        min-height: 85px;
+        min-height: 80px;
     }
-
-    .footer-iva-actions {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        flex-wrap: wrap; /* Come in consegna per gestire schermi piccoli */
-    }
-
+    .footer-iva-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .iva-action-group {
         display: flex;
         align-items: center;
         gap: 8px;
         padding: 4px 12px;
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
     }
-
     .iva-badge-label {
         font-size: 10px;
         font-weight: 800;
-        color: #64748b;
+        color: var(--text-muted);
         text-transform: uppercase;
         margin-right: 4px;
     }
-
-    .btn-small {
-        padding: 6px 12px;
-        font-size: 12px;
-        height: 34px;
-    }
+    .btn-small { padding: 6px 12px; font-size: 12px; height: 34px; }
 
     @media (max-width: 1100px) {
         .sticky-footer { flex-direction: column; height: auto; padding: 15px; }
         .iva-action-group { width: 100%; justify-content: center; }
     }
+
+    /* Btn danger outline */
     .btn-outline.danger {
-        border: 1px solid #dc3545;
-        color: #dc3545;
+        border: 1px solid var(--danger-border);
+        color: var(--danger-text);
         background: transparent;
     }
-
     .btn-outline.danger:hover {
-        background: #dc3545;
+        background: var(--danger);
         color: #fff;
+        border-color: transparent;
     }
 </style>
 

@@ -1,210 +1,145 @@
 {% extends "base.html" %}
 
 {% block page_title %}
-<h1><i class="fas fa-exclamation-triangle" style="color: #ffc107;"></i> Centro Alert & Scadenze</h1>
+<h1><i class="fas fa-exclamation-triangle" style="color: var(--warning);"></i> Centro Alert &amp; Scadenze</h1>
 {% endblock %}
 
 {% block body %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 
+{% set tipi = [
+    ('PAGAMENTO', 'Pagamenti scaduti', 'fas fa-hand-holding-usd', 'danger', 'incassi programmati non ricevuti'),
+    ('MERCE', 'Merce in ritardo', 'fas fa-truck-loading', 'info', 'oltre 5 giorni dalla data prevista'),
+    ('ORDINE', 'Ordini senza data', 'fas fa-calendar-times', 'warning', 'data di arrivo non inserita'),
+    ('DOCUMENTI', 'Documenti mancanti', 'fas fa-id-card', 'neutral', 'clienti con preventivi attivi'),
+] %}
+
 <div class="editor-container">
-    <div class="filter-bar" style="margin-bottom: 24px; display: flex; justify-content: center;">
-        <div class="multi-switch" id="alert-filter-switch" style="width: 600px;">
-            <div class="switch-thumb"></div>
-            <div class="switch-label active" data-filter="ALL">Tutti</div>
-            <div class="switch-label" data-filter="PAGAMENTO"><i class="fas fa-hand-holding-usd"></i> Pagamenti</div>
-            <div class="switch-label" data-filter="MERCE"><i class="fas fa-truck-loading"></i> Merce</div>
-            <div class="switch-label" data-filter="ORDINE"><i class="fas fa-box"></i> Ordini</div>
-            <div class="switch-label" data-filter="DOCUMENTI"><i class="fas fa-id-card"></i> Documenti</div>
-        </div>
-        <input type="hidden" id="active-alert-filter" value="ALL">
+
+    <div class="kpi-strip">
+        {% for codice, nome, icona, tono, sub in tipi %}
+        {% set n = alerts | selectattr('tipo', 'equalto', codice) | list | length %}
+        <button type="button" class="kpi-tile kpi-filter {{ 'is-zero' if not n }}" data-filter="{{ codice }}">
+            <div class="kpi-icon {{ tono }}"><i class="{{ icona }}"></i></div>
+            <div>
+                <div class="kpi-label">{{ nome }}</div>
+                <div class="kpi-value">{{ n }}</div>
+                <div class="kpi-sub">{{ sub }}</div>
+            </div>
+        </button>
+        {% endfor %}
     </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const switchLabels = document.querySelectorAll('#alert-filter-switch .switch-label');
-    const switchThumb = document.querySelector('#alert-filter-switch .switch-thumb');
-    const rows = document.querySelectorAll('.alert-row');
-    const badgeCount = document.querySelector('.badge-count');
-    const activeFilterInput = document.getElementById('active-alert-filter');
-
-    function updateFilters(filterValue, index) {
-        // Sposta il cursore (thumb)
-        switchThumb.style.transform = `translateX(${index * 100}%)`;
-        
-        // Aggiorna classi attive
-        switchLabels.forEach(l => l.classList.remove('active'));
-        switchLabels[index].classList.add('active');
-
-        let visibleCount = 0;
-        rows.forEach(row => {
-            const rowType = row.dataset.type;
-            if (filterValue === 'ALL' || rowType === filterValue) {
-                row.style.display = '';
-                visibleCount++;
-            } else {
-                row.style.display = 'none';
-            }
-        });
-        badgeCount.textContent = visibleCount + ' segnalazioni';
-    }
-
-    switchLabels.forEach((label, index) => {
-        label.addEventListener('click', () => {
-            const filterValue = label.dataset.filter;
-            updateFilters(filterValue, index);
-        });
-    });
-});
-</script>
-    
-    <div class="card">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <h3>Notifiche Attive</h3>
-            <span class="badge-count">{{ alerts|length }} segnalazioni</span>
+    <div class="toolbar">
+        <div class="chip-filters" id="alert-filter-switch">
+            <button type="button" class="filter-pill active" data-filter="ALL">Tutti <span>{{ alerts | length }}</span></button>
+            {% for codice, nome, icona, tono, sub in tipi %}
+            <button type="button" class="filter-pill" data-filter="{{ codice }}"><i class="{{ icona }}"></i> {{ nome }} <span>{{ alerts | selectattr('tipo', 'equalto', codice) | list | length }}</span></button>
+            {% endfor %}
         </div>
-        <div class="table-wrap">
-            <table class="styled-table">
-                <thead>
-                    <tr>
-                        
-                        <th>Oggetto</th>
-                        <th>Dettaglio Alert</th>
-                        <th class="right">Azioni</th>
-                        <th>Tipologia</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tbody>
-                    {% for a in alerts %}
-                    <tr class="alert-row" data-type="{{ a.tipo }}">
-                        <td>
-                            <strong>{{ a.oggetto_nome }}</strong><br>
-                            <small cla ss="muted">{{ a.oggetto_id }}</small>
-                        </td>
-                        <td>
-                            <span class="{{ a.colore }}" style="font-weight: 600;">
-                                {{ a.dettaglio }}
-                            </span>
-                        </td>
-                        <td class="right">
-                            <a href="{{ a.link_risoluzione }}" class="btn with-icon" style="padding: 8px 16px; font-size: 13px;">
-                                <i class="fas fa-external-link-alt"></i> 
-                                {{ 'Vai al Saldo' if a.tipo == 'PAGAMENTO' else 'Verifica' }}
-                            </a>
-                        </td>
-                        <td>
-                            <div class="type-badge {{ 'bg-red' if a.tipo == 'PAGAMENTO' else 'bg-yellow' if a.tipo == 'ORDINE' else 'bg-blue' if a.tipo == 'MERCE' else 'bg-orange' }}">
-                                <i class="{{ a.icona }}"></i> {{ a.tipo }}
-                            </div>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="4" class="center muted" style="padding: 60px;">
-                            <i class="fas fa-check-circle" style="font-size: 40px; color: #198754; margin-bottom: 15px; display: block;"></i>
-                            Ottimo lavoro! Non ci sono alert o documenti mancanti al momento.
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <span class="result-count"><strong class="badge-count">{{ alerts | length }}</strong> segnalazioni</span>
+    </div>
+
+    <div class="card">
+        {% if alerts %}
+        <div class="alert-list">
+            {% for a in alerts %}
+            {% set tono = {'PAGAMENTO': 'danger', 'MERCE': 'info', 'ORDINE': 'warning', 'DOCUMENTI': 'neutral'}[a.tipo] | default('neutral') %}
+            <div class="alert-row tone-{{ tono }}" data-type="{{ a.tipo }}">
+                <div class="alert-icon"><i class="{{ a.icona }}"></i></div>
+                <div class="alert-main">
+                    <div class="alert-top">
+                        <span class="chip {{ tono }}">{{ a.tipo | capitalize }}</span>
+                        <strong class="alert-subject">{{ a.oggetto_nome }}</strong>
+                        <span class="alert-id">{{ a.oggetto_id }}</span>
+                    </div>
+                    <div class="alert-detail">{{ a.dettaglio }}</div>
+                </div>
+                <a href="{{ a.link_risoluzione }}" class="btn alert-action">
+                    {% if a.tipo == 'PAGAMENTO' %}<i class="fas fa-cash-register"></i> Vai al saldo
+                    {% elif a.tipo == 'MERCE' %}<i class="fas fa-dolly"></i> Vai alla consegna
+                    {% elif a.tipo == 'ORDINE' %}<i class="fas fa-box-open"></i> Vai agli ordini
+                    {% else %}<i class="fas fa-folder-open"></i> Apri cartella{% endif %}
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        <div class="empty-state" id="alert-empty" {% if alerts %}style="display: none;"{% endif %}>
+            <i class="fas fa-check-circle"></i>
+            <h4>Nessuna segnalazione</h4>
+            <p>Ottimo lavoro! Non ci sono alert o documenti mancanti al momento.</p>
         </div>
     </div>
 </div>
 
+{% include '_workflow_dashboard_styles.html' %}
 <style>
-    /* --- NUOVO STILE MULTI-SWITCH (COERENTE CON DASHBOARD) --- */
-    .multi-switch {
-        position: relative;
-        display: flex;
-        background-color: #e9ecef;
-        border-radius: 8px;
-        padding: 3px;
-        height: 38px;
-        cursor: pointer;
-        user-select: none;
-    }
-    .switch-thumb {
-        position: absolute;
-        top: 3px;
-        bottom: 3px;
-        width: 20%; /* 1/5 dato che abbiamo 5 opzioni */
-        background-color: #ffffff;
-        border-radius: 6px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        transition: transform 0.25s ease-out;
-        z-index: 1;
-    }
-    .switch-label {
-        flex: 1;
-        text-align: center;
-        font-size: 13px;
-        font-weight: 600;
-        color: #64748b;
-        line-height: 32px;
-        position: relative;
-        z-index: 2;
-        transition: color 0.2s;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-    }
-    .switch-label.active {
-        color: #0f172a;
-    }
-    .switch-label i {
-        font-size: 14px;
-    }
-    /* --- FINE STILE MULTI-SWITCH --- */
-    .switch-container {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    color: #64748b;
-    transition: color 0.2s;
+.editor-container { max-width: 1100px; }
+
+/* Riquadri cliccabili come filtro */
+.kpi-filter { font: inherit; text-align: left; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s; }
+.kpi-filter:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+.kpi-filter.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.kpi-filter.is-zero { opacity: 0.6; }
+.kpi-icon.neutral { background: var(--neutral-bg); color: var(--neutral-text); }
+
+/* Pillole filtro */
+.chip-filters { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.filter-pill { font: inherit; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.filter-pill span { background: var(--surface-2); color: var(--text-muted); border-radius: 999px; padding: 0 7px; font-size: 11px; }
+.filter-pill:hover { border-color: var(--border-strong); color: var(--text); }
+.filter-pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.filter-pill.active span { background: rgba(255,255,255,0.25); color: #fff; }
+
+/* Elenco alert */
+.alert-list { display: flex; flex-direction: column; }
+.alert-row { --tone: var(--neutral); --tone-bg: var(--neutral-bg); --tone-text: var(--neutral-text); display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); border-left: 4px solid var(--tone); transition: background 0.15s; }
+.alert-row:last-child { border-bottom: none; }
+.alert-row:hover { background: var(--surface-hover); }
+.alert-row.tone-danger  { --tone: var(--danger);  --tone-bg: var(--danger-bg);  --tone-text: var(--danger-text); }
+.alert-row.tone-warning { --tone: var(--warning); --tone-bg: var(--warning-bg); --tone-text: var(--warning-text); }
+.alert-row.tone-info    { --tone: var(--info);    --tone-bg: var(--info-bg);    --tone-text: var(--info-text); }
+.alert-icon { width: 40px; height: 40px; border-radius: var(--radius); background: var(--tone-bg); color: var(--tone-text); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.alert-main { flex: 1; min-width: 0; }
+.alert-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.alert-subject { font-size: 14.5px; color: var(--text); }
+.alert-id { font-size: 12px; color: var(--text-muted); }
+.alert-detail { font-size: 13.5px; color: var(--text); }
+.alert-action { white-space: nowrap; flex-shrink: 0; }
+.alert-action:hover { border-color: var(--accent); color: var(--accent); }
+#alert-empty i { color: var(--success); }
+
+@media (max-width: 700px) {
+    .alert-row { flex-wrap: wrap; }
+    .alert-action { width: 100%; justify-content: center; }
 }
-
-.switch-container:hover {
-    color: #1e293b;
-}
-
-.switch-container input {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-    accent-color: #2563eb;
-}
-
-
-
-/* Colore speciale per il badge ORDINE che abbiamo aggiunto prima */
-.bg-yellow { background-color: #ffc107; color: #000 !important; }
-.bg-yellow { background-color: #ffc107; color: #000 !important; } /* Stile per avviso inserimento data */
-.bg-red { background-color: #dc3545; }
-.bg-orange { background-color: #fd7e14; }
-.bg-blue { background-color: #0d6efd; } /* Colore per la Merce */
-.text-danger { color: #dc3545; }
-.text-warning { color: #d97706; }
-.text-blue { color: #0d6efd; } /* Colore per il dettaglio Merce */
-.muted { color: #64748b; }
-.right { text-align: right; }
-.editor-container { max-width: 1200px; margin: 24px auto; padding: 0 24px; }
-.card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden; }
-.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; background: #f8f9fa; }
-.badge-count { background: #fee2e2; color: #dc2626; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
-.styled-table { width: 100%; border-collapse: collapse; }
-.styled-table th, .styled-table td { padding: 16px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; }
-.type-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; color: #fff; text-transform: uppercase; }
-.bg-red { background-color: #dc3545; }
-.bg-orange { background-color: #fd7e14; }
-.text-danger { color: #dc3545; }
-.text-warning { color: #d97706; }
-.muted { color: #64748b; }
-.right { text-align: right; }
 </style>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const pills = document.querySelectorAll('#alert-filter-switch .filter-pill');
+    const tiles = document.querySelectorAll('.kpi-filter');
+    const rows = document.querySelectorAll('.alert-row');
+    const badgeCount = document.querySelector('.badge-count');
+    const emptyEl = document.getElementById('alert-empty');
+
+    function applyFilter(filterValue) {
+        pills.forEach(p => p.classList.toggle('active', p.dataset.filter === filterValue));
+        tiles.forEach(t => t.classList.toggle('active', t.dataset.filter === filterValue));
+        let visibleCount = 0;
+        rows.forEach(row => {
+            const show = filterValue === 'ALL' || row.dataset.type === filterValue;
+            row.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        });
+        badgeCount.textContent = visibleCount;
+        emptyEl.style.display = visibleCount ? 'none' : '';
+    }
+
+    pills.forEach(p => p.addEventListener('click', () => applyFilter(p.dataset.filter)));
+    tiles.forEach(t => t.addEventListener('click', () => {
+        applyFilter(t.classList.contains('active') ? 'ALL' : t.dataset.filter);
+    }));
+});
+</script>
 {% endblock %}

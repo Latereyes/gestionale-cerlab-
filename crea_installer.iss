@@ -34,8 +34,13 @@ Source: "version.txt"; DestDir: "{userappdata}\gestionalepreventivi"; Flags: ign
 Source: "modello cashflow.xlsx"; DestDir: "{userappdata}\gestionalepreventivi\templates"; Flags: ignoreversion
 Source: "template_analisi.xlsx"; DestDir: "{userappdata}\gestionalepreventivi\templates"; Flags: ignoreversion
 
-; La migrazione dei dati utente rimane identica, ed è corretta
+; La migrazione dei dati utente rimane identica, ed e' corretta
 Source: "data\*"; DestDir: "{userappdata}\GestionalePreventivi"; Excludes: "users.json, tasks.json, comuni.json, preventivi, allegati, clienti, gh_token.txt,tagbox.json,notifications.json,messages.json,pdf_generation.log"; Flags: recursesubdirs createallsubdirs uninsneveruninstall
+
+; Script di migrazione e fix dati
+Source: "migrate_v3_installer.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "fix_pagamenti_v2.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "models.py"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; L'eseguibile ora si chiama 'Gestionale.exe'
@@ -43,7 +48,22 @@ Name: "{group}\Avvia Gestionale Preventivi"; Filename: "{app}\Gestionale.exe"
 Name: "{autodesktop}\Avvia Gestionale Preventivi"; Filename: "{app}\Gestionale.exe"; Tasks: desktopicon
 
 [Run]
-; Anche qui, il nome del file da avviare è cambiato
+; --- STEP 1: Migrazione dati V2 -> V3 (one-shot, idempotente) ---
+; Usa il python.exe embedded nell'eseguibile PyInstaller (nella cartella _internal)
+Filename: "{app}\Gestionale.exe"; Parameters: "--run-migration"; \
+  Description: "Migrazione dati al nuovo formato V3..."; \
+  StatusMsg: "Migrazione dati in corso..."; \
+  Flags: runhidden waituntilterminated; \
+  WorkingDir: "{app}"
+
+; --- STEP 2: Fix pagamenti retrocompatibilita' V2 (one-shot, idempotente) ---
+Filename: "{app}\Gestionale.exe"; Parameters: "--fix-pagamenti"; \
+  Description: "Allineamento stato pagamenti..."; \
+  StatusMsg: "Verifica e correzione stato pagamenti..."; \
+  Flags: runhidden waituntilterminated; \
+  WorkingDir: "{app}"
+
+; --- STEP 3: Avvio applicazione (opzionale, post-install) ---
 Filename: "{app}\Gestionale.exe"; Description: "{cm:LaunchProgram,Gestionale Preventivi}"; Flags: nowait postinstall
 
 [Code]

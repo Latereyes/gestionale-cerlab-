@@ -5,16 +5,26 @@
 {% endblock %}
 
 {% block body %}
-<main style="max-width: 700px; margin: 0 auto; padding-bottom: 100px;">
-    <div style="text-align: center; margin-bottom: 30px; padding-top: 30px;">
-        <div style="display: flex; justify-content: center;">
-            <button id="toggleCreateBtn" class="btn primary" onclick="window.toggleCreateArea()" title="Nuovo Task" style="border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.15); transition: 0.3s;">
-                <i class="fas fa-plus" id="plusIcon" style="font-size: 26px;"></i>
+<main class="tasks-page">
+    <section class="tasks-head">
+        <div class="tasks-head-top">
+            <div>
+                <h2>Task del team</h2>
+                <p>Segnalazioni e attività. Usa @ per assegnare un collega e # per richiamare un preventivo.</p>
+            </div>
+            <button id="toggleCreateBtn" class="btn primary new-task-btn" onclick="window.toggleCreateArea()" title="Nuovo Task">
+                <i class="fas fa-plus" id="plusIcon"></i> <span>Nuovo task</span>
             </button>
         </div>
-    </div>
+        <div class="tasks-filters" id="taskFilters">
+            <button type="button" class="filter-pill active" data-filter="all">Tutti <span id="count-all">0</span></button>
+            <button type="button" class="filter-pill" data-filter="open"><i class="fas fa-circle-notch"></i> Aperti <span id="count-open">0</span></button>
+            <button type="button" class="filter-pill" data-filter="support"><i class="fas fa-exclamation"></i> Supporto <span id="count-support">0</span></button>
+            <button type="button" class="filter-pill" data-filter="done"><i class="fas fa-check"></i> Conclusi <span id="count-done">0</span></button>
+        </div>
+    </section>
 
-    <div id="createTaskArea" class="task-card" style="display: none; margin-bottom: 30px; border-left: 6px solid #6366f1; background: #fdfdff;">
+    <div id="createTaskArea" class="task-card create-card" style="display: none;">
         <div class="task-header" style="margin-bottom: 10px;">
             <span><i class="fas fa-magic"></i> NUOVA AZIONE</span>
             <span onclick="window.toggleCreateArea()" style="cursor:pointer;"><i class="fas fa-times"></i></span>
@@ -31,11 +41,16 @@
     </div>
 
     <div id="tasksContainer" class="tasks-grid"></div>
+    <div id="tasksEmpty" class="tasks-empty" style="display: none;">
+        <i class="fas fa-clipboard-check"></i>
+        <h4>Nessun task in questa vista</h4>
+        <p>Quando qualcuno apre una segnalazione la trovi qui.</p>
+    </div>
     
 
     <div id="archiveSection" style="margin-top: 50px;">
-        <div onclick="toggleArchive()" style="display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; color: #94a3b8; transition: 0.2s;" id="archiveTrigger">
-            <span style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Visualizza Archiviati</span>
+        <div onclick="toggleArchive()" class="archive-trigger" id="archiveTrigger">
+            <span>Visualizza archiviati <span id="count-archived" class="archived-count"></span></span>
             <i class="fas fa-chevron-down" id="archiveArrow" style="font-size: 14px;"></i>
         </div>
         <div id="archivedTasksContainer" class="tasks-grid" style="display: none; margin-top: 30px; opacity: 0.7;"></div>
@@ -57,51 +72,78 @@
 </div>
 
 <style>
-    /* tasks.html: Aggiungi nel blocco <style> */
-    #taskInputInline::placeholder { color: #94a3b8; opacity: 0.7; }
-    #toggleCreateBtn.active { transform: rotate(45deg); background: #ef4444; }
-    
-    /* Regola per posizionare i suggerimenti sopra la textarea di creazione */
-    #createTaskArea .mention-list {
-        bottom: 100%;
-        top: auto;
-        margin-bottom: 10px;
-    }
-    .tasks-grid { display: flex; flex-direction: column; gap: 25px; }
-    .task-card { background: white; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 15px; transition: 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
-    .task-card.status-open { border-left: 6px solid #6366f1; }
-    .task-card.status-resolved { border-left: 6px solid #10b981; }
-    .task-card.status-failed { border-left: 6px solid #ef4444; }
-    .task-card.status-support { border-left: 6px solid #f59e0b; }
+    .tasks-page { max-width: 860px; margin: 0 auto; padding: 28px 20px 110px; }
 
-    .task-header { display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; font-weight: 600; }
-    .task-body { font-size: 15px; line-height: 1.6; color: #334155; padding: 0 5px; }
-    
-    .task-history-area { background: #f8fafc; border-radius: 14px; padding: 15px; border: 1px solid #f1f5f9; margin-top: 5px; }
-    .task-history { display: flex; flex-direction: column; gap: 12px; margin-bottom: 15px; max-height: 300px; overflow-y: auto; }
-    
-    .history-line { display: flex; gap: 12px; align-items: flex-start; font-size: 13px; color: #475569; }
+    /* Intestazione */
+    .tasks-head { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 22px 24px; margin-bottom: 24px; }
+    .tasks-head-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+    .tasks-head h2 { margin: 0 0 4px; font-size: 22px; font-weight: 700; }
+    .tasks-head p { margin: 0; color: var(--text-muted); font-size: 13.5px; }
+    .new-task-btn { height: 42px; padding: 0 18px; font-weight: 600; transition: background 0.2s; }
+    .new-task-btn i { transition: transform 0.25s; }
+    #toggleCreateBtn.active { background: var(--danger); box-shadow: none; }
+    #toggleCreateBtn.active i { transform: rotate(45deg); }
+    .tasks-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
+    .filter-pill { font: inherit; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .filter-pill span { background: var(--surface-2); border-radius: 999px; padding: 0 7px; font-size: 11px; }
+    .filter-pill:hover { border-color: var(--border-strong); color: var(--text); }
+    .filter-pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .filter-pill.active span { background: rgba(255,255,255,0.25); color: #fff; }
+
+    /* Card task */
+    .tasks-grid { display: flex; flex-direction: column; gap: 18px; }
+    .task-card { background: var(--surface); border: 1px solid var(--border); border-left: 5px solid var(--accent); border-radius: var(--radius-md); padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; box-shadow: var(--shadow-xs); transition: box-shadow 0.2s; }
+    .task-card:hover { box-shadow: var(--shadow-sm); }
+    .task-card.status-open { border-left-color: var(--accent); }
+    .task-card.status-resolved { border-left-color: var(--success); }
+    .task-card.status-failed { border-left-color: var(--danger); }
+    .task-card.status-support { border-left-color: var(--warning); }
+    .create-card { border-left-color: var(--accent); margin-bottom: 24px; background: var(--accent-light); }
+
+    .task-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: var(--text-muted); font-weight: 600; }
+    .task-author { display: flex; align-items: center; gap: 10px; }
+    .task-author strong { display: block; font-size: 13.5px; color: var(--text); }
+    .task-author small { display: block; font-size: 11.5px; color: var(--text-muted); font-weight: 500; }
+    .task-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-light); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+    .task-status { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+    .task-status.open { background: var(--accent-light); color: var(--accent); }
+    .task-status.support { background: var(--warning-bg); color: var(--warning-text); }
+    .task-status.resolved { background: var(--success-bg); color: var(--success-text); }
+    .task-status.failed { background: var(--danger-bg); color: var(--danger-text); }
+    .task-body { font-size: 15px; line-height: 1.6; color: var(--text); padding: 0 2px; }
+    .task-footer { display: flex; justify-content: space-between; align-items: center; }
+
+    .task-history-area { background: var(--surface-2); border-radius: var(--radius); padding: 14px; border: 1px solid var(--border); }
+    .task-history { display: flex; flex-direction: column; gap: 12px; max-height: 300px; overflow-y: auto; }
+    .task-history:not(:empty) { margin-bottom: 14px; }
+    .history-line { display: flex; gap: 12px; align-items: flex-start; font-size: 13px; color: var(--text); }
     .history-icon { width: 18px; flex-shrink: 0; text-align: center; margin-top: 2px; }
-    .history-meta { font-size: 9px; color: #cbd5e1; margin-top: 2px; }
+    .history-meta { font-size: 10.5px; color: var(--text-subtle); margin-top: 2px; }
 
-    /* --- Intorno alla riga 59 (Aggiornamento classe CSS) --- */
-    .inline-comment-box { 
-        display: flex; gap: 10px; background: white; border: 2px solid #e2e8f0; 
-        border-radius: 24px; padding: 6px 16px; align-items: center; transition: 0.2s;
-        position: relative; /* Indispensabile per posizionare i suggerimenti */
-    }
-    .inline-comment-box.pending-resolved { border-color: #10b981; background: #f0fdf4; }
-    .inline-comment-box.pending-failed { border-color: #ef4444; background: #fef2f2; }
-    .inline-comment-box.pending-support { border-color: #f59e0b; background: #fffbeb; }
-
+    /* Box commento */
+    #taskInputInline::placeholder { color: var(--text-subtle); }
+    #createTaskArea .mention-list { bottom: 100%; top: auto; margin-bottom: 10px; }
+    .inline-comment-box { display: flex; gap: 10px; background: var(--surface); border: 2px solid var(--border); border-radius: 24px; padding: 6px 16px; align-items: center; transition: 0.2s; position: relative; }
+    .inline-comment-box:focus-within { border-color: var(--accent); }
+    .inline-comment-box.pending-resolved { border-color: var(--success); background: var(--success-bg); }
+    .inline-comment-box.pending-failed { border-color: var(--danger); background: var(--danger-bg); }
+    .inline-comment-box.pending-support { border-color: var(--warning); background: var(--warning-bg); }
     .inline-comment-box input { border: none !important; background: transparent !important; height: 34px !important; font-size: 14px !important; box-shadow: none !important; }
+    .btn-send-inline { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 16px; }
 
-    .btn-action-min { background: none; border: none; cursor: pointer; font-size: 18px; color: #cbd5e1; transition: 0.2s; padding: 5px; }
-    .btn-action-min.active, .btn-action-min:hover { transform: scale(1.2); }
-    .btn-x-min.active, .btn-x-min:hover { color: #ef4444; }
-    .btn-warn-min.active, .btn-warn-min:hover { color: #f59e0b; }
-    .btn-check-min.active, .btn-check-min:hover { color: #10b981; }
-    
+    /* Azioni di stato */
+    .btn-action-min { width: 34px; height: 34px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); cursor: pointer; font-size: 14px; color: var(--text-muted); transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; }
+    .btn-x-min.active, .btn-x-min:hover { color: #fff; background: var(--danger); border-color: var(--danger); }
+    .btn-warn-min.active, .btn-warn-min:hover { color: #fff; background: var(--warning); border-color: var(--warning); }
+    .btn-check-min.active, .btn-check-min:hover { color: #fff; background: var(--success); border-color: var(--success); }
+
+    /* Vuoto e archivio */
+    .tasks-empty { text-align: center; padding: 48px 20px; color: var(--text-muted); background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius-md); }
+    .tasks-empty i { font-size: 34px; color: var(--text-subtle); margin-bottom: 10px; }
+    .tasks-empty h4 { margin: 0 0 6px; color: var(--text); }
+    .tasks-empty p { margin: 0; font-size: 13.5px; }
+    .archive-trigger { display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; color: var(--text-muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; padding: 12px; border-top: 1px solid var(--border); }
+    .archive-trigger:hover { color: var(--text); }
 </style>
 
 <script>
@@ -148,6 +190,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const now = new Date();
+        let archivedCount = 0;
+        const statusLabel = { open: 'Aperto', support: 'Serve supporto', resolved: 'Risolto', failed: 'Non risolto' };
+        const initials = (name) => (name || '?').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+        const counts = { all: tasks.length, open: 0, support: 0, done: 0 };
+        tasks.forEach(t => {
+            if (t.status === 'support') counts.support++;
+            else if (t.status === 'resolved' || t.status === 'failed') counts.done++;
+            else counts.open++;
+        });
+        Object.entries(counts).forEach(([k, v]) => { const el = document.getElementById(`count-${k}`); if (el) el.textContent = v; });
 
         const oneWeekAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
 
@@ -161,6 +213,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const card = document.createElement('div');
             card.className = `task-card status-${t.status}`;
             card.id = t.id;
+            card.dataset.status = t.status;
+            if (target === archiveContainer) archivedCount++;
             
             let historyHtml = t.comments.map(c => {
                 let icon = '<i class="fas fa-comment-dots" style="color:#cbd5e1"></i>';
@@ -172,7 +226,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }).join('');
 
             card.innerHTML = `
-                <div class="task-header"><span><i class="fas fa-user-circle"></i> ${t.created_by_name}</span><span>${t.timestamp}</span></div>
+                <div class="task-header">
+                    <div class="task-author">
+                        <span class="task-avatar">${initials(t.created_by_name)}</span>
+                        <div><strong>${t.created_by_name || 'Utente'}</strong><small>${t.timestamp || ''}</small></div>
+                    </div>
+                    <span class="task-status ${t.status}">${statusLabel[t.status] || t.status}</span>
+                </div>
                 <div class="task-body">${window.parseMessage(t.description)}</div>
                 
                 <div class="task-history-area">
@@ -207,6 +267,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (h) h.scrollTop = h.scrollHeight;
             }, 50);
         });
+
+        document.getElementById('count-archived').textContent = archivedCount ? `(${archivedCount})` : '';
+        window.applyTaskFilter();
 
         // Gestione scorrimento all'ancora dopo il caricamento
         const hash = window.location.hash.replace('#', '');
@@ -244,6 +307,27 @@ document.addEventListener('DOMContentLoaded', () => {
         delete pendingStates[id];
         window.loadTasks();
     };
+
+    let currentFilter = 'all';
+    window.applyTaskFilter = () => {
+        let visible = 0;
+        container.querySelectorAll('.task-card').forEach(card => {
+            const st = card.dataset.status;
+            const group = (st === 'resolved' || st === 'failed') ? 'done' : (st === 'support' ? 'support' : 'open');
+            const show = currentFilter === 'all' || currentFilter === group;
+            card.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        document.getElementById('tasksEmpty').style.display = visible ? 'none' : '';
+    };
+    document.querySelectorAll('#taskFilters .filter-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            document.querySelectorAll('#taskFilters .filter-pill').forEach(p => p.classList.remove('active'));
+            pill.classList.add('active');
+            currentFilter = pill.dataset.filter;
+            window.applyTaskFilter();
+        });
+    });
 
     window.toggleArchive = () => {
         const container = document.getElementById('archivedTasksContainer');

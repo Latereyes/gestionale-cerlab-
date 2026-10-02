@@ -1,0 +1,423 @@
+"""Genera templates/dashboard_ceo.html (esegui con python scripts/ceo_tmpl.py)."""
+import pathlib
+
+O = "{"
+C = "}"
+OO = "{{"
+CC = "}}"
+BP = "{%"
+EP = "%}"
+
+def jv(s):   return f"{OO} {s} {CC}"
+def jvf(s, f): return f"{OO} {s} | {f} {CC}"
+def jvr(s):  return f"{OO} {s} | safe {CC}"
+def bs(s):   return f"{BP} {s} {EP}"
+def bsr(s):  return f"{BP}- {s} -{EP}"
+
+TMPL = f"""\
+{bs('extends "base.html"')}
+
+{bs('block page_title')}
+<h1><i class="fas fa-chart-line"></i> Dashboard Direzionale</h1>
+{bs('endblock')}
+
+{bs('block body')}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+.ceo-root{{max-width:1500px;margin:0 auto;padding:24px;font-family:'Inter',sans-serif}}
+.ceo-filter-bar{{background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);border-radius:16px;padding:20px 28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;margin-bottom:24px;box-shadow:0 8px 32px rgba(0,0,0,.18)}}
+.ceo-filter-bar .date-inputs{{display:flex;align-items:center;gap:12px}}
+.ceo-filter-bar input[type=date]{{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#e2e8f0;padding:9px 14px 9px 38px;border-radius:10px;font-size:14px;font-family:'Inter',sans-serif}}
+.ceo-filter-bar input[type=date]::-webkit-calendar-picker-indicator{{filter:invert(1);opacity:.5}}
+.date-icon-wrap{{position:relative}}
+.date-icon-wrap .ico{{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:14px;z-index:1;pointer-events:none}}
+.date-sep{{color:#475569;font-size:18px}}
+.preset-btn{{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#94a3b8;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif}}
+.preset-btn:hover{{background:rgba(99,102,241,.2);border-color:#6366f1;color:#c7d2fe}}
+.filter-actions{{display:flex;gap:8px;flex-wrap:wrap}}
+.btn-ceo-primary{{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;padding:9px 20px;border-radius:10px;font-weight:600;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:8px;font-family:'Inter',sans-serif}}
+.btn-ceo-success{{background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:9px 16px;border-radius:10px;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:7px;font-family:'Inter',sans-serif}}
+.btn-ceo-blue{{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;border:none;padding:9px 16px;border-radius:10px;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:7px;font-family:'Inter',sans-serif}}
+.ceo-tabs-nav{{display:flex;gap:4px;margin-bottom:24px;border-bottom:2px solid #e2e8f0}}
+.ceo-tab-btn{{background:transparent;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;padding:14px 26px;font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#94a3b8;cursor:pointer;display:flex;align-items:center;gap:9px;transition:color .2s,border-color .2s;border-radius:8px 8px 0 0}}
+.ceo-tab-btn:hover{{color:#334155;background:#f8fafc}}
+.ceo-tab-btn.active{{color:#6366f1;border-bottom-color:#6366f1;background:rgba(99,102,241,.04)}}
+.ceo-tab-content{{display:none;animation:ceoFadeIn .25s ease}}
+.ceo-tab-content.active{{display:block}}
+@keyframes ceoFadeIn{{from{{opacity:0;transform:translateY(6px)}}to{{opacity:1;transform:translateY(0)}}}}
+.glass-card{{background:#fff;border-radius:16px;border:1px solid #e8edf3;box-shadow:0 2px 12px rgba(0,0,0,.05);overflow:hidden;margin-bottom:24px}}
+.glass-card-header{{padding:18px 24px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(to right,#fafbff,#fff)}}
+.glass-card-header h3{{margin:0;font-size:15px;font-weight:700;color:#1e293b;display:flex;align-items:center;gap:10px}}
+.glass-card-header h3 i{{color:#6366f1}}
+.glass-card-body{{padding:24px}}
+.math-eq-row{{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;transition:background .15s}}
+.math-eq-row.top{{background:linear-gradient(to right,#f0f9ff,#e0f2fe);padding:18px 24px}}
+.math-eq-row.top .eq-val{{font-size:22px;font-weight:800;color:#0369a1}}
+.eq-label{{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#64748b}}
+.eq-val{{font-size:17px;font-weight:700;color:#1e293b}}
+.math-eq-row.subtracted .eq-val{{color:#ef4444}}
+.math-eq-row.fee-row .eq-val{{color:#8b5cf6}}
+.math-eq-divider{{height:2px;background:linear-gradient(to right,#e0e7ff,transparent);margin:4px 0}}
+.math-eq-row.result{{background:linear-gradient(to right,#ecfdf5,#d1fae5);padding:20px 24px}}
+.math-eq-row.result .eq-label{{font-size:14px;font-weight:700;color:#065f46}}
+.math-eq-row.result .eq-val{{font-size:28px;font-weight:900;color:#059669}}
+.math-footer-grid{{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #d1fae5}}
+.math-footer-cell{{text-align:center;padding:14px;background:#f0fdf4}}
+.math-footer-cell:first-child{{border-right:1px solid #d1fae5}}
+.mfc-label{{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;font-weight:600;display:block;margin-bottom:4px}}
+.mfc-value{{font-size:20px;font-weight:800;color:#059669}}
+.funnel-wrap{{display:flex;flex-direction:column;gap:14px}}
+.funnel-row{{display:flex;align-items:center;gap:14px}}
+.f-label-col{{width:110px;font-size:13px;color:#475569;font-weight:500}}
+.f-bar-track{{flex:1;height:22px;background:#f1f5f9;border-radius:6px;overflow:hidden}}
+.f-bar-fill{{height:100%;border-radius:6px;transition:width .8s cubic-bezier(.25,.8,.25,1)}}
+.f-count{{width:40px;text-align:right;font-weight:700;font-size:14px}}
+.f-bar-fill.created{{background:linear-gradient(90deg,#3b82f6,#60a5fa)}}
+.f-bar-fill.sent{{background:linear-gradient(90deg,#f59e0b,#fbbf24)}}
+.f-bar-fill.confirmed{{background:linear-gradient(90deg,#10b981,#34d399)}}
+.f-bar-fill.cancelled{{background:linear-gradient(90deg,#ef4444,#f87171)}}
+.cf-grid{{display:grid;grid-template-columns:repeat(3,1fr) 1.4fr;gap:16px;margin-bottom:20px}}
+.cf-tile{{border-radius:14px;padding:20px;background:#fff;border:1px solid #e8edf3;box-shadow:0 2px 8px rgba(0,0,0,.04);transition:transform .2s}}
+.cf-tile:hover{{transform:translateY(-2px)}}
+.cf-tile.green{{border-left:4px solid #10b981;background:linear-gradient(135deg,#ecfdf5 0%,#fff 100%)}}
+.cf-tile.red{{border-left:4px solid #ef4444;background:linear-gradient(135deg,#fef2f2 0%,#fff 100%)}}
+.cf-tile.purple{{border-left:4px solid #8b5cf6;background:linear-gradient(135deg,#f5f3ff 0%,#fff 100%)}}
+.cf-tile.blue{{border-left:4px solid #3b82f6;background:linear-gradient(135deg,#eff6ff 0%,#fff 100%)}}
+.cf-tile.amber{{border-left:4px solid #f59e0b;background:linear-gradient(135deg,#fffbeb 0%,#fff 100%)}}
+.cf-tile.dark{{border:2px solid #1e293b;background:linear-gradient(135deg,#1e293b 0%,#334155 100%)}}
+.ct-header{{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin-bottom:10px;display:flex;align-items:center;gap:7px}}
+.cf-tile.dark .ct-header{{color:#94a3b8}}
+.ct-amount{{font-size:26px;font-weight:900;color:#1e293b;margin-bottom:4px}}
+.cf-tile.dark .ct-amount{{color:#fff}}
+.ct-sub{{font-size:12px;color:#94a3b8}}
+.iva-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}}
+.iva-tile{{border-radius:12px;padding:18px;background:#f8fafc;border:1px solid #e8edf3;text-align:center}}
+.iva-header{{font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:7px}}
+.iva-amount{{font-size:22px;font-weight:800;color:#1e293b}}
+.perf-table{{width:100%;border-collapse:collapse}}
+.perf-table th{{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;padding:10px 14px;text-align:left;background:#fafbff;border-bottom:1px solid #f1f5f9}}
+.perf-table td{{padding:11px 14px;border-bottom:1px solid #f8fafc;font-size:13px;color:#334155}}
+.perf-table tr:last-child td{{border-bottom:none}}
+.perf-table tr:hover td{{background:#fafbff}}
+.perf-table .right{{text-align:right}}
+.perf-table .center{{text-align:center}}
+.badge-pill{{display:inline-flex;align-items:center;justify-content:center;min-width:24px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#e0e7ff;color:#4338ca}}
+.badge-blue{{background:#dbeafe;color:#1e40af}}
+.conv-row{{display:flex;align-items:center;gap:16px;padding:14px 16px;border-bottom:1px solid #f8fafc;transition:background .15s}}
+.conv-row:last-child{{border-bottom:none}}
+.conv-row:hover{{background:#fafbff}}
+.conv-name{{font-weight:600;font-size:14px;color:#1e293b;width:120px;flex-shrink:0}}
+.conv-metric{{display:flex;flex-direction:column;align-items:center;width:70px;flex-shrink:0}}
+.conv-metric .clabel{{font-size:10px;text-transform:uppercase;color:#94a3b8;font-weight:600;margin-bottom:2px}}
+.conv-metric .cvalue{{font-size:15px;font-weight:700;color:#1e293b}}
+.conv-bar-wrap{{flex:3}}
+.conv-bar-bg{{height:10px;background:#f1f5f9;border-radius:5px;overflow:hidden}}
+.conv-bar-fg{{height:100%;border-radius:5px;background:linear-gradient(90deg,#6366f1,#8b5cf6);transition:width .8s cubic-bezier(.25,.8,.25,1)}}
+.conv-rate{{font-weight:800;font-size:16px;color:#6366f1;width:55px;text-align:right}}
+.big-stat-row{{display:flex}}
+.big-stat-block{{flex:1;text-align:center;padding:28px 20px;border-right:1px solid #f1f5f9}}
+.big-stat-block:last-child{{border-right:none}}
+.bs-value{{font-size:40px;font-weight:900;color:#6366f1;line-height:1;margin-bottom:6px}}
+.bs-label{{font-size:12px;color:#94a3b8;text-transform:uppercase;font-weight:600;letter-spacing:.5px}}
+.bs-sub{{font-size:13px;color:#64748b;margin-top:4px}}
+.overview-grid{{display:grid;grid-template-columns:380px 1fr;gap:24px}}
+.overview-right{{display:flex;flex-direction:column;gap:24px}}
+.chart-container{{position:relative;height:320px}}
+.table-scroll{{max-height:320px;overflow-y:auto}}
+.table-fixed{{max-height:240px;overflow-y:auto}}
+.text-success{{color:#10b981}}
+.text-danger{{color:#ef4444}}
+.text-purple{{color:#8b5cf6}}
+.mt-4{{margin-top:1.5rem}}
+@media(max-width:1100px){{.overview-grid{{grid-template-columns:1fr}}.cf-grid{{grid-template-columns:1fr 1fr}}.iva-grid{{grid-template-columns:1fr 1fr}}}}
+@media(max-width:640px){{.cf-grid{{grid-template-columns:1fr}}.iva-grid{{grid-template-columns:1fr}}}}
+</style>
+
+<div class="ceo-root">
+
+<form method="GET" action="{jv("url_for('dashboard_ceo')")}" id="ceo-form">
+  <div class="ceo-filter-bar">
+    <div class="date-inputs">
+      <div class="date-icon-wrap"><i class="fas fa-calendar-alt ico"></i><input type="date" id="start_date" name="start_date" value="{jv('start_date')}" min="2025-09-01"></div>
+      <span class="date-sep">&#8594;</span>
+      <div class="date-icon-wrap"><i class="fas fa-calendar-alt ico"></i><input type="date" id="end_date" name="end_date" value="{jv('end_date')}" min="2025-09-01"></div>
+      <div class="filter-actions">
+        <button type="submit" class="btn-ceo-primary"><i class="fas fa-filter"></i> Analizza</button>
+        <button type="button" onclick="downloadExport('{jv("url_for('export_excel_ceo')")}')" class="btn-ceo-success"><i class="fas fa-file-excel"></i> Analisi</button>
+        <button type="button" onclick="downloadExport('{jv("url_for('export_cashflow_excel')")}')" class="btn-ceo-blue"><i class="fas fa-file-invoice-dollar"></i> Cashflow</button>
+      </div>
+    </div>
+    <div class="presets">
+      <button type="button" class="preset-btn" data-preset="this-month">Mese Corrente</button>
+      <button type="button" class="preset-btn" data-preset="last-month">Mese Scorso</button>
+      <button type="button" class="preset-btn" data-preset="this-year">Anno in Corso</button>
+      <button type="button" class="preset-btn" data-preset="last-12">Ultimi 12 Mesi</button>
+    </div>
+  </div>
+</form>
+
+<div class="ceo-tabs-nav">
+  <button class="ceo-tab-btn active" data-tab="tab-overview"><i class="fas fa-tachometer-alt"></i> Overview &amp; Profitti</button>
+  <button class="ceo-tab-btn" data-tab="tab-cashflow"><i class="fas fa-wallet"></i> Cash Flow</button>
+  <button class="ceo-tab-btn" data-tab="tab-commerciale"><i class="fas fa-bullseye"></i> Commerciale</button>
+</div>
+
+<!-- TAB OVERVIEW -->
+<div id="tab-overview" class="ceo-tab-content active">
+  <div class="overview-grid">
+    <div>
+      <div class="glass-card">
+        <div class="glass-card-header"><h3><i class="fas fa-calculator"></i> Analisi Periodo</h3></div>
+        {bs('set costi_reali = kpi.imponibile_totale - kpi.fee_versata - kpi.utile_netto_finale')}
+        <div class="math-eq-row top"><span class="eq-label">IMPONIBILE PERIODO</span><span class="eq-val">{jvf('kpi.imponibile_totale','money_ui')}</span></div>
+        <div class="math-eq-row subtracted"><span class="eq-label">- COSTI FORNITORI</span><span class="eq-val">{jvf('costi_reali','money_ui')}</span></div>
+        <div class="math-eq-row fee-row"><span class="eq-label">- FEE VERSATA</span><span class="eq-val">{jvf('kpi.fee_versata','money_ui')}</span></div>
+        <div class="math-eq-divider"></div>
+        <div class="math-eq-row result"><span class="eq-label">= UTILE TOTALE</span><span class="eq-val">{jvf('kpi.utile_netto_finale','money_ui')}</span></div>
+        <div class="math-footer-grid">
+          <div class="math-footer-cell"><span class="mfc-label">RICARICO MEDIO</span><span class="mfc-value">{jv('"%.1f"|format(kpi.margine_medio_pct)')}%</span></div>
+          <div class="math-footer-cell"><span class="mfc-label">MARGINALITA TOT.</span><span class="mfc-value">{jv('"%.1f"|format(kpi.marginalita_totale_pct)')}%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="overview-right">
+      <div class="glass-card">
+        <div class="glass-card-header"><h3><i class="fas fa-chart-area"></i> Andamento Periodo</h3></div>
+        <div class="glass-card-body"><div class="chart-container"><canvas id="profitChart"></canvas></div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+        <div class="glass-card">
+          <div class="glass-card-header"><h3><i class="fas fa-briefcase"></i> Performance Venditori</h3></div>
+          <div class="table-fixed"><table class="perf-table">
+            <thead><tr><th>Venditore</th><th class="center">Prev.</th><th class="right">Imponibile</th><th class="right">Utile</th></tr></thead>
+            <tbody>
+              {bs('for v in venditori')}
+              <tr><td><strong>{jv('v.nome')}</strong></td><td class="center"><span class="badge-pill">{jv('v.count')}</span></td><td class="right"><strong>{jvf('v.imponibile','money_ui')}</strong></td><td class="right" style="color:#10b981;font-weight:700">{jvf('v.utile','money_ui')}</td></tr>
+              {bs('else')}
+              <tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px">Nessuna vendita nel periodo.</td></tr>
+              {bs('endfor')}
+            </tbody>
+          </table></div>
+        </div>
+        <div class="glass-card">
+          <div class="glass-card-header"><h3><i class="fas fa-users"></i> Performance Referenti</h3></div>
+          <div class="table-fixed"><table class="perf-table">
+            <thead><tr><th>Referente</th><th class="center">Prev.</th><th class="right">Imponibile</th><th class="right">Fee</th></tr></thead>
+            <tbody>
+              {bs('for ref in referenti')}
+              <tr><td>{jv('ref.nome')}</td><td class="center"><span class="badge-pill badge-blue">{jv('ref.preventivo')}</span></td><td class="right" style="color:#64748b">{jvf('ref.imponibile','money_ui')}</td><td class="right" style="color:#8b5cf6;font-weight:700">{jvf('ref.fee','money_ui')}</td></tr>
+              {bs('else')}
+              <tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px">Nessun dato.</td></tr>
+              {bs('endfor')}
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB CASHFLOW -->
+<div id="tab-cashflow" class="ceo-tab-content">
+  <div class="cf-grid">
+    <div class="cf-tile green"><div class="ct-header"><i class="fas fa-check-circle" style="color:#10b981"></i> Gia Incassato</div><div class="ct-amount">{jvf('cashflow.incassato_netto','money_ui')}</div><div class="ct-sub">Liquidita netta entrata nel periodo</div></div>
+    <div class="cf-tile red"><div class="ct-header"><i class="fas fa-shopping-cart" style="color:#ef4444"></i> Uscite Ordini</div><div class="ct-amount">{jvf('cashflow.costi_preventivi_in_corso','money_ui')}</div><div class="ct-sub">Costi fornitore del periodo</div></div>
+    <div class="cf-tile purple"><div class="ct-header"><i class="fas fa-percentage" style="color:#8b5cf6"></i> Fee Versate</div><div class="ct-amount">{jvf('cashflow.fee_versata','money_ui')}</div><div class="ct-sub">Calcolate su incassi del periodo</div></div>
+    <div class="cf-tile dark"><div class="ct-header"><i class="fas fa-scale-balanced"></i> Bilancio Cassa</div><div class="ct-amount {jv("'text-success' if cashflow.bilancio >= 0 else 'text-danger'")}">{jv("'+' if cashflow.bilancio > 0 else ''")} {jvf('cashflow.bilancio','money_ui')}</div><div class="ct-sub">Incassato - Uscite - Fee</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+    <div class="cf-tile blue"><div class="ct-header"><i class="fas fa-clock" style="color:#3b82f6"></i> Saldi Programmati</div><div class="ct-amount">{jvf('cashflow.in_attesa_netto','money_ui')}</div><div class="ct-sub">Futuri gia pianificati</div></div>
+    <div class="cf-tile amber"><div class="ct-header"><i class="fas fa-exclamation-circle" style="color:#f59e0b"></i> Da Incassare</div><div class="ct-amount">{jvf('cashflow.da_saldare_netto','money_ui')}</div><div class="ct-sub">Residuo non ancora pianificato</div></div>
+  </div>
+  <div class="glass-card">
+    <div class="glass-card-header"><h3><i class="fas fa-percent"></i> Analisi IVA</h3></div>
+    <div class="glass-card-body">
+      <div class="iva-grid">
+        <div class="iva-tile"><div class="iva-header" style="color:#3b82f6"><i class="fas fa-university"></i> IVA Preventivi</div><div class="iva-amount">{jvf('cashflow.iva_preventivi','money_ui')}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Su vendite incassate</div></div>
+        <div class="iva-tile"><div class="iva-header" style="color:#ef4444"><i class="fas fa-arrow-down"></i> IVA Ordini</div><div class="iva-amount">{jvf('cashflow.iva_ordini','money_ui')}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Su acquisti periodo</div></div>
+        <div class="iva-tile"><div class="iva-header" style="color:{jv("'#059669' if cashflow.bilancio_iva >= 0 else '#dc2626'")}"><i class="fas fa-balance-scale"></i> Bilancio IVA</div><div class="iva-amount {jv("'text-success' if cashflow.bilancio_iva >= 0 else 'text-danger'")}"> {jv("'+' if cashflow.bilancio_iva > 0 else ''")} {jvf('cashflow.bilancio_iva','money_ui')}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Debito/Credito IVA</div></div>
+        <div class="iva-tile"><div class="iva-header" style="color:#059669"><i class="fas fa-file-contract"></i> IVA Esente</div><div class="iva-amount">{jvf('cashflow.iva_esente','money_ui')}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Virtuale (no-IVA)</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="glass-card">
+    <div class="glass-card-header"><h3><i class="fas fa-calendar-check"></i> Prossimi Pagamenti Programmati</h3><span style="font-size:12px;color:#94a3b8">{jv('future_payments | length')} in lista</span></div>
+    <div class="table-scroll"><table class="perf-table">
+      <thead><tr><th>Data</th><th>Cliente</th><th>Preventivo</th><th class="right">Importo Netto</th><th>Note</th><th class="center"></th></tr></thead>
+      <tbody>
+        {bs('for pag in future_payments')}
+        <tr>
+          <td><strong>{jv("pag.data.strftime('%d/%m/%Y')")}</strong></td>
+          <td>{jv('pag.cliente')}</td>
+          <td><span class="badge-pill badge-blue">{jv('pag.preventivo')}</span></td>
+          <td class="right" style="color:#3b82f6;font-weight:700">{jvf('pag.importo_netto','money_ui')}</td>
+          <td style="font-size:12px;color:#94a3b8">{jv('pag.note')}</td>
+          <td class="center"><a href="{jv("url_for('gestione_pagamenti', quote_id=pag.preventivo)")}" target="_blank" style="color:#6366f1;font-size:13px"><i class="fas fa-external-link-alt"></i></a></td>
+        </tr>
+        {bs('else')}
+        <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">Nessun pagamento futuro programmato.</td></tr>
+        {bs('endfor')}
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- TAB COMMERCIALE -->
+<div id="tab-commerciale" class="ceo-tab-content">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
+    <div class="glass-card">
+      <div class="glass-card-header"><h3><i class="fas fa-filter"></i> Funnel Commerciale</h3></div>
+      <div class="glass-card-body">
+        {bs('set max_count = [funnel.creati, 1] | max')}
+        <div class="funnel-wrap">
+          <div class="funnel-row"><span class="f-label-col">Creati</span><div class="f-bar-track"><div class="f-bar-fill created" style="width:100%"></div></div><span class="f-count" style="color:#3b82f6">{jv('funnel.creati')}</span></div>
+          <div class="funnel-row"><span class="f-label-col">Inviati</span><div class="f-bar-track"><div class="f-bar-fill sent" style="width:{jv('(funnel.inviati / max_count * 100) | int')}%"></div></div><span class="f-count" style="color:#f59e0b">{jv('funnel.inviati')}</span></div>
+          <div class="funnel-row"><span class="f-label-col">Confermati</span><div class="f-bar-track"><div class="f-bar-fill confirmed" style="width:{jv('(funnel.confermati / max_count * 100) | int')}%"></div></div><span class="f-count" style="color:#10b981">{jv('funnel.confermati')}</span></div>
+          <div class="funnel-row"><span class="f-label-col">Annullati</span><div class="f-bar-track"><div class="f-bar-fill cancelled" style="width:{jv('(funnel.annullati / max_count * 100) | int')}%"></div></div><span class="f-count" style="color:#ef4444">{jv('funnel.annullati')}</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="glass-card">
+      <div class="glass-card-header"><h3><i class="fas fa-trophy"></i> KPI Commerciali</h3></div>
+      <div class="big-stat-row" style="border-bottom:1px solid #f1f5f9">
+        <div class="big-stat-block"><div class="bs-value">{jv('"%.1f"|format(funnel.tasso_firma)')}%</div><div class="bs-label">Tasso di Firma</div><div class="bs-sub">Confermati / Creati</div></div>
+        <div class="big-stat-block"><div class="bs-value" style="color:#10b981">{jv('funnel.confermati')}</div><div class="bs-label">Contratti Firmati</div><div class="bs-sub">nel periodo</div></div>
+      </div>
+      <div class="big-stat-row">
+        <div class="big-stat-block"><div class="bs-value" style="color:#f59e0b;font-size:26px">{jvf('funnel.valore_in_trattativa','money_ui')}</div><div class="bs-label">In Trattativa</div><div class="bs-sub">Bozze + Inviati</div></div>
+        <div class="big-stat-block"><div class="bs-value" style="color:#ef4444;font-size:32px">{jv('funnel.annullati')}</div><div class="bs-label">Annullati</div><div class="bs-sub">nel periodo</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="glass-card">
+    <div class="glass-card-header"><h3><i class="fas fa-user-tie"></i> Tasso di Conversione per Venditore</h3><span style="font-size:12px;color:#94a3b8">Confermati / (Confermati + Inviati aperti)</span></div>
+    <div>
+      {bs('for v in venditori')}
+      <div class="conv-row">
+        <span class="conv-name">{jv('v.nome')}</span>
+        <div class="conv-metric"><span class="clabel">Conf.</span><span class="cvalue" style="color:#10b981">{jv('v.count')}</span></div>
+        <div class="conv-metric"><span class="clabel">Aperti</span><span class="cvalue" style="color:#f59e0b">{jv('v.inviati')}</span></div>
+        <div class="conv-bar-wrap"><div class="conv-bar-bg"><div class="conv-bar-fg" style="width:{jv('v.tasso_conv')}%"></div></div></div>
+        <span class="conv-rate">{jv('v.tasso_conv')}%</span>
+      </div>
+      {bs('else')}
+      <div style="text-align:center;padding:32px;color:#94a3b8">Nessun dato per il periodo selezionato.</div>
+      {bs('endfor')}
+    </div>
+  </div>
+
+  <div class="glass-card">
+    <div class="glass-card-header"><h3><i class="fas fa-handshake"></i> Dettaglio Referenti</h3></div>
+    <div class="table-scroll"><table class="perf-table">
+      <thead><tr><th>Referente</th><th class="center">Preventivi</th><th class="right">Imponibile</th><th class="right">Fee Generata</th><th class="right">Fee / Prev.</th></tr></thead>
+      <tbody>
+        {bs('for ref in referenti')}
+        <tr>
+          <td><strong>{jv('ref.nome')}</strong></td>
+          <td class="center"><span class="badge-pill badge-blue">{jv('ref.preventivo')}</span></td>
+          <td class="right">{jvf('ref.imponibile','money_ui')}</td>
+          <td class="right" style="color:#8b5cf6;font-weight:700">{jvf('ref.fee','money_ui')}</td>
+          <td class="right" style="color:#64748b">{bs('if ref.preventivo > 0')}{jv('(ref.fee / ref.preventivo) | money_ui')}{bs('else')}--{bs('endif')}</td>
+        </tr>
+        {bs('else')}
+        <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:24px">Nessun dato.</td></tr>
+        {bs('endfor')}
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+const graficoData = {jv('grafico | tojson | safe')};
+document.addEventListener('DOMContentLoaded', () => {{
+  const startInput = document.getElementById('start_date');
+  const endInput   = document.getElementById('end_date');
+  const form       = document.getElementById('ceo-form');
+  const minDate    = new Date('2025-09-01');
+
+  document.querySelectorAll('.preset-btn').forEach(btn => {{
+    btn.addEventListener('click', () => {{
+      const today = new Date();
+      let start = new Date(today), end = new Date(today);
+      switch(btn.dataset.preset) {{
+        case 'this-month':  start = new Date(today.getFullYear(), today.getMonth(), 1); break;
+        case 'last-month':  start = new Date(today.getFullYear(), today.getMonth()-1, 1); end = new Date(today.getFullYear(), today.getMonth(), 0); break;
+        case 'this-year':   start = new Date(today.getFullYear(), 0, 1); break;
+        case 'last-12':     start.setFullYear(today.getFullYear()-1); break;
+      }}
+      if (start < minDate) start = new Date(minDate);
+      startInput.value = start.toISOString().split('T')[0];
+      endInput.value   = end.toISOString().split('T')[0];
+      form.submit();
+    }});
+  }});
+
+  const savedTab = localStorage.getItem('ceo_active_tab') || 'tab-overview';
+  activateTab(savedTab);
+  document.querySelectorAll('.ceo-tab-btn').forEach(btn => {{
+    btn.addEventListener('click', () => {{ activateTab(btn.dataset.tab); localStorage.setItem('ceo_active_tab', btn.dataset.tab); }});
+  }});
+  function activateTab(id) {{
+    document.querySelectorAll('.ceo-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.ceo-tab-content').forEach(c => c.classList.remove('active'));
+    const b = document.querySelector('.ceo-tab-btn[data-tab="' + id + '"]');
+    const c = document.getElementById(id);
+    if (b) b.classList.add('active');
+    if (c) c.classList.add('active');
+  }}
+
+  window.downloadExport = function(baseUrl) {{
+    try {{
+      const url = new URL(baseUrl, window.location.origin);
+      if (startInput.value) url.searchParams.append('start_date', startInput.value);
+      if (endInput.value)   url.searchParams.append('end_date', endInput.value);
+      window.location.href = url.toString();
+    }} catch(e) {{ alert('Errore URL: ' + e.message); }}
+  }};
+
+  const ctx = document.getElementById('profitChart');
+  if (ctx) {{
+    new Chart(ctx, {{
+      type: 'line',
+      data: {{
+        labels: graficoData.labels,
+        datasets: [
+          {{ label: 'Imponibile', data: graficoData.imponibile, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.08)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 3, pointHoverRadius: 6 }},
+          {{ label: 'Utile Netto', data: graficoData.utile, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.06)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 3, pointHoverRadius: 6 }},
+          {{ label: 'Fee Generata', data: graficoData.fee, borderColor: '#8b5cf6', fill: false, tension: 0.4, borderWidth: 2, borderDash: [5,5], pointRadius: 2, hidden: true }},
+          {{ label: 'Costi Effettivi', data: graficoData.costi_effettivi, borderColor: '#f59e0b', fill: false, tension: 0.4, borderWidth: 2, borderDash: [3,3], pointRadius: 2, hidden: true }},
+          {{ label: 'Costi Presunti', data: graficoData.costi_presunti, borderColor: '#94a3b8', fill: false, tension: 0.4, borderWidth: 1, borderDash: [4,4], pointRadius: 2, hidden: true }}
+        ]
+      }},
+      options: {{
+        responsive: true, maintainAspectRatio: false,
+        interaction: {{ mode: 'index', intersect: false }},
+        plugins: {{
+          legend: {{ display: true, position: 'top', labels: {{ font: {{ family: 'Inter', size: 12 }}, usePointStyle: true, boxHeight: 8 }} }},
+          tooltip: {{
+            backgroundColor: '#1e293b', titleColor: '#e2e8f0', bodyColor: '#94a3b8', borderColor: '#334155', borderWidth: 1, padding: 12,
+            callbacks: {{ label: ctx => ' ' + ctx.dataset.label + ': ' + new Intl.NumberFormat('it-IT',{{style:'currency',currency:'EUR'}}).format(ctx.parsed.y) }}
+          }}
+        }},
+        scales: {{
+          x: {{ grid: {{ color: 'rgba(0,0,0,0.04)' }}, ticks: {{ font: {{ family: 'Inter', size: 11 }}, color: '#94a3b8', maxRotation: 45 }} }},
+          y: {{ grid: {{ color: 'rgba(0,0,0,0.04)' }}, ticks: {{ font: {{ family: 'Inter', size: 11 }}, color: '#94a3b8', callback: v => new Intl.NumberFormat('it-IT',{{style:'currency',currency:'EUR',minimumFractionDigits:0}}).format(v) }} }}
+        }}
+      }}
+    }});
+  }}
+}});
+</script>
+{bs('endblock')}
+"""
+
+out = pathlib.Path(r"c:/Users/andre/Documents/GESTIONALE CERLAB v3/templates/dashboard_ceo.html")
+out.write_text(TMPL, encoding="utf-8")
+print(f"OK: {out.stat().st_size} bytes, {TMPL.count(chr(10))} righe")

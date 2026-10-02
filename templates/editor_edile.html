@@ -330,7 +330,7 @@
 
 
     .main-actions { display: flex; gap: 12px; align-items: center; }
-.btn.icon-btn.large-icon { font-size: 20px; padding: 10px; width: 48px; height: 48px; background: #f1f5f9; border: 1px solid #e2e8f0; }
+.btn.icon-btn.large-icon { font-size: 20px; padding: 10px; width: 48px; height: 48px; background: var(--surface-2); border: 1px solid var(--border); }
 
 
 .col-money { width: 160px; } /* Allargata leggermente per i dettagli */
@@ -339,17 +339,17 @@ body { padding-bottom: 90px; }
 .editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
 
 /* Dettagli Collapsible */
-.details-card { border: 1px solid #e2e8f0; border-radius: 12px; background-color: #fff; margin-bottom: 24px; overflow: hidden; }
+.details-card { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); margin-bottom: 24px; overflow: hidden; }
 .details-summary { display: flex; align-items: center; gap: 12px; padding: 16px 24px; font-size: 16px; font-weight: 600; cursor: pointer; list-style: none; }
 .details-summary::-webkit-details-marker { display: none; }
 .details-summary .fa-chevron-down { transition: transform 0.2s; }
 .details-card[open] > .details-summary .fa-chevron-down { transform: rotate(180deg); }
-.details-content { padding: 24px; border-top: 1px solid #e2e8f0; }
+.details-content { padding: 24px; border-top: 1px solid var(--border); }
 
 .form-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
 .form-group { display: flex; flex-direction: column; }
-.form-group label { font-size: 12px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; font-weight: 600; }
-.form-group input { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; font-size: 14px; }
+.form-group label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; font-weight: 600; }
+.form-group input { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; font-size: 14px; }
 .form-group.full-width { grid-column: span 2; }
 
 /* Card Generale */
@@ -370,13 +370,13 @@ body { padding-bottom: 90px; }
 .actions-group h4 { margin: 0 0 4px 0; }
 /* Tabella Responsive */
 .responsive-table { display: flex; flex-direction: column; }
-.rt-header { display: flex; font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600; padding: 8px 16px; background-color: #f8f9fa; border-bottom: 1px solid #e2e8f0; }
-.rt-row { display: flex; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid #e2e8f0; background: #fff; gap: 10px; }
-.rt-row:hover { background-color: #fcfcfc; }
+.rt-header { display: flex; font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; padding: 8px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.rt-row { display: flex; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface); gap: 10px; }
+.rt-row:hover { background: var(--surface-2); }
 .rt-col { display: flex; flex-direction: column; justify-content: center; }
 
 /* Colonne Specifiche Edile */
-.col-drag { width: 30px; align-items: center; color: #94a3b8; padding-top: 10px; }
+.col-drag { width: 30px; align-items: center; color: var(--border-strong); padding-top: 10px; }
 .col-main { flex: 2; } /* La descrizione prende tutto lo spazio */
 .col-money { width: 140px; }
 .col-iva { width: 70px; }
@@ -385,35 +385,35 @@ body { padding-bottom: 90px; }
 .col-actions { width: 50px; align-items: center; padding-top: 5px; }
 
 /* Input Styles */
-.cell-input { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; width: 100%; font-size: 14px; transition: border-color 0.2s; }
-.cell-input:focus { border-color: #6366f1; outline: none; }
+.cell-input { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; width: 100%; font-size: 14px; transition: border-color var(--transition); }
+.cell-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px var(--accent-light); }
 .cell-input.right { text-align: right; }
 .cell-input.text-center { text-align: center; }
 
 .textarea-autosize { min-height: 38px; resize: vertical; font-family: inherit; }
-.input-money-vendita { font-weight: 600; color: #0f172a; }
-.input-money-costo { font-weight: 600; color: #b91c1c; background: #fef2f2; }
+.input-money-vendita { font-weight: 600; color: var(--text); }
+.input-money-costo { font-weight: 600; color: var(--danger-text); background: var(--danger-bg); }
 
 .header-title-input {
     background: transparent;
     border: 1px solid transparent;
     font-size: 18px;
     font-weight: 700;
-    color: #1e293b;
+    color: var(--text);
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     width: 60%;
-    transition: all 0.2s;
+    transition: all var(--transition);
 }
-.header-title-input:hover { border-color: #cbd5e1; background: #fff; }
-.header-title-input:focus { border-color: #4f46e5; background: #fff; outline: none; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
+.header-title-input:hover { border-color: var(--border); background: var(--surface-2); }
+.header-title-input:focus { border-color: var(--accent); background: var(--surface); outline: none; box-shadow: 0 0 0 3px var(--accent-light); }
 /* --- Correzione posizionamento ancore --- */
 .card-footer[id^="section-footer-"], 
 .section-adder {
     scroll-margin-top: 550px;
 }
 
-.section-card { border-left: 4px solid #4f46e5; margin-bottom: 32px; }
+.section-card { border-left: 4px solid var(--accent); margin-bottom: 32px; }
 
 /* Margine Indicatore */
 .row-margin-indicator { font-size: 10px; text-align: right; margin-top: 4px; font-weight: 700; min-height: 15px; }
@@ -428,47 +428,30 @@ body { padding-bottom: 90px; }
 .status-actions > div > label { font-size: 12px; color: transparent; margin-bottom: 4px; }
 .totals { display: flex; align-items: center; gap: 24px; text-align: right; }
 .totals div { display: flex; flex-direction: column; }
-.totals span { display: block; font-size: 12px; color: #64748b; text-transform: none; }
-.totals strong { display: block; font-size: 16px; font-weight: 700; color: #1a202c; white-space: nowrap; }
-.grand-total strong { font-size: 22px; color: #0f172a; }
+.totals span { display: block; font-size: 12px; color: var(--text-muted); text-transform: none; }
+.totals strong { display: block; font-size: 16px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.grand-total strong { font-size: 22px; color: var(--text); }
 .main-actions { display: flex; gap: 12px; align-items: flex-end; }
 .btn-large { padding: 12px 20px; font-size: 16px; }
 .icon-btn.large-icon { font-size: 20px; padding: 10px; width: 48px; height: 48px; border-radius: 6px;}
 
-/* Status Badges */
-.status-badge { 
-    font-size: 14px; 
-    font-weight: 600; 
-    color: #fff; 
-    text-transform: capitalize; 
-    min-width: 120px; 
-    padding: 0 14px; 
-    border-radius: 10px; 
-    height: 40px; 
-    display: inline-flex; 
-    align-items: center; 
-    justify-content: center; 
-}
-.status-bozza { background-color: #6c757d; }
-.status-inviato { background-color: #0d6efd; }
-.status-confermato, .status-chiuso { background-color: #198754; }
-.status-in-lavorazione { background-color: #ffc107; color: #000; }
-.status-annullato { background-color: #dc3545; }
+/* .status-badge definito globalmente in base.html */
+/* Override dimensione per header editor */
+.page-title-header .status-badge { font-size: 12px; padding: 5px 14px; }
 
 
 /* Pulsanti */
-.btn { padding: 8px 16px; border-radius: 6px; border: 1px solid transparent; font-weight: 500; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; text-decoration: none; }
-.btn.primary { background-color: #4f46e5; color: white; }
-.btn.primary.success { background-color: #198754; border-color: #198754; }
-.btn.primary:hover { background-color: #4338ca; }
-.btn.action { background-color: #6f42c1; color: #fff; }
-.btn.action:hover { background-color: #5a379b; }
-.btn.success { background-color: #198754; color: #fff; }
-.btn.danger { background-color: #ef4444; color: white; }
-.btn.btn-outline { border-color: #cbd5e1; background: white; color: #475569; }
-.btn.btn-outline:hover { background: #f8fafc; border-color: #94a3b8; }
-.btn.icon-btn { padding: 8px; color: #64748b; background: transparent; border: 1px solid transparent; }
-.btn.icon-btn:hover { color: #ef4444; background: #fef2f2; }
+.btn.primary { background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%); color: white; border-color: transparent; }
+.btn.primary.success { background: linear-gradient(135deg, var(--success) 0%, hsl(142,71%,34%) 100%); border-color: transparent; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.action { background: linear-gradient(135deg, hsl(265,60%,52%) 0%, hsl(265,60%,42%) 100%); color: #fff; border-color: transparent; }
+.btn.action:hover { filter: brightness(1.08); }
+.btn.success { background: linear-gradient(135deg, var(--success) 0%, hsl(142,71%,34%) 100%); color: #fff; border-color: transparent; }
+.btn.danger { background: var(--danger); color: white; border-color: transparent; }
+.btn.btn-outline { border-color: var(--border); background: var(--surface); color: var(--text-muted); }
+.btn.btn-outline:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.btn.icon-btn { padding: 8px; color: var(--text-muted); background: transparent; border: 1px solid transparent; }
+.btn.icon-btn:hover { color: var(--danger-text); background: var(--danger-bg); }
 .mobile-label { display: none; }
 
 /* Responsive Mobile */
@@ -485,10 +468,10 @@ body { padding-bottom: 90px; }
     .totals { justify-content: space-between; }
 }
 /* ... dopo .col-attach ... */
-.col-totals { width: 150px; text-align: right; background-color: #f8fafc; padding: 12px; border-radius: 8px; }
-.col-totals label { font-size: 10px; color: #64748b; text-transform: uppercase; display: block; }
+.col-totals { width: 150px; text-align: right; background: var(--surface-2); padding: 12px; border-radius: var(--radius-sm); }
+.col-totals label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; display: block; }
 .col-totals span { font-weight: 600; font-size: 14px; display: block; }
-.col-totals .total-ivato { color: #4f46e5; font-size: 15px;  }
+.col-totals .total-ivato { color: var(--accent); font-size: 15px; }
 
 .main-actions { display: flex; gap: 12px; align-items: center; }
 .icon-btn.large-icon { font-size: 20px; padding: 10px; width: 48px; height: 48px; background: #f1f5f9; border: 1px solid #e2e8f0; }
@@ -505,7 +488,7 @@ body { padding-bottom: 90px; }
   position: absolute;
   cursor: pointer;
   top: 0; left: 0; right: 0; bottom: 0;
-  background-color: #cbd5e1;
+  background: var(--border);
   transition: .4s;
   border-radius: 24px;
 }
@@ -516,12 +499,12 @@ body { padding-bottom: 90px; }
   width: 16px;
   left: 3px;
   bottom: 3px;
-  background-color: white;
+  background: white;
   transition: .4s;
   border-radius: 50%;
   box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
-input:checked + .slider { background-color: #6f42c1; }
+input:checked + .slider { background: linear-gradient(135deg, hsl(265,60%,52%) 0%, hsl(265,60%,42%) 100%); }
 input:checked + .slider:before { transform: translateX(18px); }
 </style>
 
@@ -973,6 +956,17 @@ async function triggerUpload(index) {
         .then(saveData => {
             if (!saveData.success) throw new Error('Salvataggio fallito');
             
+            // "Inviato": si genera il PDF e lo stato cambia lato server solo se il PDF è stato creato
+            if (targetActionUrlName === 'invia_preventivo') {
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Genero PDF...';
+                return fetch(`/generate-pdf-task/${quoteId}?invia=1`).then(r => r.json().then(d => {
+                    if (!d.pdf_url) throw new Error("Il PDF non è stato generato, quindi il preventivo NON è stato segnato come Inviato.
+
+" + (d.error || ''));
+                    window.open(d.pdf_url, '_blank');
+                    return { ok: true };
+                }));
+            }
             btn.innerHTML = '<i class="fas fa-cog fa-spin"></i> Cambio Stato...';
             // Costruisce URL target (es. /preventivo/123/invia)
             const targetUrl = "{{ url_for('dashboard') }}" + `preventivo/${quoteId}/${targetActionUrlName.replace('_preventivo', '')}`;

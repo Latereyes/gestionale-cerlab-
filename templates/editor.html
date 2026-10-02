@@ -564,16 +564,14 @@ body {
 .icon-btn.large-icon { font-size: 20px; padding: 10px; width: 48px; height: 48px; }
 
 /* --- STILI PULSANTI E BADGE --- */
-.btn.success { background-color: #198754; color: #fff; }
-.btn.danger { background-color: #dc3545; color: #fff; }
-.btn.action { background-color: #6f42c1; color: #fff; }
-.btn.icon-btn { background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; }
-.status-badge{ font-size: 14px; font-weight: 600; color: #fff; text-transform: capitalize; min-width: 120px; padding: 0 14px; border-radius: 10px; height: 40px; display: inline-flex; align-items: center; justify-content: center; }
-.status-bozza{background-color:#6c757d;} 
-.status-inviato{background-color:#0d6efd;} 
-.status-confermato, .status-chiuso {background-color:#198754;}
-.status-in-lavorazione{background-color:#ffc107;color:#000;} 
-.status-annullato{background-color:#dc3545;}
+.btn.success { background: linear-gradient(135deg, var(--success) 0%, hsl(142,71%,34%) 100%); color: #fff; border-color: transparent; }
+.btn.danger { background: linear-gradient(135deg, var(--danger) 0%, hsl(354,76%,42%) 100%); color: #fff; border-color: transparent; }
+.btn.action { background: linear-gradient(135deg, hsl(262,60%,52%) 0%, hsl(262,60%,44%) 100%); color: #fff; border-color: transparent; }
+.btn.icon-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); }
+.btn.icon-btn:hover { background: var(--accent-light); color: var(--accent); border-color: transparent; }
+/* .status-badge definito globalmente in base.html */
+/* Override dimensione per header editor */
+.page-title-header .status-badge { font-size: 12px; padding: 5px 14px; }
 
 /* --- RESPONSIVE --- */
 @media (max-width: 1200px) {
@@ -652,10 +650,10 @@ body {
 .markup-step-btn {
     width: 22px;
     height: 22px;
-    border-radius: 6px;
-    border: 1px solid #cbd5e1;
-    background-color: #f8f9fa;
-    color: #495057;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-muted);
     font-weight: 700;
     font-size: 16px;
     line-height: 1;
@@ -664,26 +662,27 @@ body {
     align-self: center;
 }
 .markup-step-btn:hover {
-    background-color: #e9ecef;
-    border-color: #adb5bd;
+    background: var(--border);
+    border-color: var(--border-strong);
 }
 /* Stile per il nuovo pulsante "action" */
 .btn.action { 
-    background-color: #6f42c1; 
+    background: linear-gradient(135deg, hsl(265,60%,52%) 0%, hsl(265,60%,42%) 100%);
     color: #fff;
+    border-color: transparent;
 }
 .btn.action:hover {
-    background-color: #5a379b;
+    filter: brightness(1.08);
 }
 /* Stili per il maniglione di trascinamento */
 .drag-handle {
     cursor: grab;
-    color: #94a3b8;      /* Un grigio neutro */
-    font-size: 20px;     /* Dimensione più adatta per un'icona */
-    padding: 0 12px;     /* Un po' di spazio ai lati */
-    align-self: stretch; /* Fa sì che l'area cliccabile sia alta come tutta la riga */
-    display: flex;       /* Per centrare l'icona... */
-    align-items: center; /* ...verticalmente */
+    color: var(--border-strong);
+    font-size: 20px;
+    padding: 0 12px;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
 }
 .drag-handle:active {
     cursor: grabbing;
@@ -697,7 +696,7 @@ body {
 /* Stile per la riga mentre viene trascinata */
 .sortable-ghost {
     opacity: 0.4;
-    background-color: #e0f2fe;
+    background: var(--accent-light);
 }
 #tabella-righe {
     overflow: visible;
@@ -710,8 +709,9 @@ body {
 .multi-switch {
     position: relative;
     display: flex;
-    background-color: #e9ecef;
-    border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     padding: 3px;
     height: 36px;
     width: 100%;           
@@ -719,37 +719,33 @@ body {
     cursor: pointer;
     user-select: none;
     box-sizing: border-box;
-    margin: 0; /* Forza margine zero */
+    margin: 0;
 }
-
-/* Cursore mobile (Thumb) */
 .switch-thumb {
     position: absolute;
     top: 3px; bottom: 3px; left: 3px;
     width: calc((100% - 6px) / 3);
-    background-color: #ffffff;
-    border-radius: 6px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+    background: var(--surface);
+    border-radius: calc(var(--radius-sm) - 2px);
+    box-shadow: var(--shadow-sm);
     transition: transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1);
     z-index: 1;
 }
-
-/* Etichette (Labels) */
 .switch-label {
     flex: 1;
     width: 33.333%;
     text-align: center;
     font-size: 13px;
     font-weight: 600;
-    color: #6c757d;
-    line-height: 30px; /* Centra verticalmente nel pulsante */
+    color: var(--text-muted);
+    line-height: 30px;
     position: relative;
     z-index: 2;
-    transition: color 0.2s;
+    transition: color var(--transition);
     white-space: nowrap;
 }
-.switch-label.active { color: #000; }
-.multi-switch.disabled { opacity: 0.6; pointer-events: none; background-color: #f1f5f9; }
+.switch-label.active { color: var(--text); }
+.multi-switch.disabled { opacity: 0.6; pointer-events: none; background: var(--surface-2); }
 
 /* --- STILE TOGGLE ESENTE IVA --- */
 .esente-iva-wrapper {
@@ -784,7 +780,7 @@ body {
   position: absolute;
   cursor: pointer;
   top: 0; left: 0; right: 0; bottom: 0;
-  background-color: #cbd5e1;
+  background: var(--border);
   transition: .4s;
   border-radius: 24px;
 }
@@ -795,13 +791,13 @@ body {
   width: 16px;
   left: 3px;
   bottom: 3px;
-  background-color: white;
+  background: white;
   transition: .4s;
   border-radius: 50%;
   box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
-input:checked + .slider { background-color: #6f42c1; }
+input:checked + .slider { background: linear-gradient(135deg, hsl(265,60%,52%) 0%, hsl(265,60%,42%) 100%); }
 input:checked + .slider:before { transform: translateX(18px); }
 
 .switch-label {
@@ -816,7 +812,7 @@ input:checked + .slider:before { transform: translateX(18px); }
 }
 /* Stile per l'opzione attiva (testo più scuro) */
 .switch-label.active {
-    color: #000;
+    color: var(--text);
 }
 /* --- Stili per Griglia Calcoli Collassabile --- */
             .calculation-grid {
@@ -830,10 +826,10 @@ input:checked + .slider:before { transform: translateX(18px); }
 
             /* Stile per il nuovo pulsante di toggle */
             .toggle-calc-grid-btn {
-                background: #f1f5f9;
-                border: 1px solid #e2e8f0;
-                color: #475569;
-                border-radius: 6px;
+                background: var(--surface-2);
+                border: 1px solid var(--border);
+                color: var(--text-muted);
+                border-radius: var(--radius-sm);
                 padding: 6px 10px;
                 font-size: 12px;
                 font-weight: 600;
@@ -841,11 +837,12 @@ input:checked + .slider:before { transform: translateX(18px); }
                 display: inline-flex;
                 align-items: center;
                 gap: 6px;
-                margin-left: 8px; /* Spazio dall'icona della matita */
-                white-space: nowrap; /* Non mandare a capo "Dettagli" */
+                margin-left: 8px;
+                white-space: nowrap;
             }
             .toggle-calc-grid-btn:hover {
-                background: #e9ecef;
+                background: var(--border);
+                color: var(--text);
             }
             .toggle-calc-grid-btn .fas {
                 transition: transform 0.2s ease-in-out;
@@ -949,6 +946,10 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(saveData => {
             if (!saveData.success) throw new Error('Salvataggio fallito');
 
+            // "Inviato": lo stato cambia lato server solo quando il PDF è stato creato
+            // (generate-pdf-task con invia=1), così il preventivo non resta mai Inviato senza PDF.
+            if (targetActionUrlName === 'invia_preventivo') return { ok: true };
+
             stateChangeButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cambio stato...';
             const targetUrl = "{{ url_for('dashboard') }}" + `preventivo/${quoteId}/${targetActionUrlName.replace('_preventivo', '')}`;
 
@@ -959,7 +960,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) throw new Error('Cambio di stato fallito');
 
             if (targetActionUrlName === 'invia_preventivo') {
-                // STATO CAMBIATO. ORA CHIEDIAMO QUALE PDF GENERARE.
+                // DATI SALVATI. ORA CHIEDIAMO QUALE PDF GENERARE (lo stato diventa Inviato solo a PDF creato).
                 stateChangeButton.innerHTML = '<i class="fas fa-check"></i> Scegli PDF...';
 
                 // 1. Riferimenti alle modali
@@ -975,7 +976,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const newTab = window.open("{{ url_for('loading_static') }}", "_blank");
 
                     // Fetch con il parametro ?template=...
-                    fetch(`/generate-pdf-task/${quoteId}?template=${templateType}`)
+                    fetch(`/generate-pdf-task/${quoteId}?template=${templateType}&invia=1`)
                         .then(res => res.json())
                         .then(pdfData => {
                             if (newTab) {
@@ -991,7 +992,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         })
                         .catch(err => {
                             // Gestisce l'errore della generazione PDF
-                            alert("Si è verificato un errore durante la generazione del PDF: " + err.message);
+                            alert("Il PDF non è stato generato, quindi il preventivo NON è stato segnato come Inviato.
+
+" + err.message);
                             if(newTab) newTab.close();
                             stateChangeButton.innerHTML = originalButtonHtml; // Resetta il bottone originale
                             stateChangeButton.disabled = false;

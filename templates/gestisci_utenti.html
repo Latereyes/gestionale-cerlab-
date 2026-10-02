@@ -23,20 +23,30 @@
             <table class="styled-table">
                 <thead>
                     <tr>
-                        <th>Nome Utente</th>
-                        <th>Nome Completo</th>
-                        <th>Ruolo</th>
+                        <th>Utente</th>
                         <th>Sigla</th>
+                        <th>Ruolo</th>
                         <th class="actions-column">Azioni</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for user in users %}
                     <tr>
-                        <td><strong>{{ user.username }}</strong></td>
-                        <td>{{ user.full_name }}</td>
-                        <td>{{ user.role }}</td>
+                        <td>
+                            <div class="user-row">
+                                <div class="user-avatar" data-initials="{{ (user.full_name or user.username)[:1] | upper }}{{ ((user.full_name or '').split(' ')[1:2] or [''])[0][:1] | upper }}">
+                                    {{ (user.full_name or user.username)[:1] | upper }}{{ ((user.full_name or '').split(' ')[1:2] or [''])[0][:1] | upper }}
+                                </div>
+                                <div>
+                                    <strong>{{ user.username }}</strong><br>
+                                    <small class="muted">{{ user.full_name }}</small>
+                                </div>
+                            </div>
+                        </td>
                         <td>{{ user.sigla }}</td>
+                        <td>
+                            <span class="role-badge role-{{ user.role }}">{{ user.role }}</span>
+                        </td>
                         <td class="row-actions">
                         {% if user.username != session.user_id %}
                             {% if user.role != 'amministratore' %}
@@ -46,7 +56,7 @@
                             {% endif %}
                         {% if session.user_role == 'amministratore' and user.role != 'amministratore' %}
                         <a href="{{ url_for('elimina_utente', username=user.username) }}" class="btn icon-btn danger" title="Elimina Utente" onclick="return confirm('Sei sicuro di voler eliminare questo utente? L\'azione è irreversibile.');"><i class="fas fa-trash-alt"></i></a>
-                        <a href="{{ url_for('modifica_utente', username=user.username) }}" class="btn icon-btn" title="Modifica Utente"><i class="fas fa-pencil-alt"></i></a>                
+                        <a href="{{ url_for('modifica_utente', username=user.username) }}" class="btn icon-btn" title="Modifica Utente"><i class="fas fa-pencil-alt"></i></a>
                         {% endif %}
     {% else %}
         <span class="muted">(Utente corrente)</span>
@@ -61,28 +71,95 @@
 </div>
 
 <style>
-/* Stili presi da altre pagine per coerenza */
-.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
-.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
-.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
-.card-body { padding: 24px; padding-top: 16px; }
+/* ─── Layout ─── */
+.editor-container { max-width: 860px; margin: 24px auto; padding: 0 20px; }
 .table-wrap { overflow-x: auto; }
+
+/* ─── Tabella ─── */
 .styled-table { width: 100%; border-collapse: collapse; }
-.styled-table th, .styled-table td { padding: 16px 24px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); white-space: nowrap;}
-.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table th,
+.styled-table td { padding: 14px 20px; text-align: left; border-bottom: 1px solid var(--border); }
+.styled-table thead th {
+    background: var(--surface-2);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+}
+.styled-table tbody tr { transition: background var(--transition); }
+.styled-table tbody tr:hover { background: var(--surface-2); }
 .styled-table tbody tr:last-child td { border-bottom: none; }
 .actions-column { width: 1%; text-align: right; }
-.row-actions { text-align: right; display: flex; gap: 8px; justify-content: flex-end; }
+.row-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
 
-/* Stile per pulsante icona */
-.btn.icon-btn {
-    padding: 8px; line-height: 1; border-radius: 8px; background-color: var(--bg-light, #f8f9fa);
-    color: var(--muted, #6c757d); border: 1px solid var(--border-color, #e2e8f0);
+/* ─── Avatar utente ─── */
+.user-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
-.btn.icon-btn:hover { background-color: var(--bg-hover, #f1f5f9); color: var(--text-primary); }
-.btn.icon-btn.danger { background-color: #fde8e8; color: #dc3545; }
-.btn.icon-btn.danger:hover { background-color: #dc3545; color: #fff; }
+.user-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    letter-spacing: 0.5px;
+}
+
+/* ─── Badge ruolo semantici ─── */
+.role-badge {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 1px solid transparent;
+}
+.role-amministratore {
+    background: hsl(234,89%,93%);
+    color: hsl(234,89%,35%);
+    border-color: hsl(234,89%,80%);
+}
+.role-ceo {
+    background: hsl(280,80%,93%);
+    color: hsl(280,80%,35%);
+    border-color: hsl(280,80%,80%);
+}
+.role-venditore {
+    background: var(--success-bg);
+    color: var(--success-text);
+    border-color: var(--success-border);
+}
+.role-segreteria {
+    background: var(--info-bg);
+    color: var(--info-text);
+    border-color: var(--info-border);
+}
+
+/* ─── Bottoni azione ─── */
+.btn.icon-btn {
+    padding: 7px;
+    line-height: 1;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+.btn.icon-btn:hover { background: var(--border); color: var(--text); }
+.btn.icon-btn.danger { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); }
+.btn.icon-btn.danger:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+
+.muted { color: var(--text-muted); }
 </style>
 
 {% endblock %}

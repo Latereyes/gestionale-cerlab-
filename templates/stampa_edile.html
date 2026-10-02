@@ -114,6 +114,7 @@
         .footer-notes { margin-top: 40px; font-size: 9.5pt; color: var(--text-secondary); }
         .signatures { margin-top: 50px; display: flex; justify-content: space-between; }
     </style>
+    {% include "_stampa_print_fixes.html" %}
 </head>
 <body>
     <header>
@@ -122,8 +123,9 @@
             <div class="company-details">
                 <strong>CER LAB srl</strong><br>
                 Via Guarneville, 1 – 04011 Aprilia (LT)<br>
-                C.F./P.IVA 03122400595<br>
-                info@cerlab.it
+                C.F./P.IVA 03122400595 – KRRH6B9<br>
+                info@cerlab.it<br>
+                Tel. 06 69405711 – Cell. +39 349 169 5839
             </div>
         </div>
         <div class="quote-info">
@@ -136,7 +138,12 @@
         <div style="font-size: 10pt; color: var(--text-secondary); margin-bottom: 5px;">Spett.le</div>
         <strong>{{ p.cliente }}</strong><br>
         {{ p.indirizzo }}<br>
-        {{ p.cap }} {{ p.comune }} ({{ p.provincia }})
+        {{ p.cap }} {{ p.comune }} ({{ p.provincia }})<br>
+        {% if p.p_iva %}P.IVA/C.F.: {{ p.p_iva }}<br>{% endif %}
+        {% if p.telefono %}Tel.: {{ p.telefono }}<br>{% endif %}
+        {% if p.email %}E-mail: {{ p.email }}<br>{% endif %}
+        {% if p.referente %}<em>Referente: {{ p.referente }}</em><br>{% endif %}
+        {% if p.id_cliente %}<small style="color:var(--text-secondary);">N. Cliente: {{ p.id_cliente }}</small>{% endif %}
     </section>
 
     <div style="margin-bottom: 20px;">

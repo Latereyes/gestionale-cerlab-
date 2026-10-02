@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>Bolla {{ bolla.id }}</title>
+    <title>Bolla {{ bolla.id }} - Preventivo {{ p.numero }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -133,6 +133,7 @@
             }
         }
     </style>
+    {% include "_stampa_print_fixes.html" %}
 </head>
 <body>
     <div class="container">
@@ -143,7 +144,8 @@
                     <strong>CER LAB srl</strong><br>
                     Via Guarneville, 1 – 04011 Aprilia (LT)<br>
                     C.F./P.IVA 03122400595 – KRRH6B9<br>
-                    www.cerlab.it – info@cerlab.it
+                    www.cerlab.it – info@cerlab.it<br>
+                    Tel. 06 69405711 – Cell. +39 349 169 5839
                 </div>
             </div>
             <div class="document-title">
@@ -159,6 +161,7 @@
         <div class="client-info">
             <strong>Spett.le</strong><br>
             <strong>{{ p.cliente }}</strong><br>
+            {% if p.id_cliente %}<small style="color:#64748b;">N. Cliente: {{ p.id_cliente }}</small><br>{% endif %}
             {% if indirizzo_consegna %}
                 {{ indirizzo_consegna.indirizzo }}, {{ indirizzo_consegna.cap }} {{ indirizzo_consegna.comune }} ({{ indirizzo_consegna.provincia }})
                 <br><small>Presso: {{ indirizzo_consegna.descrizione }}</small>
@@ -166,6 +169,7 @@
                 {% if p.rag_sociale %}{{ p.rag_sociale }}<br>{% endif %}
                 {{ p.indirizzo }}, {{ p.cap }} {{ p.comune }} ({{ p.provincia }})
             {% endif %}
+            {% if p.telefono %}<br>Tel.: {{ p.telefono }}{% endif %}
         </div>
 
         <div class="section">
@@ -190,6 +194,8 @@
                         <td>{{ r.unt }}</td>
                         <td class="right nowrap">{{ r.qt }}</td>
                     </tr>
+                    {% else %}
+                    <tr class="empty-items"><td colspan="3">Nessun articolo in questa bolla</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

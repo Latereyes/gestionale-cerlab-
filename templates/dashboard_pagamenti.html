@@ -21,7 +21,45 @@
     </div>
 
     {% set grouped_preventivi = preventivi | groupby('cliente') %}
-    
+
+    {% if preventivi %}
+    {% set ritardi = preventivi | selectattr('allerta_giorni', 'equalto', 'rosso') | list | length %}
+    <div class="kpi-strip">
+        <div class="kpi-tile">
+            <div class="kpi-icon danger"><i class="fas fa-euro-sign"></i></div>
+            <div>
+                <div class="kpi-label">Totale da saldare</div>
+                <div class="kpi-value text-danger">{{ money_ui(preventivi | sum(attribute='totale_da_saldare')) }}</div>
+                <div class="kpi-sub">su {{ preventivi | length }} preventivi aperti</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon warning"><i class="fas fa-calendar-check"></i></div>
+            <div>
+                <div class="kpi-label">Incassi programmati</div>
+                <div class="kpi-value">{{ money_ui(preventivi | sum(attribute='totale_da_incassare')) }}</div>
+                <div class="kpi-sub">pagamenti futuri non ancora incassati</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon success"><i class="fas fa-hand-holding-usd"></i></div>
+            <div>
+                <div class="kpi-label">Già incassato</div>
+                <div class="kpi-value">{{ money_ui(preventivi | sum(attribute='totale_pagato')) }}</div>
+                <div class="kpi-sub">su {{ money_ui(preventivi | sum(attribute='totale_num')) }} di preventivi</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon {{ 'danger' if ritardi else 'info' }}"><i class="fas fa-bell"></i></div>
+            <div>
+                <div class="kpi-label">Solleciti</div>
+                <div class="kpi-value">{{ ritardi }}</div>
+                <div class="kpi-sub">oltre 22 giorni dall'ultimo pagamento</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% if not grouped_preventivi %}
     <div class="card">
         <div class="empty-state">
@@ -35,47 +73,76 @@
     {% for cliente, items in grouped_preventivi %}
     <div class="card">
         <div class="card-header">
-            <h3><strong>{{ cliente }}</strong></h3>
+            <h3><i class="fas fa-user"></i><strong>{{ cliente }}</strong></h3>
+            <div class="client-meta">
+                <span class="chip neutral">{{ items | length }} {{ 'preventivo' if items | length == 1 else 'preventivi' }}</span>
+                <span class="chip danger">Da saldare <strong>{{ money_ui(items | sum(attribute='totale_da_saldare')) }}</strong></span>
+            </div>
         </div>
         <div class="table-wrap">
             <table class="styled-table">
+                <colgroup><col style="width: 17%"><col style="width: 10%"><col style="width: 17%"><col style="width: 11%"><col style="width: 11%"><col style="width: 13%"><col style="width: 11%"><col style="width: 10%"></colgroup>
                 <thead>
                     <tr>
-                        <th style="width: 20%;">Preventivo</th>
-                        <th class="right" style="width: 12%;">Totale</th>
-                        <th class="right" style="width: 12%;">Saldato</th>
-                        <th class="right" style="width: 12%;">Da Incassare</th> 
-                        <th class="right" style="width: 12%;">Da Saldare</th>
-                        <th style="width: 12%;">Ult. Acconto</th>
-                        <th style="width: 12%;">Stato</th>
-                        <th class="actions-column" style="width: 8%;"></th>
+                        <th>Preventivo</th>
+                        <th class="right">Totale</th>
+                        <th>Incassato</th>
+                        <th class="right">Programmato</th>
+                        <th class="right">Da Saldare</th>
+                        <th>Ultimo Pagamento</th>
+                        <th>Stato</th>
+                        <th class="actions-column"></th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for p in items %}
                     <tr class="main-row payment-row {{ 'alert-' + p.allerta_giorni if p.allerta_giorni }}" data-tipo="{{ p.tipo_preventivo | default('commerciale') }}">
-                        <td><strong>{{ p.numero }}</strong></td>
-                        <td class="right nowrap total-main">{{ money_ui(p.totale) }}</td>
-                        <td class="right nowrap total-paid">{{ money_ui(p.totale_pagato) }}</td>
-                        <td class="right nowrap total-future">{{ money_ui(p.totale_da_incassare) }}</td>
-                        <td class="right nowrap total-due"><strong>{{ money_ui(p.totale_da_saldare) }}</strong></td>
+                        <td>
+                            <div class="cell-main">{{ p.numero }}{% if p.tipo_preventivo == 'edile' %}<span class="type-badge edile">Edile</span>{% endif %}</div>
+                            <div class="cell-sub"><i class="far fa-calendar"></i>{{ (p.data_conferma or p.data) | data_it }}{% if p.venditore %} · {{ p.venditore }}{% endif %}</div>
+                        </td>
+                        <td class="right cell-money total-main">{{ money_ui(p.totale_num) }}</td>
+                        <td class="progress-cell">
+                            <div class="progress-label">
+                                <span class="total-paid"><strong>{{ money_ui(p.totale_pagato) }}</strong></span>
+                                <span>{{ p.pct_pagato }}%</span>
+                            </div>
+                            <div class="progress-bar" title="Incassato {{ p.pct_pagato }}%{% if p.pct_programmato %} · Programmato {{ p.pct_programmato }}%{% endif %}">
+                                <span class="seg-success" style="width: {{ p.pct_pagato }}%"></span>
+                                <span class="seg-warning" style="width: {{ p.pct_programmato }}%"></span>
+                            </div>
+                        </td>
+                        <td class="right nowrap">
+                            {% if p.totale_da_incassare %}
+                                <div class="cell-money total-future">{{ money_ui(p.totale_da_incassare) }}</div>
+                                {% if p.prossimo_incasso %}<div class="cell-sub">previsto {{ p.prossimo_incasso | data_it }}</div>{% endif %}
+                            {% else %}
+                                <span class="muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="right cell-money total-due">{{ money_ui(p.totale_da_saldare) }}</td>
                         <td class="nowrap">
                             {% if p.ultimo_pagamento_data %}
-                              {{ p.ultimo_pagamento_data }}
+                                <div>{{ p.ultimo_pagamento_data | data_it }}</div>
+                                <div class="cell-sub">
+                                    {% if p.giorni_da_ultimo is defined and p.giorni_da_ultimo is not none and p.giorni_da_ultimo >= 0 %}{{ p.giorni_da_ultimo }} giorni fa · {% endif %}{{ p.num_pagamenti }} {{ 'pagamento' if p.num_pagamenti == 1 else 'pagamenti' }}
+                                </div>
                             {% else %}
-                              <span class="muted">-</span>
+                                <span class="muted">Nessun pagamento</span>
                             {% endif %}
                         </td>
                         <td class="nowrap">
-                            {% if p.stato_pagamento == 'Saldato' %}
-                                <span class="status-tag success">Saldato</span>
+                            {% if p.allerta_giorni == 'rosso' %}
+                                <span class="status-tag danger"><i class="fas fa-bell"></i> Sollecitare</span>
+                            {% elif p.totale_pagato == 0 %}
+                                <span class="status-tag danger">Nessun acconto</span>
                             {% else %}
-                                <span class="status-tag danger">Da Saldare</span>
+                                <span class="status-tag warning">Acconto versato</span>
                             {% endif %}
                         </td>
                         <td class="row-actions">
-                            <a href="{{ url_for('gestione_pagamenti', quote_id=p.numero) }}" class="btn icon-btn primary" title="Gestisci Pagamenti">
-                                <i class="fas fa-arrow-right"></i>
+                            <a href="{{ url_for('gestione_pagamenti', quote_id=p.numero) }}" class="btn primary" title="Gestisci Pagamenti">
+                                <i class="fas fa-cash-register"></i> Gestisci
                             </a>
                         </td>
                     </tr>
@@ -87,87 +154,23 @@
     {% endfor %}
 </div>
 
+{% include '_workflow_dashboard_styles.html' %}
 <style>
-/* Stili presi da altre pagine per coerenza */
-.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
-.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
-.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
-.table-wrap { overflow-x: auto; }
-.styled-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.styled-table th, .styled-table td { 
-    padding: 14px 18px;
-    text-align: left;
-    border-bottom: 1px solid var(--border-color, #e2e8f0);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.col-num { width: 15%; }
-.col-date { width: 12%; }
-.col-client { width: 25%; } /* Usata se non raggruppata, altrimenti distribuire */
-.col-status { width: 20%; }
-.col-money { width: 12%; text-align: right; }
-.col-actions { width: 10%; text-align: right; }
-.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
-.styled-table tbody tr:last-child td { border-bottom: none; }
-.actions-column { text-align: right; }
-.row-actions { text-align: right; }
-.empty-state { text-align: center; padding: 40px; color: var(--muted); }
-.empty-state i { font-size: 32px; color: #198754; margin-bottom: 12px; }
-.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; color: var(--text-primary); }
-.empty-state p { margin: 0; font-size: 14px; }
+/* Badge di stato pagamento */
+.status-tag { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; font-size: 11px; font-weight: 600; border-radius: 20px; white-space: nowrap; }
+.status-tag.success { background: var(--success-bg); color: var(--success-text); }
+.status-tag.warning { background: var(--warning-bg); color: var(--warning-text); }
+.status-tag.danger  { background: var(--danger-bg);  color: var(--danger-text); }
 
-/* Stili Badge di Stato */
-.status-tag { display: inline-block; padding: 4px 12px; font-size: 11px; font-weight: 600; border-radius: 20px; text-align: center; }
-.status-tag.success { background-color: #dcfce7; color: #16a34a; } /* Verde chiaro */
-.status-tag.danger { background-color: #fee2e2; color: #dc2626; } /* Rosso chiaro */
+/* Allerte sui giorni dall'ultimo pagamento */
+.payment-row.alert-giallo td:first-child  { box-shadow: inset 4px 0 0 #ffc107; }
+.payment-row.alert-arancio td:first-child { box-shadow: inset 4px 0 0 #fd7e14; }
+.payment-row.alert-rosso td:first-child   { box-shadow: inset 4px 0 0 #dc3545; }
 
-/* Stili per le allerte sui giorni */
-.payment-row.alert-giallo { border-left: 4px solid #ffc107; }
-.payment-row.alert-arancio { border-left: 4px solid #fd7e14; }
-.payment-row.alert-rosso { border-left: 4px solid #dc3545; }
-.payment-row.alert-giallo td:first-child,
-.payment-row.alert-arancio td:first-child,
-.payment-row.alert-rosso td:first-child { 
-    border-left: none; /* Evita doppi bordi */
-}
-
-/* Stile per pulsante icona */
-.btn.icon-btn {
-    padding: 8px;
-    line-height: 1;
-    border-radius: 8px;
-    background-color: var(--bg-light, #f8f9fa);
-    color: var(--muted, #6c757d);
-    border: 1px solid var(--border-color, #e2e8f0);
-}
-.btn.icon-btn:hover {
-    background-color: var(--bg-hover, #f1f5f9);
-    color: var(--text-primary);
-}
-.btn.icon-btn.primary {
-    background-color: var(--primary-color-light, #e7f0fe);
-    color: var(--primary-color, #0d6efd);
-    border-color: transparent;
-}
-.btn.icon-btn.primary:hover {
-    background-color: var(--primary-color, #0d6efd);
-    color: #fff;
-}
-.total-main { color: #0d6efd; }
-.total-paid { color: #198754; }
-.total-future { color: #fd7e14; font-weight: 600; }
-.total-due { color: #dc3545; }
-
-/* --- STILI PER FILTRO STATO --- */
-.filter-bar { margin-bottom: 24px; display: flex; justify-content: flex-start; }
-.multi-switch { position: relative; display: flex; background-color: #e9ecef; border-radius: 8px; padding: 3px; height: 36px; cursor: pointer; user-select: none; }
-.switch-thumb { position: absolute; top: 3px; bottom: 3px; width: 33.33%; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.25s ease-out; z-index: 1; }
-.switch-label { flex: 1; text-align: center; font-size: 12px; font-weight: 600; color: #495057; line-height: 30px; position: relative; z-index: 2; }
-.switch-label.active { color: #000; }
-@media (max-width: 768px) { .multi-switch { width: 100% !important; } }
-/* --- FINE STILI FILTRO --- */
+.total-main   { color: var(--accent); }
+.total-paid   { color: var(--success-text); }
+.total-future { color: hsl(25, 96%, 40%); }
+.total-due    { color: var(--danger-text); }
 </style>
 <script>
 document.addEventListener('DOMContentLoaded', () => {

@@ -5,189 +5,151 @@
 {% endblock %}
 
 {% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 
-{% include '_form_ricerca.html' with context %}
+{% set chiusi = all_quotes | selectattr('stato', 'equalto', 'Chiuso') | list %}
+{% set annullati = all_quotes | selectattr('stato', 'equalto', 'Annullato') | list %}
 
-<div class="filter-switch-container">
-  <input type="checkbox" id="toggle-annullati-switch" checked>
-  <label for="toggle-annullati-switch">Nascondi preventivi annullati</label>
-</div>
+<div class="editor-container">
 
-<div class="card archive-list-card">
-  <div class="card-header">
-    <h3>Cronologia Completa Preventivi</h3>
+  <div class="kpi-strip">
+    <div class="kpi-tile">
+      <div class="kpi-icon"><i class="fas fa-archive"></i></div>
+      <div>
+        <div class="kpi-label">Preventivi in archivio</div>
+        <div class="kpi-value">{{ all_quotes | length }}</div>
+        <div class="kpi-sub">{{ all_quotes | map(attribute='cliente') | unique | list | length }} clienti</div>
+      </div>
+    </div>
+    <div class="kpi-tile">
+      <div class="kpi-icon success"><i class="fas fa-flag-checkered"></i></div>
+      <div>
+        <div class="kpi-label">Chiusi</div>
+        <div class="kpi-value">{{ chiusi | length }}</div>
+        <div class="kpi-sub">lavori conclusi</div>
+      </div>
+    </div>
+    <div class="kpi-tile">
+      <div class="kpi-icon info"><i class="fas fa-euro-sign"></i></div>
+      <div>
+        <div class="kpi-label">Valore chiusi</div>
+        <div class="kpi-value">{{ money_ui(chiusi | sum(attribute='totale_num')) }}</div>
+        <div class="kpi-sub">totale documenti</div>
+      </div>
+    </div>
+    <div class="kpi-tile">
+      <div class="kpi-icon danger"><i class="fas fa-ban"></i></div>
+      <div>
+        <div class="kpi-label">Annullati</div>
+        <div class="kpi-value">{{ annullati | length }}</div>
+        <div class="kpi-sub">nascosti per impostazione</div>
+      </div>
+    </div>
   </div>
-  <div class="card-body">
+
+  <div class="toolbar">
+    <div class="toolbar-search">
+      <i class="fas fa-search"></i>
+      <input type="text" id="live-search-input" placeholder="Cerca per numero, cliente, venditore..." autocomplete="off">
+    </div>
+    <label class="toggle" for="toggle-annullati-switch">
+      <input type="checkbox" id="toggle-annullati-switch" checked>
+      Nascondi annullati
+    </label>
+    <span class="result-count"><strong id="visible-count">{{ all_quotes | length }}</strong> risultati</span>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3><i class="fas fa-history"></i>Cronologia completa preventivi</h3>
+    </div>
     <div class="table-wrap">
-      <table>
+      <table class="styled-table">
+        <colgroup><col style="width: 18%"><col style="width: 22%"><col style="width: 16%"><col style="width: 12%"><col style="width: 13%"><col style="width: 10%"><col style="width: 9%"></colgroup>
         <thead>
           <tr>
             <th>Preventivo</th>
             <th>Cliente</th>
             <th>Venditore</th>
-            <th class="right">Totale</th> 
-            <th>Data Chiusura/Annull.</th> 
+            <th class="right">Totale</th>
+            <th>Chiusura / Annull.</th>
             <th>Stato</th>
-            <th>Azioni</th>
+            <th class="actions-column"></th>
           </tr>
         </thead>
-<tbody id="archive-table-body">
+        <tbody id="archive-table-body">
           {% for p in all_quotes %}
-          <tr>
+          <tr class="main-row" data-stato="{{ p.stato }}">
             <td>
-              <strong>{{ p.numero }}</strong><br>
-              <small class="muted">{{ p.data }}</small>
+              <div class="cell-main">{{ p.numero }}{% if p.tipo_preventivo == 'edile' %}<span class="type-badge edile">Edile</span>{% endif %}</div>
+              <div class="cell-sub"><i class="far fa-calendar"></i>{{ p.data | data_it }}</div>
             </td>
-            <td>{{ p.cliente }}</td>
-            <td>{{ p.venditore }}</td>
-            
-            <td class="right"><strong>{{ money_ui(p.totale) }}</strong></td>
-
             <td>
-                {# Mostra la data di chiusura o quella di annullamento #}
-                {{ p.data_chiusura or p.data_annullamento or 'N/D' }}
+              <div class="cell-strong">{{ p.cliente }}</div>
+              {% if p.comune %}<div class="cell-sub"><i class="fas fa-map-marker-alt"></i>{{ p.comune }}{% if p.provincia %} ({{ p.provincia }}){% endif %}</div>{% endif %}
             </td>
-
+            <td>{{ p.venditore or '-' }}</td>
+            <td class="right cell-money">{{ money_ui(p.totale_num) }}</td>
+            <td class="nowrap">
+              {% set d = p.data_chiusura or p.data_annullamento %}
+              {% if d %}{{ d | data_it }}{% else %}<span class="muted">-</span>{% endif %}
+            </td>
             <td>
               <span class="status-badge status-{{ p.stato | lower | replace(' ', '-') }}">{{ p.stato }}</span>
             </td>
             <td class="row-actions">
-              <a href="{{ url_for('editor_preventivo', quote_id=p.numero) }}" class="btn icon-btn primary" title="Modifica Preventivo"><i class="fas fa-arrow-right"></i></a>
-                  {% if session.user_role in ['amministratore', 'ceo'] %}
-                  <a href="{{ url_for('analisi_preventivo', quote_id=p.numero) }}" class="btn icon-btn" title="Analisi Dettagliata"><i class="fas fa-chart-pie"></i></a>
-                  {% endif %}
-            </td>
-          </tr>
-          {% else %}
-          <tr>
-            <td colspan="7">
-              <div class="empty-state">
-                <h4>Nessun preventivo trovato nell'archivio.</h4>
-              </div>
+              <a href="{{ url_for('editor_preventivo', quote_id=p.numero) }}" class="btn icon-btn primary" title="Apri Preventivo"><i class="fas fa-arrow-right"></i></a>
+              {% if session.user_role in ['amministratore', 'ceo'] %}
+              <a href="{{ url_for('analisi_preventivo', quote_id=p.numero) }}" class="btn icon-btn" title="Analisi Dettagliata"><i class="fas fa-chart-pie"></i></a>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
+      <div class="empty-state" id="archive-empty" {% if all_quotes %}style="display: none;"{% endif %}>
+        <i class="fas fa-search"></i>
+        <h4>Nessun preventivo trovato</h4>
+        <p>Prova a cambiare la ricerca o a mostrare anche gli annullati.</p>
+      </div>
     </div>
   </div>
 </div>
 
+{% include '_workflow_dashboard_styles.html' %}
 <style>
-  .right {
-    text-align: right;
-    white-space: nowrap;
-}
-  /* Aggiungo un po' di spazio tra la card di ricerca e la nuova tabella */
-  .archive-list-card {
-    margin-top: 32px;
-  }
-  
-  /* Stili per i badge di stato (copiati da dashboard.html per coerenza) */
-  .status-badge { 
-    padding: 4px 12px; border-radius: 20px; font-size: 12px; 
-    font-weight: 600; text-transform: capitalize; display: inline-block; 
-    min-width: 80px; text-align: center; 
-  }
-  .status-bozza { background-color: #e2e8f0; color: #475569; }
-  .status-inviato { background-color: #e0f2fe; color: #0284c7; }
-  .status-confermato, .status-chiuso { background-color: #dcfce7; color: #16a34a; }
-  .status-in-lavorazione { background-color: #fef9c3; color: #ca8a04; }
-  .status-annullato { background-color: #fee2e2; color: #dc2626; }
-
-  /* Rimuovo il centraggio verticale dalla card di ricerca quando è inclusa qui */
-  .search-container {
-      min-height: auto;
-      padding-bottom: 0;
-  }
-  /* Stili per il contenitore dello switch */
-.filter-switch-container {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background-color: #fff;
-  padding: 16px 24px;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-  margin-bottom: 24px;
-  max-width: 350px; /* Limita la larghezza per un aspetto migliore */
-  margin-left: auto;
-  margin-right: auto;
-}
-
-/* Stili per trasformare la checkbox in uno switch */
-#toggle-annullati-switch {
-  appearance: none;
-  width: 48px;
-  height: 26px;
-  background-color: #cbd5e1;
-  border-radius: 15px;
-  position: relative;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-#toggle-annullati-switch::before {
-  content: '';
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  background-color: white;
-  border-radius: 50%;
-  top: 3px;
-  left: 4px;
-  transition: transform 0.2s;
-}
-#toggle-annullati-switch:checked {
-  background-color: #535353; 
-}
-#toggle-annullati-switch:checked::before {
-  transform: translateX(20px);
-}
+  .cell-strong { font-weight: 600; color: var(--text); }
+  .btn.icon-btn.primary { background: var(--accent-light); color: var(--accent); border-color: transparent; }
+  .btn.icon-btn.primary:hover { background: var(--accent); color: #fff; }
+  .row-actions .btn + .btn { margin-left: 4px; }
+  #archive-empty i { color: var(--text-subtle); }
 </style>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // Riferimenti agli elementi
     const searchInput = document.getElementById('live-search-input');
     const toggleSwitch = document.getElementById('toggle-annullati-switch');
-    const tableBody = document.getElementById('archive-table-body');
-    const rows = tableBody.querySelectorAll('tr');
+    const rows = document.querySelectorAll('#archive-table-body tr.main-row');
+    const countEl = document.getElementById('visible-count');
+    const emptyEl = document.getElementById('archive-empty');
 
-    // Impedisce al form di ricaricare la pagina
-    const searchForm = searchInput.closest('form');
-    if (searchForm) {
-        searchForm.addEventListener('submit', (e) => e.preventDefault());
-    }
-
-    // Funzione unica che applica entrambi i filtri
     function applyFilters() {
         const searchTerm = searchInput.value.toLowerCase().trim();
         const hideAnnullati = toggleSwitch.checked;
+        let visible = 0;
 
         rows.forEach(row => {
-            // Se la riga è quella dello "stato vuoto", non la tocchiamo
-            if (row.querySelector('.empty-state')) return;
-
-            const rowText = row.textContent.toLowerCase();
-            const isAnnullato = row.querySelector('.status-annullato') !== null;
-
-            // Condizioni di visibilità
-            const matchesSearch = rowText.includes(searchTerm) || searchTerm === "";
-            const isVisibleBySwitch = !hideAnnullati || (hideAnnullati && !isAnnullato);
-
-            // La riga è visibile solo se soddisfa ENTRAMBE le condizioni
-            if (matchesSearch && isVisibleBySwitch) {
-                row.style.display = ''; // Mostra
-            } else {
-                row.style.display = 'none'; // Nascondi
-            }
+            const matchesSearch = searchTerm === "" || row.textContent.toLowerCase().includes(searchTerm);
+            const isAnnullato = row.dataset.stato === 'Annullato';
+            const show = matchesSearch && !(hideAnnullati && isAnnullato);
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
         });
+        countEl.textContent = visible;
+        emptyEl.style.display = visible ? 'none' : '';
     }
 
-    // Aggiungi gli "ascoltatori" per entrambi i controlli
     searchInput.addEventListener('input', applyFilters);
     toggleSwitch.addEventListener('change', applyFilters);
-
-    // Applica i filtri una volta al caricamento della pagina per nascondere subito gli annullati
     applyFilters();
 });
 </script>

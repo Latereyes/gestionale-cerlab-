@@ -21,7 +21,48 @@
     </div>
 
     {% set grouped_preventivi = preventivi | groupby('cliente') %}
-    
+
+    {% if preventivi %}
+    {% set tot_da_consegnare = preventivi | map(attribute='consegna') | sum(attribute='da_consegnare') %}
+    {% set tot_pronti = preventivi | map(attribute='consegna') | sum(attribute='pronti') %}
+    {% set tot_in_bolla = preventivi | map(attribute='consegna') | sum(attribute='in_bolla') %}
+    {% set ritardi = preventivi | selectattr('arrivo_in_ritardo') | list | length %}
+    <div class="kpi-strip">
+        <div class="kpi-tile">
+            <div class="kpi-icon"><i class="fas fa-file-invoice"></i></div>
+            <div>
+                <div class="kpi-label">Preventivi da consegnare</div>
+                <div class="kpi-value">{{ preventivi | length }}</div>
+                <div class="kpi-sub">{{ preventivi | sum(attribute='articoli_da_consegnare_count') }} articoli in attesa</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon warning"><i class="fas fa-shipping-fast"></i></div>
+            <div>
+                <div class="kpi-label">In arrivo dal fornitore</div>
+                <div class="kpi-value">{{ tot_da_consegnare }}</div>
+                <div class="kpi-sub">{% if ritardi %}<span class="text-danger">{{ ritardi }} preventivi con arrivo in ritardo</span>{% else %}nessun arrivo in ritardo{% endif %}</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon info"><i class="fas fa-warehouse"></i></div>
+            <div>
+                <div class="kpi-label">Pronti per consegna</div>
+                <div class="kpi-value">{{ tot_pronti }}</div>
+                <div class="kpi-sub">arrivati in magazzino</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon success"><i class="fas fa-file-alt"></i></div>
+            <div>
+                <div class="kpi-label">In bolla</div>
+                <div class="kpi-value">{{ tot_in_bolla }}</div>
+                <div class="kpi-sub">in attesa di conferma consegna</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% if not grouped_preventivi %}
     <div class="card">
         <div class="empty-state">
@@ -33,29 +74,76 @@
     {% endif %}
 
     {% for cliente, items in grouped_preventivi %}
+    {% set pronti_cliente = items | map(attribute='consegna') | sum(attribute='pronti') %}
     <div class="card">
         <div class="card-header">
-            <h3><strong>{{ cliente }}</strong></h3>
+            <h3><i class="fas fa-user"></i><strong>{{ cliente }}</strong></h3>
+            <div class="client-meta">
+                <span class="chip neutral">{{ items | length }} {{ 'preventivo' if items | length == 1 else 'preventivi' }}</span>
+                <span class="chip warning"><strong>{{ items | sum(attribute='articoli_da_consegnare_count') }}</strong> articoli in attesa</span>
+                {% if pronti_cliente %}<span class="chip info"><strong>{{ pronti_cliente }}</strong> pronti</span>{% endif %}
+            </div>
         </div>
         <div class="table-wrap">
             <table class="styled-table">
+                <colgroup><col style="width: 17%"><col style="width: 10%"><col style="width: 18%"><col style="width: 19%"><col style="width: 11%"><col style="width: 11%"><col style="width: 14%"></colgroup>
                 <thead>
                     <tr>
-                        <th>Numero Preventivo</th>
-                        <th>Data</th>
-                        <th>Stato Consegna</th>
+                        <th>Preventivo</th>
+                        <th class="right">Totale</th>
+                        <th>Avanzamento Consegna</th>
+                        <th>Stato Articoli</th>
+                        <th>Prossimo Arrivo</th>
+                        <th>Fornitori</th>
                         <th class="actions-column"></th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for p in items %}
+                    {% set c = p.consegna %}
                     <tr class="main-row" data-tipo="{{ p.tipo_preventivo | default('commerciale') }}">
-                        <td><strong>{{ p.numero }}</strong></td>
-                        <td>{{ p.data }}</td>
                         <td>
-                            <span class="muted">
-                                <strong>{{ p.articoli_da_consegnare_count }}</strong> articoli in attesa
-                            </span>
+                            <div class="cell-main">{{ p.numero }}{% if p.tipo_preventivo == 'edile' %}<span class="type-badge edile">Edile</span>{% endif %}</div>
+                            <div class="cell-sub"><i class="far fa-calendar"></i>{{ (p.data_conferma or p.data) | data_it }}{% if p.venditore %} · {{ p.venditore }}{% endif %}</div>
+                        </td>
+                        <td class="right cell-money">{{ money_ui(p.totale_num) }}</td>
+                        <td class="progress-cell">
+                            <div class="progress-label">
+                                <span><strong>{{ c.consegnati }}</strong> / {{ c.totale }} consegnati</span>
+                                <span>{{ c.pct_consegnato }}%</span>
+                            </div>
+                            {% if c.totale %}
+                            <div class="progress-bar" title="Consegnati {{ c.consegnati }} · In bolla {{ c.in_bolla }} · Pronti {{ c.pronti }} · In arrivo {{ c.da_consegnare }}">
+                                <span class="seg-success" style="width: {{ (c.consegnati / c.totale * 100) | round(1) }}%"></span>
+                                <span class="seg-accent" style="width: {{ (c.in_bolla / c.totale * 100) | round(1) }}%"></span>
+                                <span class="seg-info" style="width: {{ (c.pronti / c.totale * 100) | round(1) }}%"></span>
+                            </div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="chip-list">
+                                {% if c.da_consegnare %}<span class="chip warning" title="Ordinati, non ancora arrivati"><strong>{{ c.da_consegnare }}</strong> in arrivo</span>{% endif %}
+                                {% if c.pronti %}<span class="chip info" title="Arrivati, pronti per la consegna"><strong>{{ c.pronti }}</strong> pronti</span>{% endif %}
+                                {% if c.in_bolla %}<span class="chip neutral" title="Inseriti in bolla, consegna da confermare"><strong>{{ c.in_bolla }}</strong> in bolla</span>{% endif %}
+                                {% if p.articoli_non_confermati %}<span class="chip danger" title="Articoli non ancora in un ordine confermato"><strong>{{ p.articoli_non_confermati }}</strong> non confermati</span>{% endif %}
+                            </div>
+                        </td>
+                        <td class="nowrap">
+                            {% if p.prossimo_arrivo %}
+                                <div class="{{ 'text-danger' if p.arrivo_in_ritardo }}">{{ p.prossimo_arrivo | data_it }}</div>
+                                {% if p.arrivo_in_ritardo %}<div class="cell-sub text-danger"><i class="fas fa-exclamation-triangle"></i>in ritardo</div>{% endif %}
+                            {% elif c.da_consegnare == 0 and c.totale %}
+                                <span class="text-success"><i class="fas fa-check"></i> Tutto arrivato</span>
+                            {% else %}
+                                <span class="muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if p.fornitori %}
+                                <div class="supplier-list" title="{{ p.fornitori | join(', ') }}">{{ p.fornitori | join(', ') }}</div>
+                            {% else %}
+                                <span class="muted">-</span>
+                            {% endif %}
                         </td>
                         <td class="row-actions">
                             <a href="{{ url_for('gestione_consegna', quote_id=p.numero) }}" class="btn primary">
@@ -71,41 +159,7 @@
     {% endfor %}
 </div>
 
-<style>
-/* Stili presi da altre pagine per coerenza */
-.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
-.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
-.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
-.table-wrap { overflow-x: auto; }
-.styled-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.styled-table th, .styled-table td { padding: 16px 24px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;}
-.col-num { width: 15%; }
-.col-date { width: 12%; }
-.col-client { width: 25%; } /* Usata se non raggruppata, altrimenti distribuire */
-.col-status { width: 20%; }
-.col-money { width: 12%; text-align: right; }
-.col-actions { width: 10%; text-align: right; }    
-.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
-.styled-table tbody tr:last-child td { border-bottom: none; }
-.actions-column { text-align: right; }
-.row-actions { text-align: right; }
-.empty-state { text-align: center; padding: 40px; color: var(--muted); }
-.empty-state i { font-size: 32px; color: #198754; margin-bottom: 12px; }
-.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; color: var(--text-primary); }
-.empty-state p { margin: 0; font-size: 14px; }
-.btn.primary { display: inline-flex; align-items: center; gap: 8px; }
-/* --- STILI PER FILTRO STATO --- */
-.filter-bar { margin-bottom: 24px; display: flex; justify-content: flex-start; }
-.multi-switch { position: relative; display: flex; background-color: #e9ecef; border-radius: 8px; padding: 3px; height: 36px; cursor: pointer; user-select: none; }
-.switch-thumb { position: absolute; top: 3px; bottom: 3px; width: 33.33%; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.25s ease-out; z-index: 1; }
-.switch-label { flex: 1; text-align: center; font-size: 12px; font-weight: 600; color: #495057; line-height: 30px; position: relative; z-index: 2; }
-.switch-label.active { color: #000; }
-@media (max-width: 768px) { .multi-switch { width: 100% !important; } }
-/* --- FINE STILI FILTRO --- */
-</style>
+{% include '_workflow_dashboard_styles.html' %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('live-search-input');

@@ -50,46 +50,50 @@
     <div class="card">
         <div class="card-header">
             <h3>Aggiungi Nuovo Acconto/Saldo</h3>
+            <span class="header-hint">Residuo da saldare: <strong class="total-due">{{ money_ui(p.totale_da_saldare) }}</strong></span>
         </div>
         <div class="card-body">
             <form action="{{ url_for('aggiungi_pagamento', quote_id=p.numero) }}" method="POST" class="payment-form">
-                <div class="form-group">
-                    <label for="data">Data Pagamento</label>
-                    <input type="date" name="data" id="data" required>
-                </div>
-    {% endif %}            
-                <div class="form-group amount-group">
-                    <label for="importo">Importo (€)</label>
-                    <div class="input-with-actions">
-                        <input 
-                                type="text" 
-                                name="importo" 
-                                id="importo" 
-                                class="form-control" 
-                                placeholder="0,00" 
-                                inputmode="decimal" 
-                                required
-                            >
-                        
-                        {% if p.totale_pagato == 0 %}
-                        <button type="button" id="btn-set-40" class="btn btn-blue" title="Calcola acconto 40%">40%</button>
-                        <button type="button" id="btn-set-50" class="btn btn-blue" title="Calcola acconto 50%">50%</button>
-                        {% endif %}
-                        
-                        <button type="button" id="btn-set-saldo" class="btn btn-green" title="Imposta il saldo rimanente">SALDO</button>
+                <div class="payment-row payment-row-main">
+                    <div class="form-group date-group">
+                        <label for="data">Data Pagamento</label>
+                        <input type="date" name="data" id="data" required>
+                    </div>
+                    <div class="form-group amount-group">
+                        <label for="importo">Importo (€)</label>
+                        <div class="input-with-actions">
+                            <div class="amount-input-wrap">
+                                <span class="amount-currency">€</span>
+                                <input 
+                                        type="text" 
+                                        name="importo" 
+                                        id="importo" 
+                                        class="form-control amount-input" 
+                                        placeholder="0,00" 
+                                        inputmode="decimal" 
+                                        autocomplete="off"
+                                        required
+                                    >
+                            </div>
+                            <button type="button" id="btn-set-40" class="btn btn-blue" title="Calcola acconto 40%">40%</button>
+                            <button type="button" id="btn-set-50" class="btn btn-blue" title="Calcola acconto 50%">50%</button>
+                            <button type="button" id="btn-set-saldo" class="btn btn-green" title="Imposta il saldo rimanente">SALDO</button>
+                        </div>
                     </div>
                 </div>
-                <div class="form-group note-group">
-                    <label for="note">Note (opzionale)</label>
-                    <input type="text" name="note" id="note" placeholder="es. Acconto 40%, Saldo finale">
-                </div>
-                <div class="form-group">
-                    <label>&nbsp;</label>
-                    <button type="submit" class="btn primary"><i class="fas fa-plus"></i> Aggiungi Pagamento</button>
+                <div class="payment-row payment-row-note">
+                    <div class="form-group note-group">
+                        <label for="note">Note (opzionale)</label>
+                        <input type="text" name="note" id="note" placeholder="es. Acconto 40%, Saldo finale">
+                    </div>
+                    <div class="form-group submit-group">
+                        <button type="submit" class="btn primary"><i class="fas fa-plus"></i> Aggiungi Pagamento</button>
+                    </div>
                 </div>
             </form>
         </div>
     </div>
+    {% endif %}
 
     <div class="card">
         <div class="card-header">
@@ -127,7 +131,7 @@
                         <td>
                             {{ pagamento.note }}
                             {% if pagamento.type == 'auto_iva' %}
-                                <span style="font-size: 10px; background: #e9ecef; padding: 2px 5px; border-radius: 4px; color: #495057; margin-left: 5px;">IVA</span>
+                                <span class="tag-iva">IVA</span>
                             {% endif %}
                         </td>
                         <td class="center">
@@ -205,72 +209,171 @@
 </div>
 
 <style>
-.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
-.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
-.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
-.card-body { padding: 24px; }
+/* ─── Layout ─── */
+.editor-container { max-width: 960px; margin: 24px auto; padding: 0 20px; }
+
+/* ─── KPI Summary Grid ─── */
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    padding: 20px 24px;
+}
+.summary-item {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    transition: box-shadow var(--transition);
+}
+.summary-item:hover { box-shadow: var(--shadow-sm); }
+.summary-item label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+.summary-item strong {
+    font-size: 22px;
+    font-weight: 700;
+    display: block;
+}
+/* Colori KPI semantici */
+.total-main  { color: var(--accent); }
+.total-paid  { color: var(--success-text); }
+.total-due   { color: var(--danger-text); }
+.total-future { color: hsl(25, 96%, 40%); }
+
+/* ─── Form Inserimento (due righe) ─── */
+.card-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+.header-hint { font-size: 13px; color: var(--text-muted); }
+.header-hint strong { font-size: 15px; margin-left: 4px; }
+.payment-form { display: flex; flex-direction: column; gap: 16px; }
+.payment-row { display: grid; align-items: end; gap: 16px; }
+.payment-row-main { grid-template-columns: 190px 1fr; }
+.payment-row-note { grid-template-columns: 1fr auto; }
+.payment-form .form-group { margin-bottom: 0; }
+.payment-form input[type="date"],
+.payment-form input[type="text"] { width: 100%; height: 46px; box-sizing: border-box; }
+.amount-input-wrap { position: relative; flex: 1; min-width: 0; }
+.amount-currency {
+    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    font-size: 18px; font-weight: 600; color: var(--text-muted); pointer-events: none;
+}
+.payment-form input.amount-input {
+    padding-left: 36px;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.input-with-actions .btn { height: 46px; padding: 0 18px; font-size: 13px; }
+.submit-group .btn { height: 46px; padding: 0 22px; white-space: nowrap; }
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+.input-with-actions { display: flex; gap: 6px; }
+.input-with-actions input { flex: 1; min-width: 0; }
+
+/* Bottoni rapidi */
+.btn.btn-green {
+    background: linear-gradient(135deg, var(--success) 0%, hsl(142,71%,34%) 100%);
+    color: #fff;
+    border-color: transparent;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.btn.btn-green:hover { filter: brightness(1.08); }
+.btn.btn-blue {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+    color: #fff;
+    border-color: transparent;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.btn.btn-blue:hover { filter: brightness(1.08); }
+
+/* ─── Tabella Pagamenti ─── */
 .table-wrap { overflow-x: auto; }
 .styled-table { width: 100%; border-collapse: collapse; }
-.styled-table th, .styled-table td { padding: 16px 24px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); }
-.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
+.styled-table th,
+.styled-table td { padding: 14px 20px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
+.styled-table thead th {
+    background: var(--surface-2);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    position: sticky;
+    top: 0;
+}
 .styled-table tbody tr:last-child td { border-bottom: none; }
-.empty-state { text-align: center; padding: 40px; color: var(--muted); }
-.empty-state i { font-size: 32px; color: #ced4da; margin-bottom: 12px; }
-.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; color: var(--text-primary); }
-.empty-state p { margin: 0; font-size: 14px; }
-.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; padding: 24px; }
-.summary-item label { display: block; color: var(--muted); margin-bottom: 8px; font-size: 14px; }
-.summary-item strong { font-size: 24px; font-weight: 700; }
-.total-main { color: #0d6efd; }
-.total-paid { color: #198754; }
-.total-due { color: #dc3545; }
-.payment-form { display: grid; grid-template-columns: 1fr 3fr 2fr auto; align-items: flex-end; gap: 16px; }
-.form-group label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
-.input-with-actions { display: flex; gap: 8px; }
-.input-with-actions input { flex-grow: 1; }
-.btn.primary { display: inline-flex; align-items: center; gap: 8px; }
-.btn-small-action { padding: 6px 10px; font-size: 12px; height: auto; line-height: 1.2; white-space: nowrap; }
-.btn-small-action i { font-size: 11px; }
-@media (max-width: 992px) {
-    .payment-form { grid-template-columns: 1fr 1fr; }
-    .note-group { grid-column: span 2; }
-}
-/* Stili per pagamenti futuri */
-.summary-item .total-future {
-    color: #fd7e14; /* Arancione */
-}
-.styled-table .total-future {
-    color: #fd7e14;
-    font-weight: 600;
-}
+.styled-table tbody tr { transition: background var(--transition); }
+.styled-table tbody tr:hover { background: var(--surface-2); }
+
+/* Righe tipologia */
 .styled-table tr.future-payment td {
-    background-color: #fff9e6; /* Sfondo giallo/arancio molto chiaro */
+    background: hsl(38, 92%, 97%);
+    color: hsl(25, 96%, 35%);
 }
-.btn.btn-green {
-    background: #198754; /* Colore verde (lo stesso di "Saldato") */
-    color: #fff;
-    border-color: #198754;
-    font-weight: 600;
+.styled-table tr.future-payment:hover td { background: hsl(38, 92%, 94%); }
+.styled-table tr.virtual-payment td {
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font-style: italic;
 }
-.btn.btn-green:hover {
-    background: #157347;
-    border-color: #146c43;
+/* Tag IVA inline */
+.tag-iva {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: var(--info-bg);
+    color: var(--info-text);
+    border: 1px solid var(--info-border);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    margin-left: 6px;
+    vertical-align: middle;
 }
 
-.btn.btn-blue {
-    background: #0d6efd; /* Colore blu (lo stesso di "Totale") */
-    color: #fff;
-    border-color: #0d6efd;
-    font-weight: 600;
+/* Importi colorati nella tabella */
+.styled-table .total-paid  { color: var(--success-text); font-weight: 600; }
+.styled-table .total-due   { color: var(--danger-text);  font-weight: 600; }
+.styled-table .total-future{ color: hsl(25,96%,40%);     font-weight: 600; }
+.right { text-align: right; }
+.center { text-align: center; }
+
+/* Empty state */
+.empty-state { text-align: center; padding: 40px; color: var(--text-muted); }
+
+/* Azioni tabella */
+.btn-small-action {
+    padding: 5px 10px;
+    font-size: 12px;
+    height: auto;
+    line-height: 1.3;
+    white-space: nowrap;
 }
-.btn.btn-blue:hover {
-    background: #0b5ed7;
-    border-color: #0a58ca;
-}
-.virtual-payment td {
-    background-color: #f8f9fa;
-    color: #6c757d;
+.btn-small-action i { font-size: 11px; }
+
+/* ─── Responsive ─── */
+@media (max-width: 768px) {
+    .payment-row-main, .payment-row-note { grid-template-columns: 1fr; }
+    .input-with-actions { flex-wrap: wrap; }
+    .amount-input-wrap { flex-basis: 100%; }
+    .submit-group .btn { width: 100%; justify-content: center; }
+    .summary-item strong { font-size: 18px; }
 }
 </style>
 {% if p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
@@ -291,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const noteInput = document.getElementById('note');
     
     // Bottoni rapidi
-    const btnSet30 = document.getElementById('btn-set-30');
+    const btnSet40 = document.getElementById('btn-set-40');
     const btnSet50 = document.getElementById('btn-set-50');
     const btnSetSaldo = document.getElementById('btn-set-saldo');
 
@@ -343,11 +446,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return num.toFixed(2).replace('.', ',');
     }
 
-    if (btnSet30) {
-        btnSet30.addEventListener('click', () => {
-            const val = totalePreventivo * 0.30;
+    if (btnSet40) {
+        btnSet40.addEventListener('click', () => {
+            const val = totalePreventivo * 0.40;
             importoInput.value = formatForInput(val);
-            if (noteInput) noteInput.value = 'Acconto 30%';
+            if (noteInput) noteInput.value = 'Acconto 40%';
         });
     }
 

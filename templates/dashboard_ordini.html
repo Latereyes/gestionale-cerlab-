@@ -21,7 +21,44 @@
     </div>
 
     {% set grouped_preventivi = preventivi | groupby('cliente') %}
-    
+
+    {% if preventivi %}
+    <div class="kpi-strip">
+        <div class="kpi-tile">
+            <div class="kpi-icon"><i class="fas fa-file-invoice"></i></div>
+            <div>
+                <div class="kpi-label">Preventivi da gestire</div>
+                <div class="kpi-value">{{ preventivi | length }}</div>
+                <div class="kpi-sub">{{ grouped_preventivi | length }} clienti</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon danger"><i class="fas fa-cart-plus"></i></div>
+            <div>
+                <div class="kpi-label">Articoli da ordinare</div>
+                <div class="kpi-value">{{ preventivi | sum(attribute='articoli_da_ordinare_count') }}</div>
+                <div class="kpi-sub">ancora senza ordine fornitore</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon warning"><i class="fas fa-hourglass-half"></i></div>
+            <div>
+                <div class="kpi-label">In attesa di conferma</div>
+                <div class="kpi-value">{{ preventivi | sum(attribute='articoli_in_attesa_conferma') }}</div>
+                <div class="kpi-sub">{{ preventivi | sum(attribute='ordini_attesa_count') }} ordini senza N. conferma</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon success"><i class="fas fa-check-double"></i></div>
+            <div>
+                <div class="kpi-label">Ordini confermati</div>
+                <div class="kpi-value">{{ preventivi | sum(attribute='ordini_confermati_count') }}</div>
+                <div class="kpi-sub">su {{ preventivi | sum(attribute='ordini_count') }} ordini creati</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% if not grouped_preventivi %}
     <div class="card">
         <div class="empty-state">
@@ -33,40 +70,72 @@
     {% endif %}
 
     {% for cliente, items in grouped_preventivi %}
+    {% set da_ordinare_cliente = items | sum(attribute='articoli_da_ordinare_count') %}
+    {% set in_attesa_cliente = items | sum(attribute='articoli_in_attesa_conferma') %}
     <div class="card">
         <div class="card-header">
-            <h3><strong>{{ cliente }}</strong></h3>
+            <h3><i class="fas fa-user"></i><strong>{{ cliente }}</strong></h3>
+            <div class="client-meta">
+                <span class="chip neutral">{{ items | length }} {{ 'preventivo' if items | length == 1 else 'preventivi' }}</span>
+                {% if da_ordinare_cliente %}<span class="chip danger"><strong>{{ da_ordinare_cliente }}</strong> da ordinare</span>{% endif %}
+                {% if in_attesa_cliente %}<span class="chip warning"><strong>{{ in_attesa_cliente }}</strong> in attesa conferma</span>{% endif %}
+            </div>
         </div>
         <div class="table-wrap">
             <table class="styled-table">
+                <colgroup><col style="width: 18%"><col style="width: 11%"><col style="width: 10%"><col style="width: 18%"><col style="width: 15%"><col style="width: 16%"><col style="width: 12%"></colgroup>
                 <thead>
                     <tr>
-                        <th>Numero Preventivo</th>
-                        <th>Data</th>
-                        <th>Stato Ordini</th>
+                        <th>Preventivo</th>
+                        <th>Confermato</th>
+                        <th class="right">Totale</th>
+                        <th>Avanzamento Ordini</th>
+                        <th>Da fare</th>
+                        <th>Fornitori</th>
                         <th class="actions-column"></th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for p in items %}
                     <tr class="main-row" data-tipo="{{ p.tipo_preventivo | default('commerciale') }}">
-                        <td><strong>{{ p.numero }}</strong></td>
-                        <td>{{ p.data }}</td>
                         <td>
-                            {% if p.articoli_da_ordinare_count > 0 %}
-                                <div style="margin-bottom: 5px;">
-                                    <strong style="color: #dc3545;">{{ p.articoli_da_ordinare_count }} articoli da ordinare</strong>
-                                </div>
+                            <div class="cell-main">{{ p.numero }}{% if p.tipo_preventivo == 'edile' %}<span class="type-badge edile">Edile</span>{% endif %}</div>
+                            {% if p.venditore %}<div class="cell-sub"><i class="fas fa-user-tie"></i>{{ p.venditore }}</div>{% endif %}
+                        </td>
+                        <td class="nowrap">
+                            <div>{{ (p.data_conferma or p.data) | data_it }}</div>
+                            {% if p.giorni_da_conferma is not none %}
+                            <div class="cell-sub {{ 'text-danger' if p.giorni_da_conferma > 14 and p.articoli_da_ordinare_count > 0 }}">
+                                {% if p.giorni_da_conferma == 0 %}oggi{% elif p.giorni_da_conferma == 1 %}ieri{% else %}{{ p.giorni_da_conferma }} giorni fa{% endif %}
+                            </div>
                             {% endif %}
-
-                            {% if p.ordini_fornitore %}
-                                <div class="muted">
-                                    {% if p.articoli_in_attesa_conferma > 0 %}
-                                        <strong style="color: #ff9800;">{{ p.articoli_in_attesa_conferma }}</strong> art. in attesa di N. Conferma
-                                    {% elif p.articoli_da_ordinare_count == 0 %}
-                                        <span style="color: #198754;">Tutti gli articoli sono ordinati</span>
-                                    {% endif %}
-                                </div>
+                        </td>
+                        <td class="right cell-money">{{ money_ui(p.totale_num) }}</td>
+                        <td class="progress-cell">
+                            <div class="progress-label">
+                                <span><strong>{{ p.articoli_ordinati }}</strong> / {{ p.articoli_totali }} articoli ordinati</span>
+                                <span>{{ p.pct_ordinato }}%</span>
+                            </div>
+                            <div class="progress-bar"><span class="{{ 'seg-success' if p.pct_ordinato == 100 else 'seg-accent' }}" style="width: {{ p.pct_ordinato }}%"></span></div>
+                        </td>
+                        <td>
+                            <div class="chip-list">
+                                {% if p.articoli_da_ordinare_count > 0 %}
+                                    <span class="chip danger"><strong>{{ p.articoli_da_ordinare_count }}</strong> da ordinare</span>
+                                {% endif %}
+                                {% if p.articoli_in_attesa_conferma > 0 %}
+                                    <span class="chip warning" title="{{ p.ordini_attesa_count }} ordini senza numero di conferma"><strong>{{ p.articoli_in_attesa_conferma }}</strong> attesa N. conferma</span>
+                                {% elif p.articoli_da_ordinare_count == 0 %}
+                                    <span class="chip success"><i class="fas fa-check"></i> Tutto ordinato</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            {% if p.fornitori %}
+                                <div class="supplier-list" title="{{ p.fornitori | join(', ') }}">{{ p.fornitori | join(', ') }}</div>
+                                <div class="cell-sub">{{ p.ordini_count }} {{ 'ordine' if p.ordini_count == 1 else 'ordini' }}{% if p.ordini_confermati_count %}, {{ p.ordini_confermati_count }} confermati{% endif %}</div>
+                            {% else %}
+                                <span class="muted">Nessun ordine creato</span>
                             {% endif %}
                         </td>
                         <td class="row-actions">
@@ -83,33 +152,7 @@
     {% endfor %}
 </div>
 
-<style>
-/* Stili presi da altre pagine per coerenza */
-.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
-.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
-.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
-.table-wrap { overflow-x: auto; }
-.styled-table { width: 100%; border-collapse: collapse; }
-.styled-table th, .styled-table td { padding: 16px 24px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0); }
-.styled-table thead th { background-color: var(--bg-light, #f8f9fa); font-size: 11px; text-transform: uppercase; color: #64748b; }
-.styled-table tbody tr:last-child td { border-bottom: none; }
-.actions-column { text-align: right; }
-.row-actions { text-align: right; }
-.empty-state { text-align: center; padding: 40px; color: var(--muted); }
-.empty-state i { font-size: 32px; color: #198754; margin-bottom: 12px; }
-.empty-state h4 { margin: 0 0 8px 0; font-size: 18px; color: var(--text-primary); }
-.empty-state p { margin: 0; font-size: 14px; }
-.btn.primary { display: inline-flex; align-items: center; gap: 8px; }
-/* --- STILI PER FILTRO STATO --- */
-.filter-bar { margin-bottom: 24px; display: flex; justify-content: flex-start; }
-.multi-switch { position: relative; display: flex; background-color: #e9ecef; border-radius: 8px; padding: 3px; height: 36px; cursor: pointer; user-select: none; }
-.switch-thumb { position: absolute; top: 3px; bottom: 3px; width: 33.33%; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.25s ease-out; z-index: 1; }
-.switch-label { flex: 1; text-align: center; font-size: 12px; font-weight: 600; color: #495057; line-height: 30px; position: relative; z-index: 2; }
-.switch-label.active { color: #000; }
-@media (max-width: 768px) { .multi-switch { width: 100% !important; } }
-/* --- FINE STILI FILTRO --- */
-</style>
+{% include '_workflow_dashboard_styles.html' %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('live-search-input');

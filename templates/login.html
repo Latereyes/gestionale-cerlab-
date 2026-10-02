@@ -3,54 +3,276 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Login - Gestionale Preventivi</title>
+  <title>Accesso — Gestionale Cerlab</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
   <style>
-    body { font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
-    .login-card { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; /* Centra il contenuto */ }
-    .logo { height: 60px; margin-bottom: 20px; } /* Stile per il logo */
-    h2 { margin-top: 0; margin-bottom: 24px; color: #333; }
-    .form-group { margin-bottom: 20px; text-align: left; /* Allinea a sx label e input */ }
-    label { display: block; margin-bottom: 6px; font-weight: 600; color: #555; }
-    input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
-    .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; background-color: #111; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; }
-    .flash-error { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --accent:       hsl(234, 89%, 58%);
+      --accent-hover: hsl(234, 89%, 50%);
+      --accent-light: hsl(234, 89%, 96%);
+      --bg:           hsl(220, 20%, 96%);
+      --surface:      hsl(0, 0%, 100%);
+      --border:       hsl(220, 13%, 88%);
+      --text:         hsl(222, 25%, 14%);
+      --text-muted:   hsl(220, 10%, 52%);
+      --danger:       hsl(354, 76%, 50%);
+      --danger-bg:    hsl(354, 76%, 96%);
+      --danger-border:hsl(354, 76%, 82%);
+      --danger-text:  hsl(354, 76%, 40%);
+      --font:         'Inter', system-ui, sans-serif;
+      --radius-sm:    8px;
+      --radius-md:    12px;
+      --radius-lg:    18px;
+      --shadow-sm:    0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-card:  0 4px 24px rgba(0,0,0,0.07), 0 1px 4px rgba(0,0,0,0.04);
+    }
+
+    body {
+      font-family: var(--font);
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Decorazione geometrica di sfondo — discreta e light */
+    .bg-deco {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+    .deco-circle {
+      position: absolute;
+      border-radius: 50%;
+      opacity: 0.5;
+    }
+    .deco-1 {
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, hsl(234,89%,94%) 0%, transparent 68%);
+      top: -200px; right: -150px;
+    }
+    .deco-2 {
+      width: 480px; height: 480px;
+      background: radial-gradient(circle, hsl(220,20%,90%) 0%, transparent 70%);
+      bottom: -180px; left: -120px;
+    }
+    .deco-3 {
+      width: 240px; height: 240px;
+      background: radial-gradient(circle, hsl(234,89%,93%) 0%, transparent 70%);
+      top: 55%; right: 12%;
+      opacity: 0.4;
+    }
+
+    /* ── Card ── */
+    .login-card {
+      position: relative; z-index: 10;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 44px 40px 38px;
+      width: 100%; max-width: 400px;
+      box-shadow: var(--shadow-card);
+      animation: cardIn 0.45s cubic-bezier(.34,1.3,.64,1) both;
+    }
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(20px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* ── Logo ── */
+    .logo-wrap { text-align: center; margin-bottom: 28px; }
+    .logo {
+      height: 54px;
+      filter: drop-shadow(0 2px 8px rgba(79,107,245,0.18));
+      animation: logoIn 0.5s 0.1s cubic-bezier(.34,1.3,.64,1) both;
+    }
+    @keyframes logoIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Titolo ── */
+    h2 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      text-align: center;
+      letter-spacing: -0.3px;
+    }
+    .subtitle {
+      text-align: center;
+      font-size: 13.5px;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+    }
+
+    /* ── Divisore ── */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 0 0 24px;
+    }
+
+    /* ── Form ── */
+    .form-group { margin-bottom: 16px; }
+    label {
+      display: block;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .input-wrap { position: relative; }
+    .input-wrap i {
+      position: absolute;
+      left: 13px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 14px;
+      pointer-events: none;
+      transition: color 0.2s;
+    }
+    input {
+      width: 100%;
+      padding: 11px 14px 11px 38px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 14px;
+      font-family: var(--font);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    }
+    input::placeholder { color: hsl(220,10%,72%); }
+    input:focus {
+      border-color: var(--accent);
+      background: var(--accent-light);
+      box-shadow: 0 0 0 3px hsl(234,89%,90%);
+    }
+    /* Icona si colora all'hover del wrapper */
+    .input-wrap:focus-within i { color: var(--accent); }
+
+    /* ── Bottone ── */
+    .btn-login {
+      width: 100%;
+      padding: 13px;
+      margin-top: 10px;
+      border: none;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, hsl(234,89%,58%) 0%, hsl(250,80%,62%) 100%);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: var(--font);
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(79,107,245,0.35);
+      transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-login::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.14) 0%, transparent 55%);
+      pointer-events: none;
+    }
+    .btn-login:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 22px rgba(79,107,245,0.45);
+      filter: brightness(1.06);
+    }
+    .btn-login:active { transform: scale(0.98); }
+
+    /* ── Flash error ── */
+    .flash-error {
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      color: var(--danger-text);
+      border-radius: var(--radius-sm);
+      padding: 11px 14px;
+      margin-bottom: 20px;
+      font-size: 13.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+    }
+
+    /* ── Version tag ── */
+    .version-info {
+      position: fixed;
+      bottom: 14px; right: 18px;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font);
+      z-index: 20;
+      opacity: 0.6;
+    }
   </style>
 </head>
 <body>
+  <div class="bg-deco">
+    <div class="deco-circle deco-1"></div>
+    <div class="deco-circle deco-2"></div>
+    <div class="deco-circle deco-3"></div>
+  </div>
+
   <div class="login-card">
-    <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="logo">
-    
+    <div class="logo-wrap">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Cerlab Logo" class="logo">
+    </div>
     <h2>Accesso Gestionale</h2>
-    
+    <p class="subtitle">Inserisci le tue credenziali per continuare</p>
+    <div class="divider"></div>
+
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for category, message in messages %}
-        <div class="flash-{{ category }}">{{ message }}</div>
+        <div class="flash-{{ category }}"><i class="fas fa-exclamation-circle"></i> {{ message }}</div>
       {% endfor %}
     {% endwith %}
-    
+
     <form method="post">
       <div class="form-group">
         <label for="username">Nome Utente</label>
-        <input type="text" id="username" name="username" required>
+        <div class="input-wrap">
+          <i class="fas fa-user"></i>
+          <input type="text" id="username" name="username" placeholder="es. mario.rossi" required autocomplete="username">
+        </div>
       </div>
       <div class="form-group">
         <label for="password">Password</label>
-        <input type="password" id="password" name="password" required>
+        <div class="input-wrap">
+          <i class="fas fa-lock"></i>
+          <input type="password" id="password" name="password" placeholder="••••••••" required autocomplete="current-password">
+        </div>
       </div>
-      <button type="submit" class="btn">Accedi</button>
+      <button type="submit" class="btn-login">
+        <i class="fas fa-arrow-right-to-bracket"></i> Accedi
+      </button>
     </form>
   </div>
-  <div class="version-info">
-  v{{ app_version }}
-</div>
+
+  <div class="version-info">v{{ app_version }}</div>
 </body>
-<style>
-.version-info {
-    position: fixed; 
-    bottom: 10px;
-    right: 15px;
-    font-size: 12px;
-    color: #999;
-}
-</style>
 </html>

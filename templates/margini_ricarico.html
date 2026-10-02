@@ -74,126 +74,122 @@
 </div>
 
 <style>
-/* Stili generali (invariati) */
+/* Stili generali */
 .editor-container { max-width: 1200px; margin: 24px auto; padding: 0 24px; }
 .card-footer { text-align: right; }
 
-/* Stili pallini (invariati) */
+/* Pallini semaforo */
 .dot { height: 16px; width: 16px; border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 8px; border: 1px solid rgba(0,0,0,0.1); }
-.dot-optimal { background-color: #198754; }
-.dot-warning { background-color: #ffc107; }
-.dot-danger { background-color: #dc3545; }
+.dot-optimal { background: var(--success); }
+.dot-warning  { background: var(--warning); }
+.dot-danger   { background: var(--danger); }
 
-/* NUOVI STILI PER IL LAYOUT A CARD 
-  (sostituiscono i vecchi .styled-table)
-*/
+/* Griglia card margini */
 .margin-grid {
     display: grid;
-    /* Crea una griglia flessibile, 3 colonne se c'è spazio, 1 colonna su mobile */
     grid-template-columns: repeat(3, 1fr);
-    gap: 24px; /* Spazio tra le card */
+    gap: 20px;
 }
 
 .tier-card {
-    background-color: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
     overflow: hidden;
-    display: flex; /* Aggiunto per flessibilità */
-    flex-direction: column; /* Aggiunto per flessibilità */
+    display: flex;
+    flex-direction: column;
 }
 
 .tier-header {
-    padding: 16px 24px;
-    font-size: 18px;
+    padding: 14px 20px;
+    font-size: 17px;
     font-weight: 600;
-    border-bottom: 1px solid #e2e8f0;
-    background-color: #f8f9fa; /* Sfondo leggero per l'header */
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
 }
 
 .tier-subheader {
-    padding: 10px 24px;
+    padding: 10px 20px;
     font-size: 14px;
     font-weight: 500;
-    color: var(--muted);
-    background-color: #fff;
-    border-bottom: 1px solid #e2e8f0;
+    color: var(--text-muted);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
     text-align: center;
 }
 .tier-subheader strong {
-    color: #198754; /* Colore verde (success) */
+    color: var(--success-text);
     font-weight: 700;
 }
 
 .tier-body {
-    padding: 24px;
+    padding: 20px;
     display: flex;
     flex-direction: column;
-    gap: 18px; /* Spazio tra i gruppi di input */
-    flex-grow: 1; /* Fa sì che il corpo si espanda per riempire lo spazio */
+    gap: 16px;
+    flex-grow: 1;
 }
 
 .form-group, .input-group {
     display: flex;
-    justify-content: space-between; /* Allinea etichetta e input ai lati */
+    justify-content: space-between;
     align-items: center;
     gap: 12px;
 }
 
 .form-group label, .input-group label {
     font-weight: 500;
-    color: #333;
+    color: var(--text);
     display: flex;
     align-items: center;
-    flex-shrink: 0; /* Impedisce all'etichetta di andare a capo */
+    flex-shrink: 0;
 }
 
-/* Stile per il gruppo "Fino a:" */
-.cost-limit-group {
-    min-height: 42px; /* Dà un'altezza fissa per allineare le card */
-}
+/* Gruppo "Fino a:" */
+.cost-limit-group { min-height: 42px; }
 
 .muted-text {
     font-size: 14px;
-    color: var(--muted);
+    color: var(--text-muted);
     font-style: italic;
 }
 
 .divider {
     border: none;
-    border-top: 1px solid #f1f5f9; /* Divisore leggero */
+    border-top: 1px solid var(--border);
     margin: 0;
 }
 
 .input-group-title {
     font-size: 14px;
     font-weight: 600;
-    color: var(--ink);
-    margin-bottom: -5px; /* Avvicina al primo input */
+    color: var(--text);
+    margin-bottom: -5px;
 }
 
-/* Stili per gli input numerici */
+/* Input numerici */
 .input-group input[type="number"],
 .input-with-suffix input[type="number"] {
     width: 90px;
     text-align: right;
     font-size: 16px;
     padding: 8px 12px;
-    border: 1px solid #cbd5e1;
-    border-radius: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    transition: border-color var(--transition);
+}
+.input-group input[type="number"]:focus,
+.input-with-suffix input[type="number"]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-light);
 }
 
-.input-with-suffix {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.input-with-suffix span {
-    font-size: 16px;
-    color: var(--muted);
-}
+.input-with-suffix { display: flex; align-items: center; gap: 8px; }
+.input-with-suffix span { font-size: 16px; color: var(--text-muted); }
 </style>
 <script>
 document.addEventListener('DOMContentLoaded', () => {

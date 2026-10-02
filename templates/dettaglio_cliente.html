@@ -1,8 +1,8 @@
-{% extends "base.html" %}    
+{% extends "base.html" %}
 
 {% block extra_fab %}
-    <a href="javascript:void(0)" class="fab-btn task-fab" 
-       onclick="window.openQuickTask('{{ cliente.id_cliente }}', 'CLIENTE', '{{ cliente.cliente | replace("'", "\\'") }}')" 
+    <a href="javascript:void(0)" class="fab-btn task-fab"
+       onclick="window.openQuickTask('{{ cliente.id_cliente }}', 'CLIENTE', '{{ cliente.cliente | replace("'", "\\'") }}')"
        title="Nuova Task Cliente">
         <i class="fas fa-plus"></i>
         <span class="fab-label">TASK</span>
@@ -30,17 +30,44 @@
 
 <div class="editor-container">
 
-<div class="card filter-card">
-    <div class="filter-body">
-        <label for="live-search-input">
-            <i class="fas fa-filter"></i>
-            Filtra documenti in questa pagina
-        </label>
-        <input type="text" 
-               id="live-search-input" 
-               placeholder="Scrivi qui per filtrare per numero preventivo, tipo documento, ecc..."
-               autocomplete="off">
+<section class="client-hero">
+    <div class="client-hero-main">
+        <span class="client-avatar">{{ (cliente.cliente or '?')[:1] | upper }}</span>
+        <div class="client-hero-info">
+            <h2>{{ cliente.cliente }}</h2>
+            {% if cliente.rag_sociale and cliente.rag_sociale != cliente.cliente %}<div class="client-rag">{{ cliente.rag_sociale }}</div>{% endif %}
+            <div class="client-facts">
+                {% if cliente.p_iva %}<span><i class="fas fa-hashtag"></i>P.IVA {{ cliente.p_iva }}</span>{% endif %}
+                {% if cliente.codice_univoco %}<span><i class="fas fa-paper-plane"></i>SDI {{ cliente.codice_univoco }}</span>{% endif %}
+                {% if cliente.indirizzo or cliente.comune %}<span><i class="fas fa-map-marker-alt"></i>{{ cliente.indirizzo }}{% if cliente.comune %}, {{ cliente.cap }} {{ cliente.comune }}{% if cliente.provincia %} ({{ cliente.provincia }}){% endif %}{% endif %}</span>{% endif %}
+                {% if cliente.email %}<span><i class="fas fa-envelope"></i><a href="mailto:{{ cliente.email }}">{{ cliente.email }}</a></span>{% endif %}
+                {% if cliente.telefono %}<span><i class="fas fa-phone"></i>{{ cliente.telefono }}</span>{% endif %}
+            </div>
+        </div>
     </div>
+    <div class="client-hero-side">
+        <div class="chip-list">
+            <span class="chip {{ 'success' if cliente.has_ci else 'danger' }}"><i class="fas {{ 'fa-check' if cliente.has_ci else 'fa-times' }}"></i> C.I.</span>
+            <span class="chip {{ 'success' if cliente.has_privacy else 'danger' }}"><i class="fas {{ 'fa-check' if cliente.has_privacy else 'fa-times' }}"></i> Privacy</span>
+            <span class="chip {{ 'success' if cliente.has_contratto else 'danger' }}"><i class="fas {{ 'fa-check' if cliente.has_contratto else 'fa-times' }}"></i> Contratto</span>
+        </div>
+        <div class="client-hero-actions">
+            <a href="{{ url_for('modifica_cliente', client_id=cliente.id_cliente) }}" class="btn"><i class="fas fa-pen"></i> Modifica dati</a>
+            {% if is_archivio_mode %}
+            <a href="{{ url_for('dettaglio_cliente', client_id=cliente.id_cliente) }}" class="btn"><i class="fas fa-eye-slash"></i> Solo attivi</a>
+            {% else %}
+            <a href="{{ url_for('dettaglio_cliente', client_id=cliente.id_cliente, archivio='1') }}" class="btn"><i class="fas fa-archive"></i> Mostra anche chiusi</a>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+<div class="toolbar">
+    <div class="toolbar-search">
+        <i class="fas fa-search"></i>
+        <input type="text" id="live-search-input" placeholder="Filtra per numero preventivo, tipo documento, nome file..." autocomplete="off">
+    </div>
+    <span class="result-count"><strong>{{ preventivi | length }}</strong> {{ 'preventivo' if preventivi | length == 1 else 'preventivi' }}{% if not is_archivio_mode %} attivi{% endif %}</span>
 </div>
 {% if source_quote %}
 <div class="sticky-footer">
@@ -53,30 +80,10 @@
     </div>
 </div>
 {% endif %}
-<style>
-.filter-card {
-    margin-bottom: 24px;
-}
-.filter-body {
-    padding: 16px 24px;
-}
-.filter-body label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: #475569;
-}
-.filter-body input {
-    width: 100%;
-}
-</style>
 
 <div class="card">
     <div class="card-header">
-        <h3><i class="fas fa-id-card"></i> Documenti Anagrafici Cliente</h3>
+        <h3><i class="fas fa-id-card"></i> Documenti anagrafici <span class="count-pill">{{ cliente.documenti_anagrafici | length }}</span></h3>
     </div>
     <div class="altri-documenti-layout">
         <div class="upload-form">
@@ -107,18 +114,18 @@
                     <div class="document-item">
                         <div>
                             <i class="fas fa-file-alt"></i>
-                            <span style="font-weight: 600; color: #0d6efd; margin-right: 10px;">{{ doc.tipo }}:</span>
+                            <span class="doc-type">{{ doc.tipo }}</span>
                             <span title="{{ doc.filename }}">{{ doc.filename }}</span>
                         </div>
-                        
+
                         <div class="document-actions">
                             {% if doc.filename.lower().endswith('.pdf') %}
                                 <a href="{{ url_for('serve_allegato_cliente', client_id=cliente.id_cliente, filename=doc.filename, action='view') }}" target="_blank" class="btn icon-btn" title="Visualizza PDF"><i class="fas fa-eye"></i></a>
                             {% else %}
                                 <a href="{{ url_for('serve_allegato_cliente', client_id=cliente.id_cliente, filename=doc.filename) }}" class="btn icon-btn" title="Scarica"><i class="fas fa-download"></i></a>
                             {% endif %}
-                            <button type="button" 
-                                    class="btn icon-btn danger delete-client-doc-btn" 
+                            <button type="button"
+                                    class="btn icon-btn danger delete-client-doc-btn"
                                     title="Elimina"
                                     data-client-id="{{ cliente.id_cliente }}"
                                     data-filename="{{ doc.filename }}">
@@ -139,12 +146,20 @@
 {% for p in preventivi %}
     {% set is_edile = p.tipo_preventivo == 'edile' %}
     <div class="card">
-        <div class="card-header">
-            <h3>Preventivo: <strong>{{ p.numero }}</strong></h3>
-                    {% if session.user_role in ['amministratore', 'ceo'] %}
-                  <a href="{{ url_for('analisi_preventivo', quote_id=p.numero) }}" class="btn icon-btn" title="Analisi Dettagliata"><i class="fas fa-chart-pie"></i> Analisi preventivo</a>
-                  {% endif %}
-            
+        <div class="card-header quote-header">
+            <div class="quote-title">
+                <h3><i class="fas fa-file-signature"></i><strong>{{ p.numero }}</strong>{% if is_edile %}<span class="type-badge edile">Edile</span>{% endif %}</h3>
+                <div class="quote-meta">
+                    <span class="status-badge status-{{ (p.stato or 'bozza') | lower | replace(' ', '-') }}">{{ p.stato }}</span>
+                    <span><i class="far fa-calendar"></i>{{ p.data | data_it }}</span>
+                    {% if p.venditore %}<span><i class="fas fa-user-tie"></i>{{ p.venditore }}</span>{% endif %}
+                    <span class="quote-total">{{ money_ui(p.totale_num) }}</span>
+                </div>
+            </div>
+            <div class="quote-actions">
+            {% if session.user_role in ['amministratore', 'ceo'] %}
+                <a href="{{ url_for('analisi_preventivo', quote_id=p.numero) }}" class="btn btn-outline" title="Analisi Dettagliata"><i class="fas fa-chart-pie"></i> Analisi</a>
+            {% endif %}
             {% if is_edile %}
                 <a href="{{ url_for('editor_preventivo_edile', quote_id=p.numero) }}" class="btn btn-outline">
                     <i class="fas fa-pencil-alt"></i> Modifica Preventivo Edile
@@ -154,14 +169,14 @@
                     <i class="fas fa-pencil-alt"></i> Modifica Preventivo
                 </a>
             {% endif %}
-
+            </div>
         </div>
-        
+
         <div class="document-grid">
-            
+
             {# 1. COLONNA: PREVENTIVI PDF #}
             <div class="document-section">
-                <h4><i class="fas fa-file-pdf"></i> Preventivi Generati (PDF)</h4>
+                <h4><i class="fas fa-file-pdf"></i> Preventivi PDF <span class="count-pill">{{ p.storico_pdf | length if p.storico_pdf else 0 }}</span></h4>
                 <div class="document-list">
                     {% if p.storico_pdf %}
                         {% for rev in p.storico_pdf %}
@@ -186,14 +201,14 @@
 
             {# 2. COLONNA: BOLLE DI CONSEGNA (SISTEMA) #}
             <div class="document-section">
-                <h4><i class="fas fa-truck"></i> Bolle di Consegna</h4>
+                <h4><i class="fas fa-truck"></i> Bolle di consegna <span class="count-pill">{{ p.bolle | length if p.bolle else 0 }}</span></h4>
                 <div class="document-list">
                     {% if p.bolle %}
                         {% for bolla in p.bolle %}
                         <div class="document-item">
                             <div>
                                 <i class="fas fa-receipt"></i>
-                                <span><strong>{{ bolla.id }}:</strong> {{ bolla.data }}</span>
+                                <span><strong>{{ bolla.id }}</strong> · {{ bolla.data | data_it }}</span>
                             </div>
                             <div class="document-actions">
                                 <a href="{{ url_for('export_bolla_pdf', quote_id=p.numero, bolla_id=bolla.id) }}" target="_blank" class="btn icon-btn" title="Visualizza/Stampa"><i class="fas fa-print"></i></a>
@@ -208,7 +223,7 @@
 
             {# 3. COLONNA: BOLLE FIRMATE (UPLOAD) #}
             <div class="document-section">
-                <h4><i class="fas fa-signature"></i> Bolle Firmate</h4>
+                <h4><i class="fas fa-signature"></i> Bolle firmate</h4>
                 <div class="document-list">
                     {% set ns_signed = namespace(found=false) %}
                     {% if p.allegati %}
@@ -239,7 +254,7 @@
             {# 4. COLONNA: CONFERME ORDINE (Solo Standard) #}
             {% if not is_edile %}
             <div class="document-section">
-                <h4><i class="fas fa-clipboard-check"></i> Conferme Ordine</h4>
+                <h4><i class="fas fa-clipboard-check"></i> Conferme ordine</h4>
                 <div class="document-list">
                     {% set found_attachments = [] %}
                     {% if p.ordini_fornitore %}
@@ -268,10 +283,10 @@
                 </div>
             </div>
             {% endif %}
-            
+
             {# 5. COLONNA: FATTURE EMESSE #}
             <div class="document-section">
-                <h4><i class="fas fa-file-invoice-dollar"></i> Fatture Emesse</h4>
+                <h4><i class="fas fa-file-invoice-dollar"></i> Fatture emesse <span class="count-pill">{{ p.fatture_allegate | length if p.fatture_allegate else 0 }}</span></h4>
                 <div class="document-list">
                     {% if p.fatture_allegate %}
                         {% for fattura in p.fatture_allegate %}
@@ -294,8 +309,8 @@
         </div> {# Chiusura document-grid #}
 
         {# Nuovo blocco separato per Altri Documenti #}
-        <div class="document-section" style="border-top: 1px solid #e2e8f0; padding: 24px;">
-            <h4><i class="fas fa-paperclip"></i> Altri Documenti</h4>
+        <div class="document-section other-docs">
+            <h4><i class="fas fa-paperclip"></i> Altri documenti</h4>
             <div class="altri-documenti-compact">
                 <div class="upload-form-inline">
                     <form action="{{ url_for('allega_documento', quote_id=p.numero) }}" method="POST" enctype="multipart/form-data">
@@ -309,7 +324,7 @@
                     </form>
                 </div>
 
-                <div class="document-list" style="margin-top: 15px; border-top: 1px dashed #e2e8f0; padding-top: 10px;">
+                <div class="document-list other-docs-list">
                     {% set ns_others = namespace(found=false) %}
                     {% if p.allegati %}
                         {% for allegato in p.allegati %}
@@ -342,90 +357,83 @@
 {% endfor %}
 </div>
 
+{% include '_workflow_dashboard_styles.html' %}
 <style>
-/* Stili base (invariati) */
-.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-.card { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; overflow: hidden; }
-.card-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
-.card-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
-.empty-state { text-align: center; padding: 40px; }
+/* Scheda cliente */
+.client-hero { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; background: linear-gradient(135deg, var(--surface) 0%, var(--accent-light) 100%); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 22px 26px; margin-bottom: 18px; }
+.client-hero-main { display: flex; gap: 16px; align-items: flex-start; min-width: 0; flex: 1; }
+.client-avatar { width: 54px; height: 54px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 22px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.client-hero-info h2 { margin: 0; font-size: 22px; font-weight: 700; }
+.client-rag { color: var(--text-muted); font-size: 13.5px; margin-top: 2px; }
+.client-facts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 13px; color: var(--text); }
+.client-facts span { display: inline-flex; align-items: center; gap: 6px; }
+.client-facts i { color: var(--text-subtle); }
+.client-facts a { color: inherit; text-decoration: none; }
+.client-facts a:hover { color: var(--accent); }
+.client-hero-side { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.client-hero-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
-/* ELIMINA I VECCHI STILI .altri-documenti-layout, .upload-form E SOSTITUISCI CON QUESTI */
+/* Card */
+.card-header h3 { gap: 8px; }
+.count-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); font-size: 11px; font-weight: 700; }
+.quote-header { align-items: flex-start; }
+.quote-title { display: flex; flex-direction: column; gap: 6px; }
+.quote-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--text-muted); }
+.quote-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.quote-total { font-weight: 700; color: var(--accent); font-size: 14px; }
+.quote-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.altri-documenti-compact {
-    display: flex;
-    flex-direction: column;
-}
-
-.upload-form-inline {
-    background: #f1f5f9;
-    padding: 12px;
-    border-radius: 8px;
-}
-
-.upload-form-inline .form-group {
-    margin-bottom: 8px;
-}
-
-.upload-form-inline input {
-    font-size: 13px;
-    padding: 6px;
-}
-
-/* Assicurati che la griglia gestisca bene il wrapping se ci sono 5 sezioni */
-.document-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-    gap: 1px;
-    background-color: #e2e8f0;
-    border-bottom: 1px solid #e2e8f0;
-}
-.document-section {
-    background-color: #fff;
-    padding: 24px;
-}
-.document-section h4 { margin: 0 0 16px 0; display: flex; align-items: center; gap: 8px; }
-.document-list { display: flex; flex-direction: column; gap: 8px; }
-.document-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 8px; background-color: #f8f9fa; color: var(--ink); text-decoration: none; transition: background-color 0.2s; }
-.document-item:hover { background-color: #e9ecef; }
-.document-item.primary { background-color: #e7f5e9; color: #198754; font-weight: 600; }
-.document-item i { margin-right: 10px; color: #6c757d; }
-.document-item.primary i { color: #198754; }
-
-/* LAYOUT A DUE COLONNE PER "ALTRI DOCUMENTI" */
-.altri-documenti-layout { display: flex; gap: 24px; align-items: flex-start; padding: 24px; }
-.upload-form { flex-basis: 320px; flex-shrink: 0; padding-right: 24px; border-right: 1px dashed #ced4da; }
-.upload-form h5 { margin: 0 0 16px 0; font-size: 14px; font-weight: 600; }
+/* Upload anagrafica */
+.altri-documenti-layout { display: flex; gap: 24px; align-items: flex-start; padding: 22px 24px; }
+.upload-form { flex-basis: 300px; flex-shrink: 0; padding: 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.upload-form h5 { margin: 0 0 14px 0; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
 .document-list-wrapper { flex: 1; min-width: 0; }
 .form-group { margin-bottom: 12px; }
 .form-group label { display: block; font-size: 12px; margin-bottom: 4px; }
 .full-width { width: 100%; }
-.btn.icon-btn { padding: 6px; line-height: 1; }
+.doc-type { font-weight: 600; color: var(--accent); margin-right: 8px; white-space: nowrap; }
 
-/* Correzione testo lungo (ellipsis) */
+/* Griglia documenti preventivo */
+.document-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1px; background-color: var(--border); border-bottom: 1px solid var(--border); }
+.document-section { background-color: var(--surface); padding: 20px 22px; }
+.document-section h4 { margin: 0 0 14px 0; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
+.document-section h4 i { color: var(--accent); }
+.document-list { display: flex; flex-direction: column; gap: 6px; }
+.document-list .muted { font-size: 13px; margin: 0; }
+.document-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); background-color: var(--surface-2); border: 1px solid transparent; color: var(--text); font-size: 13px; transition: background-color 0.15s, border-color 0.15s; }
+.document-item:hover { background-color: var(--surface-hover); border-color: var(--border); }
+.document-item.primary { background-color: var(--success-bg); color: var(--success-text); font-weight: 600; }
+.document-item i { margin-right: 8px; color: var(--text-subtle); }
+.document-item.primary i { color: var(--success-text); }
 .document-item > div:first-child { min-width: 0; display: flex; align-items: center; }
 .document-item > div:first-child span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.document-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.document-actions .btn.icon-btn { width: 30px; height: 30px; }
+.document-actions .btn.icon-btn i { margin: 0; color: inherit; }
+.btn.icon-btn.danger { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); }
+.btn.icon-btn.danger:hover { background: var(--danger); color: #fff; border-color: transparent; }
 
-.document-actions {
-    display: flex;
-    gap: 4px; /* Spazio tra i bottoni */
-}
-.btn.icon-btn.danger {
-    background-color: #fde8e8;
-    color: #dc3545;
-}
-.btn.icon-btn.danger:hover {
-    background-color: #dc3545;
-    color: #fff;
+/* Altri documenti */
+.other-docs { border-top: 1px solid var(--border); }
+.altri-documenti-compact { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
+.upload-form-inline { background: var(--surface-2); border: 1px solid var(--border); padding: 12px; border-radius: var(--radius); }
+.upload-form-inline .form-group { margin-bottom: 8px; }
+.upload-form-inline input { font-size: 13px; }
+.other-docs-list { margin: 0; }
+
+@media (max-width: 900px) {
+    .altri-documenti-layout, .altri-documenti-compact { display: flex; flex-direction: column; }
+    .upload-form { flex-basis: auto; width: 100%; box-sizing: border-box; }
+    .client-hero-side { align-items: flex-start; }
 }
 </style>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('live-search-input');
     const contentContainer = document.querySelector('.editor-container');
-    
+
     const cardsToFilter = Array.from(contentContainer.querySelectorAll('.card')).filter(card => {
-        return card.querySelector('h3 strong'); 
+        return card.querySelector('h3 strong');
     });
 
     const searchForm = searchInput.closest('form');
@@ -445,7 +453,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // GESTIONE CLIC UNIFICATA (Delegazione Eventi)
     contentContainer.addEventListener('click', (e) => {
-        
+
         // A. ELIMINAZIONE ALLEGATO PREVENTIVO
         const deleteAttachBtn = e.target.closest('.delete-attachment-btn');
         if (deleteAttachBtn) {

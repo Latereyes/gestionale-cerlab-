@@ -7,87 +7,117 @@
 {% block body %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 
+{% set attivi = clients | selectattr('has_active_quote') | list %}
+{% set ns = namespace(completi=0, mancanti=0) %}
+{% for c in clients %}
+    {% if c.has_ci and c.has_privacy and c.has_contratto %}{% set ns.completi = ns.completi + 1 %}{% endif %}
+    {% if c.has_active_quote and not (c.has_ci and c.has_privacy and c.has_contratto) %}{% set ns.mancanti = ns.mancanti + 1 %}{% endif %}
+{% endfor %}
+
 <div class="editor-container">
-    
-    <div class="card" style="padding: 16px; margin-bottom: 24px;">
-        <div class="input-group" style="position: relative;">
-            <span class="input-icon" style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: #9ca3af;">
-                <i class="fas fa-search"></i>
-            </span>
-            <input type="text" id="live-search-anagrafica" class="form-control" placeholder="Cerca per nome, P.IVA o comune..." style="padding-left: 40px; width: 100%;">
+
+    <div class="kpi-strip">
+        <div class="kpi-tile">
+            <div class="kpi-icon"><i class="fas fa-users"></i></div>
+            <div>
+                <div class="kpi-label">Clienti in anagrafica</div>
+                <div class="kpi-value">{{ clients | length }}</div>
+                <div class="kpi-sub">totale registrati</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon info"><i class="fas fa-briefcase"></i></div>
+            <div>
+                <div class="kpi-label">Con preventivi attivi</div>
+                <div class="kpi-value">{{ attivi | length }}</div>
+                <div class="kpi-sub">bozza, inviato o in lavorazione</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon success"><i class="fas fa-folder-plus"></i></div>
+            <div>
+                <div class="kpi-label">Documenti completi</div>
+                <div class="kpi-value">{{ ns.completi }}</div>
+                <div class="kpi-sub">C.I., privacy e contratto</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon danger"><i class="fas fa-file-excel"></i></div>
+            <div>
+                <div class="kpi-label">Documenti mancanti</div>
+                <div class="kpi-value">{{ ns.mancanti }}</div>
+                <div class="kpi-sub">tra i clienti attivi</div>
+            </div>
         </div>
     </div>
 
-    <div class="filter-switch-container">
-        <input type="checkbox" id="active-filter-toggle" checked>
-        <label for="active-filter-toggle">Mostra solo clienti con preventivi attivi</label>
+    <div class="toolbar">
+        <div class="toolbar-search">
+            <i class="fas fa-search"></i>
+            <input type="text" id="live-search-anagrafica" placeholder="Cerca per nome, P.IVA, comune, email..." autocomplete="off">
+        </div>
+        <label class="toggle" for="active-filter-toggle">
+            <input type="checkbox" id="active-filter-toggle" checked>
+            Solo clienti con preventivi attivi
+        </label>
+        <span class="result-count"><strong id="visible-count">{{ clients | length }}</strong> clienti</span>
     </div>
 
     <div class="card">
         <div class="table-wrap">
             <table class="styled-table" id="table-anagrafica">
+                <colgroup><col style="width: 22%"><col style="width: 15%"><col style="width: 19%"><col style="width: 19%"><col style="width: 14%"><col style="width: 11%"></colgroup>
                 <thead>
                     <tr>
                         <th>Cliente / Rag. Sociale</th>
-                        <th>P.IVA / Cod. Univoco</th>
-                        <th>Sede Legale</th>
+                        <th>P.IVA / SDI</th>
+                        <th>Sede</th>
                         <th>Contatti</th>
-                        <th class="left">C.I.</th>
-                        <th class="left">PRVC</th>
-                        <th class="left">CONTR</th>
-                        <th class="right">AZIONI</th>
+                        <th>Documenti</th>
+                        <th class="actions-column"></th>
                     </tr>
-                </thead>
                 </thead>
                 <tbody>
                     {% for c in clients %}
-                    <tr class="client-row" data-active="{{ 'true' if c.has_active_quote else 'false' }}">
+                    <tr class="client-row main-row" data-active="{{ 'true' if c.has_active_quote else 'false' }}">
                         <td>
-                            <strong>{{ c.cliente }}</strong>
-                            <br>
-                            <small class="muted">{{ c.rag_sociale }}</small>
+                            <div class="client-name">
+                                <span class="avatar">{{ (c.cliente or '?')[:1] | upper }}</span>
+                                <div>
+                                    <div class="cell-strong">{{ c.cliente }}</div>
+                                    {% if c.rag_sociale and c.rag_sociale != c.cliente %}<div class="cell-sub">{{ c.rag_sociale }}</div>{% endif %}
+                                    {% if c.has_active_quote %}<span class="chip info mini">Preventivi attivi</span>{% endif %}
+                                </div>
+                            </div>
                         </td>
                         <td>
-                            <span class="badge-info">P.IVA: {{ c.p_iva }}</span><br>
-                            <small class="muted">SDI: {{ c.codice_univoco or 'N/D' }}</small>
+                            <div class="mono">{{ c.p_iva or '-' }}</div>
+                            <div class="cell-sub">SDI: {{ c.codice_univoco or 'N/D' }}</div>
                         </td>
                         <td>
-                            {{ c.indirizzo }}<br>
-                            <small class="muted">{{ c.cap }} - {{ c.comune }} ({{ c.provincia }})</small>
+                            <div>{{ c.indirizzo or '-' }}</div>
+                            {% if c.comune %}<div class="cell-sub">{{ c.cap }} {{ c.comune }}{% if c.provincia %} ({{ c.provincia }}){% endif %}</div>{% endif %}
                         </td>
-<td>
-                            {% if c.email %}<i class="fas fa-envelope muted"></i> {{ c.email }}<br>{% endif %}
-                            {% if c.telefono %}<i class="fas fa-phone muted"></i> {{ c.telefono }}{% endif %}
+                        <td>
+                            {% if c.email %}<div class="contact-line"><i class="fas fa-envelope"></i><a href="mailto:{{ c.email }}">{{ c.email }}</a></div>{% endif %}
+                            {% if c.telefono %}<div class="contact-line"><i class="fas fa-phone"></i>{{ c.telefono }}</div>{% endif %}
+                            {% if not c.email and not c.telefono %}<span class="muted">-</span>{% endif %}
                         </td>
-                        <td class="center">
-                            {% if c.has_ci %}
-                                <i class="fas fa-check-circle text-success" title="C.I. Caricata"></i>
-                            {% else %}
-                                <i class="fas fa-times-circle text-danger" title="C.I. Mancante"></i>
-                            {% endif %}
+                        <td>
+                            <div class="chip-list">
+                                <span class="chip {{ 'success' if c.has_ci else 'danger' }} mini" title="Carta identità {{ 'caricata' if c.has_ci else 'mancante' }}"><i class="fas {{ 'fa-check' if c.has_ci else 'fa-times' }}"></i> C.I.</span>
+                                <span class="chip {{ 'success' if c.has_privacy else 'danger' }} mini" title="Privacy {{ 'caricata' if c.has_privacy else 'mancante' }}"><i class="fas {{ 'fa-check' if c.has_privacy else 'fa-times' }}"></i> Privacy</span>
+                                <span class="chip {{ 'success' if c.has_contratto else 'danger' }} mini" title="Contratto {{ 'caricato' if c.has_contratto else 'mancante' }}"><i class="fas {{ 'fa-check' if c.has_contratto else 'fa-times' }}"></i> Contratto</span>
+                            </div>
                         </td>
-                        <td class="center">
-                            {% if c.has_privacy %}
-                                <i class="fas fa-check-circle text-success" title="Privacy Caricata"></i>
-                            {% else %}
-                                <i class="fas fa-times-circle text-danger" title="Privacy Mancante"></i>
-                            {% endif %}
-                        </td>
-                        <td class="center">
-                            {% if c.has_contratto %}
-                                <i class="fas fa-check-circle text-success" title="Contratto Caricato"></i>
-                            {% else %}
-                                <i class="fas fa-times-circle text-danger" title="Contratto Mancante"></i>
-                            {% endif %}
-                        </td>
-                        <td class="right" style="white-space: nowrap; min-width: 130px;">
-                            <a href="{{ url_for('dettaglio_cliente', client_id=c.id_cliente) }}" class="btn icon-btn" title="Vedi Documenti">
+                        <td class="row-actions">
+                            <a href="{{ url_for('dettaglio_cliente', client_id=c.id_cliente) }}" class="btn icon-btn primary" title="Cartella documenti">
                                 <i class="fas fa-folder-open"></i>
                             </a>
-                            <a href="{{ url_for('modifica_cliente', client_id=c.id_cliente) }}" class="btn icon-btn" title="Modifica Dati Cliente">
+                            <a href="{{ url_for('modifica_cliente', client_id=c.id_cliente) }}" class="btn icon-btn" title="Modifica dati cliente">
                                 <i class="fas fa-pen"></i>
                             </a>
-                            <button type="button" class="btn icon-btn" title="Elimina Cliente" style="color: #ef4444; background: none; border: none; padding: 0; cursor: pointer; margin-left: 8px;" onclick="eliminaClienteJs('{{ c.id_cliente }}')">
+                            <button type="button" class="btn icon-btn danger" title="Elimina cliente" onclick="eliminaClienteJs('{{ c.id_cliente }}')">
                                 <i class="fas fa-trash-alt"></i>
                             </button>
                         </td>
@@ -95,81 +125,33 @@
                     {% endfor %}
                 </tbody>
             </table>
+            <div class="empty-state" id="anagrafica-empty" style="display: none;">
+                <i class="fas fa-search"></i>
+                <h4>Nessun cliente trovato</h4>
+                <p>Prova a cambiare la ricerca o a mostrare anche i clienti senza preventivi attivi.</p>
+            </div>
         </div>
     </div>
 </div>
 
+{% include '_workflow_dashboard_styles.html' %}
 <style>
-.status-in-lavorazione { background-color: #ffc107; }
-.muted { color: #64748b; font-size: 12px; }
-.right { text-align: right; }
-.center { text-align: center; }
-.text-success { color: #198754; font-size: 16px; }
-.text-danger { color: #dc3545; font-size: 16px; }
-   
-/* --- STILI SWITCH GRAFICO (DA ARCHIVIO) --- */
-.filter-switch-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background-color: #fff;
-  padding: 16px 24px;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-  margin-bottom: 24px;
-  max-width: 400px;
-  margin-left: auto;
-  margin-right: auto;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-}
-
-#active-filter-toggle {
-  appearance: none;
-  width: 48px;
-  height: 26px;
-  background-color: #cbd5e1;
-  border-radius: 15px;
-  position: relative;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  flex-shrink: 0;
-}
-#active-filter-toggle::before {
-  content: '';
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  background-color: white;
-  border-radius: 50%;
-  top: 3px;
-  left: 4px;
-  transition: transform 0.2s;
-}
-#active-filter-toggle:checked {
-  background-color: #0d6efd; 
-}
-#active-filter-toggle:checked::before {
-  transform: translateX(20px);
-}
-.filter-switch-container label {
-    font-size: 14px;
-    font-weight: 600;
-    color: #4b5563;
-    cursor: pointer;
-}
-
-/* --- STILI TABELLA E BADGE --- */
-.badge-info { font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
-.editor-container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
-.card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden; }
-.styled-table { width: 100%; border-collapse: collapse; }
-.styled-table th, .styled-table td { padding: 14px 18px; text-align: left; border-bottom: 1px solid #e2e8f0; }
-.styled-table thead th { background: #f8f9fa; font-size: 11px; color: #64748b; text-transform: uppercase; }
-.status-badge { display: inline-block; border-radius: 4px; color: #000; font-weight: 700; text-align: center; }
-.status-in-lavorazione { background-color: #ffc107; }
-.muted { color: #64748b; font-size: 12px; }
-.right { text-align: right; }
+.cell-strong { font-weight: 600; color: var(--text); }
+.client-name { display: flex; align-items: flex-start; gap: 12px; }
+.avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-light); color: var(--accent); font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.chip.mini { font-size: 10.5px; padding: 2px 7px; margin-top: 4px; }
+.mono { font-variant-numeric: tabular-nums; letter-spacing: 0.2px; }
+.contact-line { display: flex; align-items: center; gap: 7px; font-size: 13px; overflow: hidden; }
+.contact-line + .contact-line { margin-top: 3px; }
+.contact-line i { color: var(--text-subtle); width: 13px; text-align: center; flex-shrink: 0; }
+.contact-line a { color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-line a:hover { color: var(--accent); }
+.row-actions .btn + .btn { margin-left: 4px; }
+.btn.icon-btn.primary { background: var(--accent-light); color: var(--accent); border-color: transparent; }
+.btn.icon-btn.primary:hover { background: var(--accent); color: #fff; }
+.btn.icon-btn.danger { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); }
+.btn.icon-btn.danger:hover { background: var(--danger); color: #fff; border-color: transparent; }
+#anagrafica-empty i { color: var(--text-subtle); }
 </style>
 
 <div id="delete-client-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000;">
@@ -203,6 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyFilters() {
         const term = searchInput.value.toLowerCase().trim();
         const onlyActive = toggleSwitch.checked;
+        let visible = 0;
 
         rows.forEach(row => {
             const isActive = row.dataset.active === 'true';
@@ -211,8 +194,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const matchesSearch = text.includes(term) || term === "";
             const matchesActive = !onlyActive || (onlyActive && isActive);
 
-            row.style.display = (matchesSearch && matchesActive) ? '' : 'none';
+            const show = matchesSearch && matchesActive;
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
         });
+        document.getElementById('visible-count').textContent = visible;
+        document.getElementById('anagrafica-empty').style.display = visible ? 'none' : '';
     }
 
 searchInput.addEventListener('input', applyFilters);

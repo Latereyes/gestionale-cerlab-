@@ -12,6 +12,13 @@ PYTHON_FILES_TO_UPDATE = ["gestionale.py"]
 INNO_SETUP_FILE = "crea_installer.iss"
 FOLDERS_TO_CLEAN = ["dist", "build", "userdesktop"]
 
+# File ausiliari obbligatori inclusi nell'installer (devono esistere prima della build)
+REQUIRED_AUX_FILES = [
+    "migrate_v3_installer.py",
+    "fix_pagamenti_v2.py",
+    "models.py",
+]
+
 def clean_previous_builds():
     print("--- Pulizia delle build precedenti ---")
     for folder in FOLDERS_TO_CLEAN:
@@ -38,6 +45,16 @@ def update_file(filepath, pattern, replacement):
 
 if __name__ == "__main__":
     clean_previous_builds()
+
+    # --- Verifica file ausiliari obbligatori ---
+    print("--- Verifica file ausiliari per l'installer ---")
+    missing_aux = [f for f in REQUIRED_AUX_FILES if not os.path.exists(f)]
+    if missing_aux:
+        print(f"\nERRORE: File mancanti: {missing_aux}")
+        print("Assicurati che fix_pagamenti_v2.py sia nella cartella del gestionale prima di buildare.")
+        sys.exit(1)
+    print(f"  OK: {', '.join(REQUIRED_AUX_FILES)}")
+
     current_version = get_current_version()
     print(f"Versione attuale: {current_version}")
     while True:
@@ -58,6 +75,18 @@ if __name__ == "__main__":
             print("\n--- 1/2: Compilazione di Gestionale.exe ---")
             # Compiliamo un solo eseguibile che contiene tutto usando lo stesso interprete Python corrente
             subprocess.run([sys.executable, "-m", "PyInstaller", "gestionale.spec", "--noconfirm"], check=True)
+
+            # Programma "Gestionale Notifiche" per gli altri PC: un solo .exe messo dentro dist\Gestionale,
+            # così l'installer lo copia insieme al gestionale e il server lo offre in download.
+            print("\n--- 1b/2: Compilazione di GestionaleNotifiche.exe ---")
+            here = os.path.abspath(".")
+            subprocess.run([sys.executable, "-m", "PyInstaller", "notifiche_client.py", "--onefile", "--noconsole",
+                            "--noconfirm", "--name", "GestionaleNotifiche",
+                            "--icon", os.path.join(here, "static", "favicon.ico"),
+                            "--add-data", f"{os.path.join(here, 'static', 'favicon.ico')};.",
+                            "--distpath", os.path.join("dist", "Gestionale"),
+                            "--workpath", os.path.join("build", "notifiche"),
+                            "--specpath", os.path.join("build", "notifiche")], check=True)
 
             print("\n--- 2/2: Creazione dell'installer con Inno Setup ---")
             inno_compiler_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
