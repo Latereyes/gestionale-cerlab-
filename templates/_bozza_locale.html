@@ -1,0 +1,149 @@
+{# Copia di sicurezza locale del preventivo in compilazione (editor standard ed edile).
+   - ogni modifica viene copiata nel browser di questo PC (localStorage), anche senza salvare
+   - se un salvataggio non arriva al server (rete, server spento, sessione scaduta) la copia resta
+     e alla riapertura del preventivo compare un avviso per recuperarla
+   - finché ci sono modifiche non salvate la sessione viene tenuta viva e chiudere la pagina chiede conferma #}
+<style>
+.bozza-banner {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 10002;
+    background: var(--surface, #fff); border: 1px solid var(--warning, #f59e0b); border-left: 5px solid var(--warning, #f59e0b);
+    border-radius: var(--radius-md, 10px); box-shadow: var(--shadow-xl, 0 10px 30px rgba(0,0,0,.2));
+    padding: 14px 18px; max-width: min(640px, calc(100vw - 30px)); display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+    font-size: 13.5px; color: var(--text, #1a202c);
+}
+.bozza-banner i.fa-life-ring { color: var(--warning, #f59e0b); font-size: 22px; }
+.bozza-banner .bb-text { flex: 1; min-width: 220px; line-height: 1.45; }
+.bozza-banner .bb-actions { display: flex; gap: 8px; }
+.bozza-indicator {
+    position: fixed; left: 16px; bottom: 14px; z-index: 9998; font-size: 11.5px; color: var(--text-muted, #64748b);
+    background: var(--surface, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 12px; padding: 3px 10px;
+    box-shadow: var(--shadow-xs, none); display: none;
+}
+.bozza-indicator.warn { color: var(--warning-text, #92400e); border-color: var(--warning, #f59e0b); }
+</style>
+<div class="bozza-indicator" id="bozzaIndicator"></div>
+<script>
+// Parte dopo il caricamento completo, così i calcoli automatici della pagina hanno già riempito i campi
+window.addEventListener('load', () => setTimeout(function () {
+    const form = document.getElementById('grid-form');
+    if (!form || !window.localStorage) return;
+    const quoteId = form.dataset.quoteId;
+    const KEY = 'gestionale:bozza:' + quoteId;
+    const indicator = document.getElementById('bozzaIndicator');
+    let dirty = false, submitting = false, timer = null;
+
+    const store = {
+        get() { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } },
+        set(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); return true; } catch (e) { return false; } },
+        del() { try { localStorage.removeItem(KEY); } catch (e) {} }
+    };
+
+    // Fotografia di tutti i campi del form (esclusi i file, che non si possono salvare nel browser)
+    function snapshot() {
+        const fields = [];
+        for (const el of form.elements) {
+            if (!el.name || el.disabled || el.type === 'file' || el.type === 'submit' || el.type === 'button') continue;
+            if ((el.type === 'checkbox' || el.type === 'radio') && !el.checked) continue;
+            fields.push([el.name, el.value]);
+        }
+        return fields;
+    }
+    // confronto "normalizzato": la pagina riformatta alcuni campi (es. "22" ↔ "22 %"), che non sono modifiche vere
+    const norm = (v) => String(v ?? '').replace(/\s*%\s*$/, '').replace(/\s+/g, ' ').trim();
+    const sig = (fields) => JSON.stringify(fields.map(([k, v]) => [k, norm(v)]));
+    const righe = (fields) => new Set(fields.map(f => (f[0].match(/^r\[(\d+)\]/) || [])[1]).filter(Boolean)).size;
+    const ora = (ts) => new Date(ts).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+    function showIndicator(text, warn) {
+        indicator.textContent = text;
+        indicator.className = 'bozza-indicator' + (warn ? ' warn' : '');
+        indicator.style.display = 'block';
+    }
+
+    const baseline = sig(snapshot());   // dati come arrivati dal server
+
+    function saveDraft() {
+        const fields = snapshot();
+        if (sig(fields) === baseline) { store.del(); dirty = false; indicator.style.display = 'none'; return; }
+        const ok = store.set({ ts: Date.now(), fields });
+        dirty = true;
+        showIndicator(ok ? '🛟 Copia di sicurezza su questo PC: ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                         : '⚠️ Copia di sicurezza non riuscita: salva spesso', !ok);
+    }
+    function schedule() { clearTimeout(timer); timer = setTimeout(saveDraft, 600); }
+
+    // ---------- 1. All'apertura: c'è una copia locale diversa dai dati del server? ----------
+    const draft = store.get();
+    if (draft && draft.fields) {
+        if (sig(draft.fields) === baseline) {
+            store.del();   // il server ha già questi dati: la copia non serve più
+        } else {
+            const banner = document.createElement('div');
+            banner.className = 'bozza-banner';
+            banner.innerHTML = `
+                <i class="fas fa-life-ring"></i>
+                <div class="bb-text"><strong>Ci sono modifiche non salvate su questo PC</strong><br>
+                    Ultima copia: ${ora(draft.ts)} · ${righe(draft.fields)} righe. Probabilmente l'ultimo salvataggio non è arrivato al server.</div>
+                <div class="bb-actions">
+                    <button type="button" class="btn" id="bozzaScarta">Scarta</button>
+                    <button type="button" class="btn primary" id="bozzaRipristina"><i class="fas fa-undo"></i> Recupera</button>
+                </div>`;
+            document.body.appendChild(banner);
+            document.getElementById('bozzaScarta').onclick = () => {
+                if (!confirm('Scartare definitivamente le modifiche non salvate di ' + ora(draft.ts) + '?')) return;
+                store.del(); banner.remove();
+            };
+            document.getElementById('bozzaRipristina').onclick = async (ev) => {
+                const btn = ev.currentTarget;
+                btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Recupero...';
+                // Si rimanda al server la copia completa (tutte le righe), poi si ricarica la pagina
+                const fd = new FormData();
+                draft.fields.forEach(([k, v]) => fd.append(k, v));
+                fd.set('is_ajax', '1');
+                try {
+                    const res = await fetch(form.action, { method: 'POST', body: fd, credentials: 'same-origin' });
+                    const data = await res.json().catch(() => null);
+                    if (!res.ok || !data || data.success === false) throw new Error(res.redirected ? 'sessione scaduta: accedi di nuovo e riprova' : 'il server non ha accettato il salvataggio');
+                    store.del();
+                    location.reload();
+                } catch (e) {
+                    alert('Recupero non riuscito (' + e.message + '). La copia resta su questo PC: riprova tra poco.');
+                    btn.disabled = false; btn.innerHTML = '<i class="fas fa-undo"></i> Recupera';
+                }
+            };
+        }
+    }
+
+    // ---------- 2. Copia continua mentre si scrive ----------
+    form.addEventListener('input', schedule, true);
+    form.addEventListener('change', schedule, true);
+    // righe aggiunte/rimosse/riordinate via JavaScript
+    new MutationObserver(schedule).observe(form, { childList: true, subtree: true });
+
+    // ---------- 3. Protezione al salvataggio ----------
+    form.addEventListener('submit', (e) => {
+        saveDraft();   // la copia resta finché la pagina successiva non conferma che il server ha i dati
+        if (!navigator.onLine) {
+            e.preventDefault();
+            alert('Connessione assente: il preventivo NON è stato inviato al server.\nLe modifiche sono al sicuro su questo PC: riprova appena torna la rete.');
+            return;
+        }
+        submitting = true;
+    });
+    window.addEventListener('beforeunload', (e) => {
+        if (dirty && !submitting) { saveDraft(); e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // ---------- 4. Sessione tenuta viva mentre ci sono modifiche non salvate ----------
+    // (la sessione scade dopo 1 ora senza richieste: senza questo, un preventivo lungo
+    //  salvato dopo più di un'ora finirebbe sulla pagina di login e i dati andrebbero persi)
+    setInterval(() => {
+        if (!dirty) return;
+        fetch('/health', { credentials: 'same-origin', cache: 'no-store' })
+            .then(() => { if (indicator.classList.contains('warn')) saveDraft(); })
+            .catch(() => showIndicator('⚠️ Server non raggiungibile · le modifiche sono al sicuro su questo PC', true));
+    }, 5 * 60 * 1000);
+    window.addEventListener('offline', () => showIndicator('⚠️ Connessione assente · le modifiche sono al sicuro su questo PC', true));
+    window.addEventListener('online', () => { if (dirty) saveDraft(); });
+}, 400));
+</script>
