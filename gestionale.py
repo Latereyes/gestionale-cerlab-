@@ -1638,6 +1638,7 @@ def login():
         users = load_users()
         user_found = next((u for u in users if u["username"] == username), None)
         if user_found and check_password_hash(user_found["password_hash"], password):
+            next_url = session.get("next_url", "")
             # Cancella la vecchia sessione, inclusi i nostri "segnali"
             session.clear() 
             session["user_id"] = user_found["username"]
@@ -1648,7 +1649,9 @@ def login():
 
             flash(f"Benvenuto, {user_found['full_name']}!", "success")
             
-            # Vai direttamente alla dashboard senza controllare il changelog
+            # Torna alla pagina richiesta prima del login (solo percorsi interni), altrimenti dashboard
+            if next_url.startswith("/") and not next_url.startswith("//") and not session["force_password_reset"]:
+                return redirect(next_url)
             return redirect(url_for("dashboard"))
         else:
             flash("Credenziali non valide. Riprova.", "error")
@@ -1664,7 +1667,10 @@ def logout():
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if "user_id" not in session: return redirect(url_for("login"))
+        if "user_id" not in session:
+            if request.method == "GET":
+                session["next_url"] = request.full_path
+            return redirect(url_for("login"))
         # NUOVO: Controlla se l'utente deve cambiare password
         if session.get("force_password_reset") and request.endpoint != 'cambia_password':
             flash("Per favore, imposta una nuova password.", "warning")
