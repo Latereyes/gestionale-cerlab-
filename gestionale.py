@@ -997,16 +997,11 @@ def load_users():
 try:
     with open(resource_path("data/changelog.json"), "r", encoding="utf-8") as f:
         CHANGELOG_DATA = json.load(f)
+    # Il file puo' contenere una sola versione (oggetto) o un elenco di versioni
+    if isinstance(CHANGELOG_DATA, dict):
+        CHANGELOG_DATA = [CHANGELOG_DATA]
+    CHANGELOG_DATA = [e for e in CHANGELOG_DATA if isinstance(e, dict) and e.get("version")]
 except (FileNotFoundError, json.JSONDecodeError):
-    CHANGELOG_DATA = []
-
-# Carichiamo il changelog (Sola lettura, resta nella cartella app)
-try:
-    with open(resource_path("data/changelog.json"), "r", encoding="utf-8") as f:
-        CHANGELOG_DATA = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    CHANGELOG_DATA = []
-
     CHANGELOG_DATA = []
     print("ATTENZIONE: File 'data/changelog.json' non trovato o corrotto.")
 def save_users(users_data):
