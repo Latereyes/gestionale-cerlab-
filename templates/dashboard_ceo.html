@@ -223,7 +223,7 @@
         <div class="iva-tile"><div class="iva-header" style="color:#3b82f6"><i class="fas fa-university"></i> IVA Preventivi</div><div class="iva-amount">{{ cashflow.iva_preventivi | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Su vendite incassate</div></div>
         <div class="iva-tile"><div class="iva-header" style="color:#ef4444"><i class="fas fa-arrow-down"></i> IVA Ordini</div><div class="iva-amount">{{ cashflow.iva_ordini | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Su acquisti periodo</div></div>
         <div class="iva-tile"><div class="iva-header" style="color:{{ '#059669' if cashflow.bilancio_iva >= 0 else '#dc2626' }}"><i class="fas fa-balance-scale"></i> Bilancio IVA</div><div class="iva-amount {{ 'text-success' if cashflow.bilancio_iva >= 0 else 'text-danger' }}"> {{ '+' if cashflow.bilancio_iva > 0 else '' }} {{ cashflow.bilancio_iva | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Debito/Credito IVA</div></div>
-        <div class="iva-tile"><div class="iva-header" style="color:#059669"><i class="fas fa-file-contract"></i> IVA Esente</div><div class="iva-amount">{{ cashflow.iva_esente | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Virtuale (no-IVA)</div></div>
+        <div class="iva-tile"><div class="iva-header" style="color:#059669"><i class="fas fa-file-contract"></i> IVA Esente</div><div class="iva-amount">{{ cashflow.iva_esente | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Non applicata sugli incassi esenti</div></div>
       </div>
     </div>
   </div>

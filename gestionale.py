@@ -4306,10 +4306,6 @@ def dashboard_ceo():
                 dovuto_lordo = imponibile if is_no_iva else tot_lordo
                 cashflow["da_saldare_netto"] += (dovuto_lordo - inc_tot_quote) * ratio_netto
 
-                # IVA esente
-                if is_no_iva:
-                    cashflow["iva_esente"] += _to_float(p.get("tot_iva", 0))
-
             # == B. LOGICA CASSA (data pagamento, senza filtro periodo competenza) ==
             for pag in p.get("pagamenti", []):
                 val_lordo = _to_float(pag.get("importo", 0))
@@ -4327,6 +4323,9 @@ def dashboard_ceo():
                     cashflow["fee_versata"] += fee_su_incasso
                     if not is_no_iva:
                         cashflow["iva_preventivi"] += quota_iva
+                    elif imponibile > 0:
+                        # IVA esente per cassa: quota dell'IVA non applicata corrispondente all'incasso
+                        cashflow["iva_esente"] += val_netto * _to_float(p.get("tot_iva", 0)) / imponibile
 
                 if pag.get("is_scheduled"):
                     cashflow["in_attesa_netto"] += val_netto
@@ -4482,6 +4481,211 @@ def _invia_workbook(wb, filename):
     )
 
 
+_FMT_EURO = '#,##0.00\\ "€"'
+_FMT_PCT = '0.0%'
+_FMT_INT = '0'
+
+
+class _FoglioCalcoli:
+    """Costruisce il foglio CALCOLI di un export: sezioni con voci e tabelle di formule Excel
+    che leggono la tabella dati (Tabella1), cosi' i totali seguono eventuali filtri o modifiche."""
+
+    def __init__(self, wb, titolo, sottotitolo):
+        from openpyxl.styles import Font, PatternFill, Alignment
+        self.Font, self.PatternFill, self.Alignment = Font, PatternFill, Alignment
+        idx = len(wb.sheetnames)
+        if "CALCOLI" in wb.sheetnames:
+            idx = wb.sheetnames.index("CALCOLI")
+            del wb["CALCOLI"]
+        self.ws = wb.create_sheet("CALCOLI", idx)
+        self.ws.sheet_view.showGridLines = False
+        self.ws["A1"] = titolo
+        self.ws["A1"].font = Font(bold=True, size=14, color="1F2937")
+        self.ws["A2"] = sottotitolo
+        self.ws["A2"].font = Font(italic=True, size=10, color="6B7280")
+        self.ws.column_dimensions["A"].width = 38
+        for col in "BCDEFGHI":
+            self.ws.column_dimensions[col].width = 17
+        self.row = 4
+
+    @staticmethod
+    def col(nome):
+        """Riferimento strutturato a una colonna di Tabella1 (doppie parentesi: vale anche con spazi e simboli)."""
+        return f"Tabella1[[{nome}]]"
+
+    def sezione(self, titolo, larghezza=2):
+        self.row += 1
+        for c in range(1, larghezza + 1):
+            cell = self.ws.cell(row=self.row, column=c)
+            cell.fill = self.PatternFill("solid", fgColor="1F2937")
+            cell.font = self.Font(bold=True, color="FFFFFF")
+        self.ws.cell(row=self.row, column=1, value=titolo)
+        self.row += 1
+
+    def voce(self, etichetta, formula, fmt=_FMT_EURO, nota=None, evidenzia=False):
+        a = self.ws.cell(row=self.row, column=1, value=etichetta)
+        b = self.ws.cell(row=self.row, column=2, value=formula)
+        b.number_format = fmt
+        if evidenzia:
+            for cell in (a, b):
+                cell.font = self.Font(bold=True)
+                cell.fill = self.PatternFill("solid", fgColor="DCFCE7")
+        if nota:
+            n = self.ws.cell(row=self.row, column=3, value=nota)
+            n.font = self.Font(italic=True, size=9, color="6B7280")
+        ref = f"B{self.row}"
+        self.row += 1
+        return ref
+
+    def tabella(self, intestazioni, righe, formati):
+        """righe: lista di (etichetta, valore_prima_colonna_o_None, funzione(riga_excel, cella_etichetta) -> lista formule)."""
+        self.row += 1
+        for c, h in enumerate(intestazioni, start=1):
+            cell = self.ws.cell(row=self.row, column=c, value=h)
+            cell.font = self.Font(bold=True)
+            cell.fill = self.PatternFill("solid", fgColor="E5E7EB")
+            cell.alignment = self.Alignment(wrap_text=True, vertical="center")
+        self.row += 1
+        prima = self.row
+        for etichetta, fmt_etichetta, formule in righe:
+            cell = self.ws.cell(row=self.row, column=1, value=etichetta)
+            if fmt_etichetta:
+                cell.number_format = fmt_etichetta
+                cell.alignment = self.Alignment(horizontal="left")
+            for c, (f, fmt) in enumerate(zip(formule(self.row, f"$A{self.row}"), formati), start=2):
+                x = self.ws.cell(row=self.row, column=c, value=f)
+                x.number_format = fmt
+            self.row += 1
+        return prima, self.row - 1
+
+    def riga_totale(self, prima, ultima, colonne, formati):
+        cell = self.ws.cell(row=self.row, column=1, value="Totale")
+        cell.font = self.Font(bold=True)
+        for col, fmt in zip(colonne, formati):
+            x = self.ws[f"{col}{self.row}"]
+            x.value = f"=SUM({col}{prima}:{col}{ultima})"
+            x.number_format = fmt
+            x.font = self.Font(bold=True)
+        self.row += 1
+
+
+def _mesi_periodo(start_date, end_date, max_mesi=36):
+    mesi, d = [], start_date.replace(day=1)
+    while d <= end_date and len(mesi) < max_mesi:
+        mesi.append(d)
+        d = (d.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+    return mesi
+
+
+def _calcoli_cashflow(wb, start_date, end_date, righe, n_programmati):
+    C = _FoglioCalcoli.col
+    f = _FoglioCalcoli(
+        wb, "Riepilogo cashflow (per cassa)",
+        f"Periodo {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')} | generato il "
+        f"{datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} | stesse regole della dashboard CEO")
+    E, U, FEE, T, ID = C("ENTRATE NETTE (€)"), C("USCITE NETTE (€)"), C("FEE VERSATA "), C("TIPO"), C("ID (Rif.)")
+    IVA_O, IVA_P, IVA_E, DT, VEN = C("IVA ORDINE (€)"), C("IVA PREVENTIVO (€)"), C("IVA ESENTE (€)"), C("DATA TRANSAZIONE"), C("VENDITORE")
+
+    f.sezione("BILANCIO DI CASSA")
+    entrate = f.voce("Entrate nette (incassi)", f"=SUM({E})", nota="Pagamenti incassati nel periodo, IVA esclusa; rettifiche comprese")
+    f.voce("  Uscite ordini fornitore", f'=SUMIFS({U},{ID},"Ord.*")', nota="Alla data di conferma d'ordine o di arrivo")
+    f.voce("  Uscite costi edili", f'=SUMIFS({U},{ID},"Costi Stimati*")', nota="Costi manuali dei preventivi edili, alla data di conferma")
+    uscite = f.voce("Totale uscite nette", f"=SUM({U})")
+    fee = f.voce("Fee versata", f"=SUM({FEE})", nota="Calcolata sugli incassi")
+    f.voce("BILANCIO (entrate - uscite - fee)", f"={entrate}-{uscite}-{fee}", evidenzia=True, nota="Uguale al riquadro Bilancio della dashboard CEO")
+
+    f.sezione("IVA")
+    iva_p = f.voce("IVA incassata sui preventivi", f"=SUM({IVA_P})")
+    iva_o = f.voce("IVA pagata sugli ordini", f"=SUM({IVA_O})")
+    f.voce("BILANCIO IVA (incassata - pagata)", f"={iva_p}-{iva_o}", evidenzia=True, nota="Positivo = IVA a debito")
+    f.voce("IVA esente (non applicata sugli incassi)", f"=SUM({IVA_E})", nota="Solo informativa")
+
+    f.sezione("MOVIMENTI")
+    f.voce("Numero incassi", f'=COUNTIFS({T},"INCASSO")', fmt=_FMT_INT)
+    f.voce("  di cui rettifiche", f'=COUNTIFS({ID},"Rettifica*")', fmt=_FMT_INT)
+    f.voce("Numero uscite", f'=COUNTIFS({T},"USCITA")', fmt=_FMT_INT)
+
+    f.sezione("INCASSI PROGRAMMATI (non ancora incassati, esclusi dal bilancio)")
+    ultima = max(n_programmati, 1) + 1
+    f.voce("Numero pagamenti programmati", f"=COUNTA(Programmati!A2:A{ultima})", fmt=_FMT_INT, nota="Dettaglio nel foglio Programmati")
+    f.voce("Importo programmato (lordo)", f"=SUM(Programmati!F2:F{ultima})")
+    f.voce("Importo programmato (netto)", f"=SUM(Programmati!G2:G{ultima})")
+
+    f.sezione("ANDAMENTO MENSILE", larghezza=8)
+    def _mese(r, a):
+        fine = f"EOMONTH({a},0)"
+        crit = f'{DT},">="&{a},{DT},"<="&{fine}'
+        return [f"=SUMIFS({E},{crit})", f"=SUMIFS({U},{crit})", f"=SUMIFS({FEE},{crit})",
+                f"=B{r}-C{r}-D{r}", f"=SUMIFS({IVA_P},{crit})", f"=SUMIFS({IVA_O},{crit})", f"=F{r}-G{r}"]
+    p, u = f.tabella(["Mese", "Entrate nette", "Uscite nette", "Fee", "Bilancio", "IVA incassata", "IVA ordini", "Bilancio IVA"],
+                     [(m, "mmmm yyyy", _mese) for m in _mesi_periodo(start_date, end_date)], [_FMT_EURO] * 7)
+    f.riga_totale(p, u, "BCDEFGH", [_FMT_EURO] * 7)
+
+    venditori = sorted({(x.get("VENDITORE") or "N/D") for x in righe if x.get("TIPO") == "INCASSO"})
+    if venditori:
+        f.sezione("ENTRATE PER VENDITORE", larghezza=4)
+        f.tabella(["Venditore", "Entrate nette", "Fee", "% sulle entrate"],
+                  [(v, None, lambda r, a: [f"=SUMIFS({E},{VEN},{a})", f"=SUMIFS({FEE},{VEN},{a})",
+                                           f"=IF({entrate}=0,0,B{r}/{entrate})"]) for v in venditori],
+                  [_FMT_EURO, _FMT_EURO, _FMT_PCT])
+
+
+def _calcoli_analisi(wb, start_date, end_date, righe):
+    C = _FoglioCalcoli.col
+    f = _FoglioCalcoli(
+        wb, "Riepilogo analisi preventivi (per competenza)",
+        f"Preventivi confermati dal {start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')} | generato il "
+        f"{datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} | stesse regole dei KPI della dashboard CEO")
+    N, TOT, IMP, IVA = C("N. Preventivo"), C("Totale Preventivo (€)"), C("Imponibile Cliente (€)"), C("IVA (€)")
+    COS, IVO, PRE, MAR = C("Costi da Ordini (€)"), C("IVA su Ordini (€)"), C("Costo Negozio Stimato (€)"), C("Margine (€)")
+    FEE, INC, DAI, PRG = C("FEE (€)"), C("Incassato (€)"), C("Da Incassare (€)"), C("Programmato Futuro (€)")
+    ST, STP, VEN, DATA, ES = C("Stato"), C("Stato Pagamento"), C("Venditore"), C("Data"), C("Esente IVA")
+
+    f.sezione("PREVENTIVI")
+    f.voce("Numero preventivi", f"=COUNTA({N})", fmt=_FMT_INT)
+    f.voce("  di cui esenti IVA", f'=COUNTIFS({ES},"SÌ")', fmt=_FMT_INT)
+    f.voce("Totale preventivi (IVA inclusa)", f"=SUM({TOT})")
+    imp = f.voce("Imponibile clienti", f"=SUM({IMP})")
+    f.voce("IVA sui preventivi", f"=SUM({IVA})")
+
+    f.sezione("COSTI E MARGINE")
+    reali = f.voce("Costi reali (ordini netti + costi edili)", f"=SUM({COS})")
+    f.voce("IVA sugli ordini", f"=SUM({IVO})")
+    presunti = f.voce("Costi presunti (da preventivo)", f"=SUM({PRE})")
+    f.voce("Scostamento (presunti - reali)", f"={presunti}-{reali}", nota="Include i preventivi ancora senza ordini")
+    marg = f.voce("MARGINE", f"=SUM({MAR})", evidenzia=True, nota="Imponibile meno costi reali (o presunti se non ci sono ordini)")
+    f.voce("Margine % sull'imponibile", f"=IF({imp}=0,0,{marg}/{imp})", fmt=_FMT_PCT)
+    f.voce("Fee", f"=SUM({FEE})")
+
+    f.sezione("INCASSI")
+    inc = f.voce("Incassato", f"=SUM({INC})", nota="Importi lordi, rettifiche comprese")
+    dai = f.voce("Da incassare", f"=SUM({DAI})", evidenzia=True)
+    prg = f.voce("  di cui gia' programmato", f"=SUM({PRG})")
+    f.voce("  di cui da programmare", f"={dai}-{prg}")
+
+    def _gruppo(colonna):
+        return lambda r, a: [f"=COUNTIFS({colonna},{a})", f"=SUMIFS({IMP},{colonna},{a})",
+                             f"=SUMIFS({MAR},{colonna},{a})", f"=IF(C{r}=0,0,D{r}/C{r})", f"=SUMIFS({DAI},{colonna},{a})"]
+    intest = ["", "Preventivi", "Imponibile", "Margine", "Margine %", "Da incassare"]
+    formati = [_FMT_INT, _FMT_EURO, _FMT_EURO, _FMT_PCT, _FMT_EURO]
+
+    f.sezione("PER STATO", larghezza=6)
+    f.tabella(["Stato"] + intest[1:], [(s, None, _gruppo(ST)) for s in ("Confermato", "In Lavorazione", "Chiuso")], formati)
+    f.sezione("PER STATO PAGAMENTO", larghezza=6)
+    f.tabella(["Stato pagamento"] + intest[1:], [(s, None, _gruppo(STP)) for s in ("Saldato", "Da Saldare")], formati)
+
+    venditori = sorted({(x.get("Venditore") or "N/D") for x in righe})
+    f.sezione("PER VENDITORE", larghezza=6)
+    f.tabella(["Venditore"] + intest[1:], [(v, None, _gruppo(VEN)) for v in venditori], formati)
+
+    f.sezione("PER MESE DI CONFERMA", larghezza=6)
+    def _mese(r, a):
+        crit = f'{DATA},">="&{a},{DATA},"<="&EOMONTH({a},0)'
+        return [f"=COUNTIFS({crit})", f"=SUMIFS({IMP},{crit})", f"=SUMIFS({MAR},{crit})",
+                f"=IF(C{r}=0,0,D{r}/C{r})", f"=SUMIFS({DAI},{crit})"]
+    f.tabella(["Mese"] + intest[1:], [(m, "mmmm yyyy", _mese) for m in _mesi_periodo(start_date, end_date)], formati)
+
+
 @app.route("/dashboard/ceo/export_cashflow")
 @login_required
 def export_cashflow_excel():
@@ -4576,6 +4780,7 @@ def export_cashflow_excel():
         if "€" in str(c.value):
             c.number_format = '#,##0.00\\ "€"'
     _scrivi_foglio_tabella(ws_p, sorted(programmati, key=lambda r: r["DATA PREVISTA"] or datetime.date.max))
+    _calcoli_cashflow(wb, start_date, end_date, cashflow_rows, len(programmati))
 
     filename = f"Cashflow_Dettagliato_{start_date.strftime('%d-%m')}_{end_date.strftime('%d-%m-%Y')}.xlsx"
     return _invia_workbook(wb, filename)
@@ -4650,6 +4855,7 @@ def export_excel_ceo():
         flash("Il file modello non contiene un foglio chiamato 'Analisi'.", "error")
         return redirect(url_for("dashboard_ceo"))
     _scrivi_foglio_tabella(wb["Analisi"], export_data, formati_colonna={"FEE %": "0.0%"})
+    _calcoli_analisi(wb, start_date, end_date, export_data)
 
     filename = f"Analisi_Globale_{start_date.strftime('%d-%m')}_{end_date.strftime('%d-%m-%Y')}.xlsx"
     return _invia_workbook(wb, filename)
