@@ -1641,6 +1641,7 @@ def login():
             session["user_role"] = user_found["role"]
             session["user_sigla"] = user_found.get("sigla", "XX")
             session["force_password_reset"] = user_found.get("force_password_reset", False)
+            lega_utente_al_pc(request.remote_addr, user_found["username"], user_found["full_name"])
 
             flash(f"Benvenuto, {user_found['full_name']}!", "success")
             
@@ -1656,6 +1657,8 @@ def login():
 
 @app.route("/logout", methods=['GET', 'POST'])
 def logout():
+    if "user_id" in session:
+        stacca_utente_dal_pc(request.remote_addr, session["user_id"])
     session.clear()
     return redirect(url_for("login"))
 
@@ -1762,6 +1765,39 @@ def traccia_utente_collegato():
             "ip": request.remote_addr,
             "ts": time.time(),
         }
+    # Le richieste automatiche delle pagine aperte (GET /api/...: badge, chat, notifiche) non contano:
+    # solo un'azione vera "lega" l'utente al PC, così una scheda dimenticata aperta non lo ricollega.
+    if request.method != "GET" or not request.path.startswith("/api/"):
+        lega_utente_al_pc(request.remote_addr, session["user_id"], session.get("user_name"))
+
+# --- Chi sta usando il gestionale su ciascun PC ---
+# Il programma "Gestionale Notifiche" mostra chat e notifiche di questo utente, non di chi lo ha installato:
+# se sullo stesso PC lavorano più persone, i messaggi seguono chi ha fatto l'ultima azione nel gestionale.
+_UTENTE_DEL_PC = {}               # chiave PC -> {"user", "nome", "ts"}
+UTENTE_DEL_PC_MAX_ORE = 12        # dopo una giornata senza usare il gestionale il PC torna "libero"
+
+def _chiave_pc(ip):
+    """Il PC server arriva come 127.0.0.1 o con l'IP di rete: è sempre lo stesso PC."""
+    return "server" if ip in ("127.0.0.1", "::1", LAN_IP) else (ip or "")
+
+def lega_utente_al_pc(ip, username, nome=None):
+    with _UTENTI_ATTIVITA_LOCK:
+        _UTENTE_DEL_PC[_chiave_pc(ip)] = {"user": username, "nome": nome or username, "ts": time.time()}
+
+def utente_del_pc(ip):
+    """Username di chi sta usando il gestionale dal PC con questo IP, oppure None."""
+    with _UTENTI_ATTIVITA_LOCK:
+        info = _UTENTE_DEL_PC.get(_chiave_pc(ip))
+    if not info or time.time() - info["ts"] > UTENTE_DEL_PC_MAX_ORE * 3600:
+        return None
+    return info["user"]
+
+def stacca_utente_dal_pc(ip, username=None):
+    """Il PC non è più di nessuno (uscita dal gestionale, PC bloccato o inattivo)."""
+    with _UTENTI_ATTIVITA_LOCK:
+        info = _UTENTE_DEL_PC.get(_chiave_pc(ip))
+        if info and (username is None or info["user"] == username):
+            del _UTENTE_DEL_PC[_chiave_pc(ip)]
 
 def get_utenti_collegati(minuti=10):
     """Utenti che hanno usato il gestionale negli ultimi `minuti` minuti (i più recenti prima)."""
@@ -1884,19 +1920,24 @@ def _widget_tokens():
     except Exception:
         return {}
 
-def _widget_user():
-    """Utente collegato al widget (header X-Widget-Token), oppure None."""
+def _widget_autorizzato():
+    """Il widget ha un token valido (header X-Widget-Token): il PC è stato abilitato con un accesso."""
     token = request.headers.get("X-Widget-Token", "")
-    if not token:
-        return None
-    info = _widget_tokens().get(hashlib.sha256(token.encode()).hexdigest())
-    if not info:
-        return None
-    return next((u for u in load_users() if u["username"] == info["user"]), None)
+    return bool(token) and hashlib.sha256(token.encode()).hexdigest() in _widget_tokens()
+
+def _widget_user():
+    """Utente di cui il widget mostra messaggi e notifiche: chi sta usando il gestionale da quel PC
+    (non chi ha fatto l'accesso al widget), oppure None se in questo momento nessuno lo sta usando."""
+    username = utente_del_pc(request.remote_addr)
+    return next((u for u in load_users() if u["username"] == username), None) if username else None
+
+def _widget_risposta_non_autorizzato():
+    return jsonify({"ok": False, "error": "non_autorizzato"}), 401
 
 @app.route("/api/widget/login", methods=["POST"])
 def api_widget_login():
-    """Il widget si collega una volta con utente e password e riceve un token personale (salvato solo su quel PC)."""
+    """Il widget si collega una volta con utente e password e riceve un token (salvato solo su quel PC) che abilita
+    il PC; i messaggi mostrati poi seguono chi sta usando il gestionale da quel PC."""
     if not _ip_rete_locale(request.remote_addr):
         return jsonify({"ok": False, "error": "Accesso consentito solo dalla rete locale"}), 403
     data = request.get_json(silent=True) or {}
@@ -1912,15 +1953,20 @@ def api_widget_login():
             "user": user["username"], "pc": str(data.get("pc", ""))[:60], "ip": request.remote_addr,
             "creato": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
         WIDGET_TOKENS_FILE.write_text(json.dumps(tokens, indent=1), encoding="utf-8")
+    lega_utente_al_pc(request.remote_addr, user["username"], user["full_name"])  # chi accede qui è seduto a quel PC
     return jsonify({"ok": True, "token": token, "username": user["username"], "full_name": user["full_name"]})
 
 @app.route("/api/widget/feed")
 def api_widget_feed():
     """Novità per l'utente del widget: messaggi chat ricevuti e notifiche non lette.
     ?msg=<ultimo id messaggio visto>; senza parametro restituisce solo il punto di partenza (niente arretrati)."""
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
     user = _widget_user()
     if not user:
-        return jsonify({"ok": False, "error": "non_autorizzato"}), 401
+        # nessuno sta usando il gestionale da questo PC: niente messaggi personali
+        return jsonify({"ok": True, "segue_pc": True, "username": None, "full_name": None, "ultimo_msg_id": None,
+                        "messaggi": [], "messaggi_non_letti": 0, "notifiche": []})
     me = user["username"]
     db = _DBSession()
     try:
@@ -1942,16 +1988,19 @@ def api_widget_feed():
                                                              ).limit(30).all()]
     finally:
         db.close()
-    return jsonify({"ok": True, "username": me, "full_name": user["full_name"], "ultimo_msg_id": ultimo,
+    return jsonify({"ok": True, "segue_pc": True, "username": me, "full_name": user["full_name"], "ultimo_msg_id": ultimo,
                     "messaggi": messaggi, "messaggi_non_letti": non_letti, "notifiche": notifiche})
 
 @app.route("/api/widget/rispondi", methods=["POST"])
 def api_widget_rispondi():
     """Risposta rapida dal widget: invia un messaggio chat e segna come letti quelli ricevuti da quel collega."""
-    user = _widget_user()
-    if not user:
-        return jsonify({"ok": False, "error": "non_autorizzato"}), 401
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
     data = request.get_json(silent=True) or {}
+    user = _widget_user()
+    # l'avviso era di un altro utente (nel frattempo al PC si è seduto un collega): non si risponde a suo nome
+    if not user or ("come" in data and data["come"] != user["username"]):
+        return jsonify({"ok": False, "error": "su questo PC ora c'è un altro utente"}), 409
     to_user, text = str(data.get("to", "")), str(data.get("text", "")).strip()
     if not to_user or not text:
         return jsonify({"ok": False, "error": "Messaggio vuoto"}), 400
@@ -1973,9 +2022,11 @@ def api_widget_rispondi():
 
 @app.route("/api/widget/notifica-letta", methods=["POST"])
 def api_widget_notifica_letta():
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
     user = _widget_user()
     if not user:
-        return jsonify({"ok": False, "error": "non_autorizzato"}), 401
+        return jsonify({"ok": False, "error": "nessun utente su questo PC"}), 409
     nid = str((request.get_json(silent=True) or {}).get("id", ""))
     db = _DBSession()
     try:
@@ -1984,6 +2035,15 @@ def api_widget_notifica_letta():
         db.commit()
     finally:
         db.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/widget/rilascia", methods=["POST"])
+def api_widget_rilascia():
+    """Il widget segnala che il PC è bloccato o inattivo: da qui in poi nessun messaggio personale
+    finché qualcuno non torna a usare il gestionale da quel PC."""
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
+    stacca_utente_dal_pc(request.remote_addr, (request.get_json(silent=True) or {}).get("user"))
     return jsonify({"ok": True})
 
 @app.route("/health")

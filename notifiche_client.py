@@ -7,7 +7,12 @@ Resta nell'area di notifica vicino all'orologio e mostra avvisi (con suono) quan
 Cliccando un avviso si apre la pagina giusta del gestionale.
 
 Trova da solo il PC server sulla rete locale e si avvia con Windows. Al primo avvio chiede
-utente e password del gestionale (una volta sola) per ricevere i propri messaggi e notifiche.
+utente e password del gestionale (una volta sola) per abilitare il PC.
+
+Messaggi e notifiche personali seguono chi sta usando il gestionale da questo PC: se nell'arco
+della giornata si alternano più colleghi, ciascuno riceve i propri. Quando il PC viene bloccato o
+resta inattivo, o si esce dal gestionale, i messaggi personali si nascondono finché qualcuno non
+torna a usare il gestionale.
 
 Compilato da build.py come GestionaleNotifiche.exe e incluso nell'installer;
 si scarica anche dal gestionale (pulsante "Notifiche su questo PC").
@@ -34,6 +39,8 @@ from PIL import Image, ImageDraw
 APP = "Gestionale Notifiche"
 PORTA = 5001
 INTERVALLO_SECS = 5
+MINUTI_INATTIVITA = 30   # PC senza mouse/tastiera per tanto tempo: si nascondono i messaggi personali
+SECS_BLOCCO = 60         # PC bloccato (Win+L) per almeno tanto: idem
 CONFIG = Path(os.environ.get("APPDATA") or Path.home()) / "GestionaleNotifiche" / "config.json"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -104,6 +111,33 @@ def suono(tipo):
         pass
 
 
+def secondi_inattivita():
+    """Da quanti secondi nessuno tocca mouse o tastiera di questo PC."""
+    try:
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        info = LASTINPUTINFO(ctypes.sizeof(LASTINPUTINFO), 0)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return 0
+        return ((ctypes.windll.kernel32.GetTickCount() - info.dwTime) & 0xFFFFFFFF) / 1000
+    except Exception:
+        return 0
+
+
+def pc_bloccato():
+    """True se è mostrata la schermata di blocco di Windows (il desktop non è accessibile)."""
+    try:
+        user32 = ctypes.windll.user32
+        user32.OpenInputDesktop.restype = ctypes.c_void_p
+        h = user32.OpenInputDesktop(0, False, 0x0100)  # DESKTOP_SWITCHDESKTOP
+        if not h:
+            return True
+        user32.CloseDesktop(ctypes.c_void_p(h))
+        return False
+    except Exception:
+        return False
+
+
 def area_lavoro():
     """Area dello schermo senza la barra delle applicazioni (sinistra, alto, destra, basso)."""
     try:
@@ -159,7 +193,8 @@ class UI:
         self.root.after(150, self._svuota_coda)
 
     # ---------- avvisi ----------
-    def avviso(self, tipo, titolo, testo, link=None, rispondi_a=None, durata=12):
+    def avviso(self, tipo, titolo, testo, link=None, rispondi_a=None, durata=12, di=None):
+        """di = username a cui appartiene l'avviso (chat, notifiche): si chiude se al PC cambia utente."""
         if len(self.avvisi) >= self.MAX_AVVISI:
             self._chiudi(self.avvisi[0])
         colore = COLORI.get(tipo, "#4f46e5")
@@ -188,7 +223,7 @@ class UI:
                      anchor="w", justify="left", wraplength=self.LARGHEZZA - 30)
         b.pack(fill="x", pady=(2, 0))
 
-        stato = {"finestra": w, "timer": None, "durata": durata * 1000, "entry": None}
+        stato = {"finestra": w, "timer": None, "durata": durata * 1000, "entry": None, "di": di}
         x.bind("<Button-1>", lambda e: self._chiudi(stato))
 
         def apri(_e=None):
@@ -219,7 +254,7 @@ class UI:
                 esito.configure(text="Invio...", fg="#64748b")
 
                 def lavoro():
-                    ok, err = self.app.rispondi(rispondi_a, txt)
+                    ok, err = self.app.rispondi(rispondi_a, txt, di)
                     self.esegui(fine, ok, err)
 
                 def fine(ok, err):
@@ -262,6 +297,11 @@ class UI:
         self._programma_chiusura(stato)
         if self.app.suono_attivo:
             suono(tipo)
+
+    def chiudi_personali(self, tranne=None):
+        """Chiude gli avvisi con messaggi e notifiche di un utente che non è più al PC."""
+        for stato in [s for s in self.avvisi if s["di"] and s["di"] != tranne]:
+            self._chiudi(stato)
 
     def _programma_chiusura(self, stato):
         w = stato["finestra"]
@@ -307,7 +347,8 @@ class UI:
         f = tk.Frame(w, padx=22, pady=18)
         f.pack()
         tk.Label(f, text="Accedi con il tuo utente del gestionale", font=("Segoe UI Semibold", 11)).grid(row=0, column=0, columnspan=2, sticky="w")
-        tk.Label(f, text="Serve una volta sola: così ricevi i tuoi messaggi e le tue notifiche\ne puoi rispondere in chat direttamente da qui.",
+        tk.Label(f, text="Serve una volta sola per abilitare questo PC. Poi qui arrivano i messaggi e le notifiche\n"
+                         "di chi sta usando il gestionale su questo PC, e si può rispondere in chat da qui.",
                  font=("Segoe UI", 9), fg="#64748b", justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 12))
         tk.Label(f, text="Utente", font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w")
         u = tk.Entry(f, width=28, font=("Segoe UI", 10))
@@ -359,7 +400,11 @@ class ClientNotifiche:
         self.attive = self.cfg.get("notifiche", True)
         self.suono_attivo = self.cfg.get("suono", True)
         self.token = self.cfg.get("token")
-        self.utente = self.cfg.get("utente_nome")
+        self.utente = None           # nome di chi sta usando il gestionale da questo PC (dal server)
+        self.utente_pc = None        # il suo username
+        self.salutato = None         # ultimo utente a cui si è mostrato "ora arrivano i messaggi di..."
+        self.rilasciato = False      # PC bloccato/inattivo già segnalato al server
+        self.minuti_inattivita = self.cfg.get("minuti_inattivita", MINUTI_INATTIVITA)
         self.ultimo_id = None        # attività
         self.ultimo_msg = None       # messaggi chat
         self.notifiche_viste = None  # id notifiche già mostrate
@@ -381,7 +426,8 @@ class ClientNotifiche:
         try:
             CONFIG.parent.mkdir(parents=True, exist_ok=True)
             self.cfg.update({"server": self.server, "notifiche": self.attive, "suono": self.suono_attivo,
-                             "token": self.token, "utente_nome": self.utente})
+                             "token": self.token, "minuti_inattivita": self.minuti_inattivita})
+            self.cfg.pop("utente_nome", None)  # l'utente non è più fisso: lo dice il server
             CONFIG.write_text(json.dumps(self.cfg), encoding="utf-8")
         except Exception:
             pass
@@ -432,24 +478,51 @@ class ClientNotifiche:
             return False, "Server non raggiungibile."
         if not r.get("ok"):
             return False, r.get("error", "Accesso non riuscito.")
-        self.token, self.utente = r["token"], r["full_name"]
-        self.ultimo_msg, self.notifiche_viste = None, None
+        self.token = r["token"]
         self._salva_config()
-        self.icon.update_menu()
+        self.rilasciato = False
+        # chi fa l'accesso qui è seduto al PC: anche il server lo considera l'utente di questo PC
+        self._cambia_utente(r["username"], r["full_name"], saluto=False)
+        self.salutato = r["username"]
         self.ui.esegui(self.ui.avviso, "sistema", f"Ciao {self.utente}!",
-                       "Da ora ricevi qui i tuoi messaggi e le tue notifiche. Puoi rispondere in chat direttamente dagli avvisi.")
+                       "Ricevi qui i tuoi messaggi e le tue notifiche finché usi il gestionale su questo PC. "
+                       "Puoi rispondere in chat direttamente dagli avvisi.")
         return True, ""
 
-    def esci_account(self, *_):
-        self.token, self.utente = None, None
-        self._salva_config()
-        self.icon.update_menu()
+    def rilascia(self, *_):
+        """Nasconde i messaggi personali: il PC non è più di nessuno finché qualcuno non usa il gestionale."""
+        if self.utente_pc and self.server and self.token:
+            try:
+                http_json(self.server + "api/widget/rilascia", {"user": self.utente_pc}, token=self.token)
+            except Exception:
+                pass
+        self._cambia_utente(None, None)
 
-    def rispondi(self, a_chi, testo):
+    def _cambia_utente(self, username, nome, saluto=True):
+        if username == self.utente_pc:
+            self.utente = nome or self.utente
+            return
+        self.utente_pc, self.utente = username, nome
+        # si riparte da zero: niente arretrati, e via gli avvisi dell'utente precedente
+        self.ultimo_msg, self.notifiche_viste, self.non_letti = None, None, 0
+        self.ui.esegui(self.ui.chiudi_personali, username)
+        if username and saluto and username != self.salutato:
+            self.avviso("sistema", f"Messaggi di {nome}",
+                        f"Su questo PC ora arrivano i messaggi e le notifiche di {nome}.")
+        if username:
+            self.salutato = username
+        self._aggiorna()
+
+    def rispondi(self, a_chi, testo, di=None):
+        dati = {"to": a_chi, "text": testo}
+        if di:
+            dati["come"] = di  # il server rifiuta se nel frattempo al PC c'è un altro utente
         try:
-            r = http_json(self.server + "api/widget/rispondi", {"to": a_chi, "text": testo}, token=self.token)
+            r = http_json(self.server + "api/widget/rispondi", dati, token=self.token)
             return bool(r.get("ok")), r.get("error", "")
         except urllib.error.HTTPError as e:
+            if e.code == 409:
+                return False, "su questo PC ora c'è un altro utente"
             return False, "accesso scaduto, accedi di nuovo" if e.code == 401 else f"errore {e.code}"
         except Exception:
             return False, "server non raggiungibile"
@@ -476,7 +549,7 @@ class ClientNotifiche:
 
     def _tooltip(self):
         extra = f"\n{self.non_letti} messaggi non letti" if self.non_letti else ""
-        chi = f"\n{self.utente}" if self.utente else ""
+        chi = f"\nMessaggi di {self.utente}" if self.utente else ""
         return f"{APP}{chi}\n{self._stato()}{extra}"[:127]
 
     def _aggiorna(self):
@@ -489,7 +562,7 @@ class ClientNotifiche:
         return pystray.Menu(
             M(APP, None, enabled=False),
             M(lambda i: self._stato(), None, enabled=False),
-            M(lambda i: f"Utente: {self.utente}" if self.utente else "Non hai ancora fatto l'accesso", None, enabled=False),
+            M(lambda i: self._chi(), None, enabled=False),
             pystray.Menu.SEPARATOR,
             M("Apri Gestionale", lambda *_: self.apri("/"), default=True, enabled=lambda i: bool(self.server)),
             M(lambda i: f"Apri chat ({self.non_letti} non letti)" if self.non_letti else "Apri chat",
@@ -499,12 +572,20 @@ class ClientNotifiche:
             M("Suono", self._toggle_suono, checked=lambda i: self.suono_attivo),
             M("Avvia con Windows", self._toggle_avvio, checked=lambda i: self.avvio_automatico()),
             pystray.Menu.SEPARATOR,
+            M(lambda i: f"Non sono {self.utente}: nascondi i suoi messaggi" if self.utente else "-", self.rilascia,
+              visible=lambda i: bool(self.utente)),
             M(lambda i: "Cambia utente..." if self.token else "Accedi...", lambda *_: self.ui.esegui(self.ui.chiedi_accesso),
               enabled=lambda i: bool(self.server)),
-            M("Esci dall'account", self.esci_account, visible=lambda i: bool(self.token)),
             M("Cerca di nuovo il server", self._ricerca),
             M("Chiudi programma", self._esci),
         )
+
+    def _chi(self):
+        if not self.token:
+            return "Non hai ancora fatto l'accesso"
+        if self.utente:
+            return f"Messaggi di: {self.utente}"
+        return "Nessuno sta usando il gestionale su questo PC"
 
     def _toggle_notifiche(self, *_):
         self.attive = not self.attive
@@ -563,8 +644,15 @@ class ClientNotifiche:
             if e.code == 401:
                 self.token = None
                 self._salva_config()
-                self.avviso("sistema", "Accesso scaduto", "Accedi di nuovo dal menu dell'icona per ricevere i tuoi messaggi.")
+                self._cambia_utente(None, None)
+                self.avviso("sistema", "Accesso scaduto", "Accedi di nuovo dal menu dell'icona per ricevere i messaggi.")
             return
+        # Il server dice chi sta usando il gestionale da questo PC (un server vecchio dà sempre
+        # l'utente del widget). Se nessuno lo sta usando non si mostra nulla di personale.
+        self._cambia_utente(dati.get("username"), dati.get("full_name"))
+        if not self.utente_pc:
+            return
+        di = self.utente_pc
         primo_giro = self.ultimo_msg is None
         self.non_letti = dati.get("messaggi_non_letti", 0)
         if not primo_giro:
@@ -577,15 +665,26 @@ class ClientNotifiche:
                 testo = ultimo["text"] or (f"📎 {ultimo['allegato']}" if ultimo["allegato"] else "")
                 titolo = ultimo["from_name"] + (f"  ({len(msgs)} messaggi)" if len(msgs) > 1 else "")
                 self.avviso("chat", titolo, testo, link=f"/?chat={urllib.parse.quote(mittente)}",
-                            rispondi_a=mittente, durata=30)
+                            rispondi_a=mittente, durata=30, di=di)
         self.ultimo_msg = dati.get("ultimo_msg_id", self.ultimo_msg or 0)
 
         ids = {n["id"] for n in dati.get("notifiche", [])}
         if self.notifiche_viste is not None:
             for n in dati.get("notifiche", []):
                 if n["id"] not in self.notifiche_viste:
-                    self.avviso("notifica", n["text"], "", link=n.get("link") or "/", durata=15)
+                    self.avviso("notifica", n["text"], "", link=n.get("link") or "/", durata=15, di=di)
         self.notifiche_viste = (self.notifiche_viste or set()) | ids
+
+    def _controlla_presenza(self):
+        """PC bloccato o lasciato inattivo: i messaggi personali si nascondono (una volta per assenza)."""
+        fermo = secondi_inattivita()
+        assente = (pc_bloccato() and fermo >= SECS_BLOCCO) or (
+            self.minuti_inattivita and fermo >= self.minuti_inattivita * 60)
+        if not assente:
+            self.rilasciato = False
+        elif not self.rilasciato and self.utente_pc:
+            self.rilasciato = True
+            self.rilascia()
 
     def _ciclo(self):
         fallimenti = 0
@@ -607,6 +706,8 @@ class ClientNotifiche:
                 if self.collegato is False:
                     self.avviso("sistema", "Di nuovo collegato al gestionale.", "")
                 self.collegato, fallimenti = True, 0
+                if self.token:
+                    self._controlla_presenza()
                 self._controlla_personali()
             except Exception:
                 fallimenti += 1
