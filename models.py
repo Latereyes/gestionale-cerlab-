@@ -521,6 +521,7 @@ class MovimentoMagazzino(Base):
     tipo = Column(String)          # creazione | rettifica | scarico | storno
     quantita = Column(Float)       # variazione (+ entra, - esce)
     giacenza_dopo = Column(Float)
+    costo_unitario = Column(Float)  # costo dell'articolo al momento del movimento (spesa dei carichi)
     preventivo_id = Column(String)
     utente = Column(String)
     note = Column(Text, default="")
@@ -533,6 +534,7 @@ class MovimentoMagazzino(Base):
             "tipo": self.tipo,
             "quantita": self.quantita or 0.0,
             "giacenza_dopo": self.giacenza_dopo or 0.0,
+            "costo_unitario": self.costo_unitario or 0.0,
             "preventivo_id": self.preventivo_id or "",
             "utente": self.utente or "",
             "note": self.note or "",
@@ -570,6 +572,7 @@ def _apply_schema_migrations():
         "preventivi": [("extra", "TEXT DEFAULT '{}'")],
         "ordini":     [("extra", "TEXT DEFAULT '{}'")],
         "bolle":      [("extra", "TEXT DEFAULT '{}'")],
+        "magazzino_movimenti": [("costo_unitario", "REAL")],
     }
 
     for table, columns in migrations.items():

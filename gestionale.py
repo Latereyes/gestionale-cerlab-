@@ -4291,7 +4291,7 @@ def _registra_movimento(db, articolo, delta, tipo, preventivo_id="", note=""):
     articolo.aggiornato_il = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
     db.add(_MovimentoMagazzino(
         articolo_id=articolo.id, data=articolo.aggiornato_il, tipo=tipo, quantita=delta,
-        giacenza_dopo=articolo.giacenza, preventivo_id=preventivo_id,
+        giacenza_dopo=articolo.giacenza, costo_unitario=articolo.costo or 0.0, preventivo_id=preventivo_id,
         utente=session.get("user_name", "") if session else "", note=note))
 
 
@@ -4348,6 +4348,41 @@ def storna_righe_magazzino(p, indici):
         raise
     finally:
         db.close()
+
+
+def costo_righe_magazzino(p):
+    """Costo delle righe di un preventivo prese dal magazzino (quantita' x costo salvato sulla riga).
+    Nei conti CEO vale come costo reale del preventivo, al pari degli ordini fornitore."""
+    costo = 0.0
+    for i in _indici_righe_magazzino(p):
+        r = p["righe"][i]
+        prezzo = _to_num(r.get("prezzo_catalogo"))
+        for s in ("s1", "s2", "s3"):
+            prezzo *= 1 - _to_num(r.get(s)) / 100
+        costo += prezzo * _to_num(r.get("qt"))
+    return round(costo, 2)
+
+
+def acquisti_magazzino(start_date, end_date):
+    """Spesa per la merce messa in magazzino nel periodo (logica di cassa, come gli ordini fornitore):
+    ogni aggiunta di quantita' vale quantita' x costo dell'articolo in quel momento.
+    Una riduzione fatta a mano (correzione) riduce la spesa; consegne e storni non sono spese."""
+    db = _DBSession()
+    try:
+        rows = (db.query(_MovimentoMagazzino, _ArticoloMagazzino.descrizione, _ArticoloMagazzino.codice)
+                  .join(_ArticoloMagazzino, _ArticoloMagazzino.id == _MovimentoMagazzino.articolo_id)
+                  .filter(_MovimentoMagazzino.tipo.in_(["creazione", "rettifica"])).all())
+    finally:
+        db.close()
+    out = []
+    for m, descrizione, codice in rows:
+        d = _str_to_date((m.data or "")[:10])
+        importo = round((m.quantita or 0.0) * (m.costo_unitario or 0.0), 2)
+        if d and start_date <= d <= end_date and importo:
+            out.append({"data": d, "articolo": descrizione or "", "codice": codice or "",
+                        "quantita": m.quantita or 0.0, "costo_unitario": m.costo_unitario or 0.0,
+                        "importo": importo, "note": m.note or ""})
+    return out
 
 
 @app.route("/magazzino")
@@ -4702,6 +4737,9 @@ def dashboard_ceo():
                         for r in p.get("righe_edili", [])
                     )
 
+                # Costo delle righe prese dal magazzino (vale come un ordine fornitore)
+                c_reale += costo_righe_magazzino(p)
+
                 # Costo da ordini fornitore (usati gli oggetti ORM gia caricati)
                 for ordine_obj in prev_obj.ordini_rel:
                     ordine = ordine_obj.to_dict()
@@ -4806,6 +4844,10 @@ def dashboard_ceo():
             vnd = p.get("venditore", "N/D")
             if vnd in venditori_dict:
                 venditori_dict[vnd]["inviati"] += 1
+
+    # Uscite per la merce caricata in magazzino (logica cassa: data del carico, come gli ordini)
+    cashflow["acquisti_magazzino"] = sum(a["importo"] for a in acquisti_magazzino(start_date, end_date))
+    cashflow["costi_preventivi_in_corso"] += cashflow["acquisti_magazzino"]
 
     # --- 5. CALCOLI FINALI ---
     # Tasso conversione per venditore
@@ -5040,6 +5082,7 @@ def _calcoli_cashflow(wb, start_date, end_date, righe, n_programmati):
     entrate = f.voce("Entrate nette (incassi)", f"=SUM({E})", nota="Pagamenti incassati nel periodo, IVA esclusa; rettifiche comprese")
     f.voce("  Uscite ordini fornitore", f'=SUMIFS({U},{ID},"Ord.*")', nota="Alla data di conferma d'ordine o di arrivo")
     f.voce("  Uscite costi edili", f'=SUMIFS({U},{ID},"Costi Stimati*")', nota="Costi manuali dei preventivi edili, alla data di conferma")
+    f.voce("  Uscite carichi magazzino", f'=SUMIFS({U},{ID},"Mag.*")', nota="Merce messa in magazzino, alla data del carico")
     uscite = f.voce("Totale uscite nette", f"=SUM({U})")
     fee = f.voce("Fee versata", f"=SUM({FEE})", nota="Calcolata sugli incassi")
     f.voce("BILANCIO (entrate - uscite - fee)", f"={entrate}-{uscite}-{fee}", evidenzia=True, nota="Uguale al riquadro Bilancio della dashboard CEO")
@@ -5212,6 +5255,16 @@ def export_cashflow_excel():
                 "IVA PREVENTIVO (€)": 0.0, "IVA ESENTE (€)": 0.0, "TIPO": "USCITA"
             })
 
+    # --- D. USCITE: merce caricata in magazzino (data del carico) ---
+    for a in acquisti_magazzino(start_date, end_date):
+        cashflow_rows.append({
+            "N. PREVENTIVO": "MAGAZZINO", "CLIENTE": "", "STATO": "", "VENDITORE": "",
+            "ID (Rif.)": f"Mag. {a['codice'] + ' ' if a['codice'] else ''}{a['articolo']} ({_fmt_qt(a['quantita'])} x {money_ui(a['costo_unitario'])})",
+            "DATA TRANSAZIONE": a["data"],
+            "ENTRATE NETTE (€)": 0.0, "USCITE NETTE (€)": a["importo"], "FEE VERSATA": 0.0,
+            "IVA ORDINE (€)": 0.0, "IVA PREVENTIVO (€)": 0.0, "IVA ESENTE (€)": 0.0, "TIPO": "USCITA"
+        })
+
     if not cashflow_rows:
         flash("Nessuna transazione trovata nel periodo selezionato.", "warning")
         return redirect(url_for("dashboard_ceo", start_date=start_date_str, end_date=end_date_str))
@@ -5259,7 +5312,8 @@ def export_excel_ceo():
         is_no_iva = (p.get("no_iva") is True) or (str(p.get("no_iva")).lower() == "true")
 
         # Costi reali come nei KPI CEO: ordini al netto IVA + costi manuali edili
-        costi_ordini = sum(_get_netto_ordine(o) for o in p.get("ordini_fornitore", [])) + _costo_manuale_edile(p)
+        costi_ordini = (sum(_get_netto_ordine(o) for o in p.get("ordini_fornitore", []))
+                        + _costo_manuale_edile(p) + costo_righe_magazzino(p))
         iva_ordini = sum(_to_float(o.get("iva_ordine", 0)) for o in p.get("ordini_fornitore", []))
         costo_presunto = _to_float(p.get("tot_imponibile_negozio", 0))
         imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
@@ -5332,6 +5386,7 @@ def analisi_preventivo(quote_id):
         _get_ordine_costo_effettivo_netto(o)
         for o in p.get("ordini_fornitore", [])
     )
+    costi_effettivi_netti += costo_righe_magazzino(p)
 
     # Se è edile, integriamo il costo stimato manuale nei costi effettivi
     if p.get("tipo_preventivo") == "edile":
@@ -5456,6 +5511,7 @@ def analisi_cliente(client_id):
             
             # B. Costi Effettivi (Somma ordini netti)
             costo_eff = sum(_get_ordine_costo_effettivo_netto(o) for o in p.get("ordini_fornitore", []))
+            costo_eff += costo_righe_magazzino(p)
             
             # Se è edile, integriamo il costo stimato manuale nei costi effettivi
             if p.get("tipo_preventivo") == "edile":

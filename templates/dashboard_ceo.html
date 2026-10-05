@@ -208,7 +208,7 @@
 <div id="tab-cashflow" class="ceo-tab-content">
   <div class="cf-grid">
     <div class="cf-tile green"><div class="ct-header"><i class="fas fa-check-circle" style="color:#10b981"></i> Gia Incassato</div><div class="ct-amount">{{ cashflow.incassato_netto | money_ui }}</div><div class="ct-sub">Liquidita netta entrata nel periodo</div></div>
-    <div class="cf-tile red"><div class="ct-header"><i class="fas fa-shopping-cart" style="color:#ef4444"></i> Uscite Ordini</div><div class="ct-amount">{{ cashflow.costi_preventivi_in_corso | money_ui }}</div><div class="ct-sub">Costi fornitore del periodo</div></div>
+    <div class="cf-tile red"><div class="ct-header"><i class="fas fa-shopping-cart" style="color:#ef4444"></i> Uscite Ordini</div><div class="ct-amount">{{ cashflow.costi_preventivi_in_corso | money_ui }}</div><div class="ct-sub">Fornitori e carichi magazzino del periodo</div></div>
     <div class="cf-tile purple"><div class="ct-header"><i class="fas fa-percentage" style="color:#8b5cf6"></i> Fee Versate</div><div class="ct-amount">{{ cashflow.fee_versata | money_ui }}</div><div class="ct-sub">Calcolate su incassi del periodo</div></div>
     <div class="cf-tile dark"><div class="ct-header"><i class="fas fa-scale-balanced"></i> Bilancio Cassa</div><div class="ct-amount {{ 'text-success' if cashflow.bilancio >= 0 else 'text-danger' }}">{{ '+' if cashflow.bilancio > 0 else '' }} {{ cashflow.bilancio | money_ui }}</div><div class="ct-sub">Incassato - Uscite - Fee</div></div>
   </div>
