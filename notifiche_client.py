@@ -37,12 +37,15 @@ import pystray
 from PIL import Image, ImageDraw
 
 APP = "Gestionale Notifiche"
+APP_VERSION = "3.0.0"    # aggiornata da build.py insieme a quella del gestionale
 PORTA = 5001
 INTERVALLO_SECS = 5
 MINUTI_INATTIVITA = 30   # PC senza mouse/tastiera per tanto tempo: si nascondono i messaggi personali
 SECS_BLOCCO = 60         # PC bloccato (Win+L) per almeno tanto: idem
 CONFIG = Path(os.environ.get("APPDATA") or Path.home()) / "GestionaleNotifiche" / "config.json"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+# Dimensione degli avvisi scelta dal menu, moltiplicata alla scala calcolata dallo schermo
+DIMENSIONI = [("Automatica", 1.0), ("Più piccoli", 0.85), ("Più grandi", 1.25), ("Molto grandi", 1.5)]
 
 COLORI = {"chat": "#4f46e5", "notifica": "#d97706", "attivita": "#059669", "pdf": "#059669",
           "pdf_errore": "#dc2626", "sistema": "#64748b"}
@@ -61,6 +64,27 @@ def http_json(url, data=None, token=None, timeout=5):
     req = urllib.request.Request(url, data=body, headers=headers, method="POST" if data is not None else "GET")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def versione_tupla(v):
+    try:
+        return tuple(int(x) for x in str(v).strip().lstrip("v").split("."))
+    except Exception:
+        return (0,)
+
+
+def imposta_dpi_awareness():
+    """Da chiamare PRIMA di creare Tk: altrimenti Windows disegna tutto a 96 DPI e su schermi
+    ad alta risoluzione gli avvisi risultano minuscoli (o sfocati se ingranditi da Windows)."""
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # PROCESS_SYSTEM_DPI_AWARE
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
 
 
 def ip_locale():
@@ -154,7 +178,7 @@ def area_lavoro():
 # Interfaccia (avvisi a comparsa e finestra di accesso) — tutto nel thread di Tkinter
 # =====================================================================================
 class UI:
-    LARGHEZZA = 370
+    LARGHEZZA = 370   # in pixel "a 100%": moltiplicata per la scala dello schermo
     MAX_AVVISI = 4
 
     def __init__(self, app):
@@ -170,12 +194,10 @@ class UI:
         self.coda.put((fn, args))
 
     def _loop(self):
+        imposta_dpi_awareness()
         self.root = tk.Tk()
         self.root.withdraw()
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except Exception:
-            pass
+        self.scala_schermo = self._calcola_scala()
         self.pronta.set()
         self._svuota_coda()
         self.root.mainloop()
@@ -192,6 +214,30 @@ class UI:
             pass
         self.root.after(150, self._svuota_coda)
 
+    # ---------- dimensioni adattive ----------
+    def _calcola_scala(self):
+        """Scala rispetto a uno schermo Full HD al 100%: segue il ridimensionamento di Windows (DPI)
+        e, sugli schermi grandi lasciati al 100% (es. 1440p o 4K), anche la risoluzione."""
+        try:
+            dpi = self.root.winfo_fpixels("1i") / 96.0
+        except Exception:
+            dpi = 1.0
+        dpi = max(dpi, 1.0)
+        alto_logico = self.root.winfo_screenheight() / dpi
+        extra = min(max(alto_logico / 1080.0, 1.0), 2.0)
+        return dpi * extra
+
+    @property
+    def scala(self):
+        return getattr(self, "scala_schermo", 1.0) * self.app.dimensione
+
+    def px(self, n):
+        return max(1, round(n * self.scala))
+
+    def font(self, punti, famiglia="Segoe UI"):
+        # dimensione negativa = pixel: così il testo segue la stessa scala di finestre e margini
+        return (famiglia, -max(8, round(punti * 96 / 72 * self.scala)))
+
     # ---------- avvisi ----------
     def avviso(self, tipo, titolo, testo, link=None, rispondi_a=None, durata=12, di=None):
         """di = username a cui appartiene l'avviso (chat, notifiche): si chiude se al PC cambia utente."""
@@ -202,26 +248,26 @@ class UI:
         w.overrideredirect(True)
         w.attributes("-topmost", True)
         w.configure(bg="#cbd5e1")
-        corpo = tk.Frame(w, bg="#ffffff", padx=12, pady=10)
+        corpo = tk.Frame(w, bg="#ffffff", padx=self.px(12), pady=self.px(10))
         corpo.pack(fill="both", expand=True, padx=1, pady=1)
-        tk.Frame(corpo, bg=colore, height=3).pack(fill="x", pady=(0, 8))
+        tk.Frame(corpo, bg=colore, height=self.px(3)).pack(fill="x", pady=(0, self.px(8)))
 
         testa = tk.Frame(corpo, bg="#ffffff")
         testa.pack(fill="x")
         etichette = {"chat": "💬 Messaggio", "notifica": "🔔 Notifica", "attivita": "Gestionale",
                      "pdf": "📄 PDF", "pdf_errore": "⚠️ PDF", "sistema": "Gestionale"}
         tk.Label(testa, text=etichette.get(tipo, "Gestionale") + " · " + time.strftime("%H:%M"), bg="#ffffff",
-                 fg="#64748b", font=("Segoe UI", 8)).pack(side="left")
-        x = tk.Label(testa, text="✕", bg="#ffffff", fg="#94a3b8", font=("Segoe UI", 10), cursor="hand2")
+                 fg="#64748b", font=self.font(8)).pack(side="left")
+        x = tk.Label(testa, text="✕", bg="#ffffff", fg="#94a3b8", font=self.font(10), cursor="hand2")
         x.pack(side="right")
 
-        t = tk.Label(corpo, text=titolo, bg="#ffffff", fg="#0f172a", font=("Segoe UI Semibold", 10),
-                     anchor="w", justify="left", wraplength=self.LARGHEZZA - 30)
-        t.pack(fill="x", pady=(4, 0))
+        t = tk.Label(corpo, text=titolo, bg="#ffffff", fg="#0f172a", font=self.font(10, "Segoe UI Semibold"),
+                     anchor="w", justify="left", wraplength=self.px(self.LARGHEZZA - 30))
+        t.pack(fill="x", pady=(self.px(4), 0))
         testo = testo if len(testo) <= 260 else testo[:257] + "..."
-        b = tk.Label(corpo, text=testo, bg="#ffffff", fg="#334155", font=("Segoe UI", 9),
-                     anchor="w", justify="left", wraplength=self.LARGHEZZA - 30)
-        b.pack(fill="x", pady=(2, 0))
+        b = tk.Label(corpo, text=testo, bg="#ffffff", fg="#334155", font=self.font(9),
+                     anchor="w", justify="left", wraplength=self.px(self.LARGHEZZA - 30))
+        b.pack(fill="x", pady=(self.px(2), 0))
 
         stato = {"finestra": w, "timer": None, "durata": durata * 1000, "entry": None, "di": di}
         x.bind("<Button-1>", lambda e: self._chiudi(stato))
@@ -237,13 +283,13 @@ class UI:
                 wid.bind("<Button-1>", apri)
 
         azioni = tk.Frame(corpo, bg="#ffffff")
-        azioni.pack(fill="x", pady=(8, 0))
+        azioni.pack(fill="x", pady=(self.px(8), 0))
         if rispondi_a:
-            entry = tk.Entry(azioni, font=("Segoe UI", 10), relief="solid", bd=1)
-            entry.pack(side="left", fill="x", expand=True, ipady=4)
+            entry = tk.Entry(azioni, font=self.font(10), relief="solid", bd=1)
+            entry.pack(side="left", fill="x", expand=True, ipady=self.px(4))
             entry.insert(0, "")
             stato["entry"] = entry
-            esito = tk.Label(corpo, text="", bg="#ffffff", fg="#059669", font=("Segoe UI", 8), anchor="w")
+            esito = tk.Label(corpo, text="", bg="#ffffff", fg="#059669", font=self.font(8), anchor="w")
             esito.pack(fill="x")
 
             def invia(_e=None):
@@ -269,14 +315,14 @@ class UI:
 
             entry.bind("<Return>", invia)
             tk.Button(azioni, text="Invia", command=invia, bg=colore, fg="#ffffff", relief="flat",
-                      activebackground=colore, font=("Segoe UI Semibold", 9), padx=10, cursor="hand2").pack(side="left", padx=(6, 0))
+                      activebackground=colore, font=self.font(9, "Segoe UI Semibold"), padx=self.px(10), cursor="hand2").pack(side="left", padx=(self.px(6), 0))
             tk.Button(azioni, text="Apri chat", command=apri, relief="flat", bg="#f1f5f9",
-                      font=("Segoe UI", 9), padx=8, cursor="hand2").pack(side="left", padx=(6, 0))
+                      font=self.font(9), padx=self.px(8), cursor="hand2").pack(side="left", padx=(self.px(6), 0))
             # le finestre senza bordo non prendono la tastiera da sole: la si dà al clic sulla casella
             entry.bind("<Button-1>", lambda e: (w.focus_force(), entry.focus_set()))
         elif link:
             tk.Button(azioni, text="Apri", command=apri, bg=colore, fg="#ffffff", relief="flat",
-                      activebackground=colore, font=("Segoe UI Semibold", 9), padx=12, cursor="hand2").pack(side="right")
+                      activebackground=colore, font=self.font(9, "Segoe UI Semibold"), padx=self.px(12), cursor="hand2").pack(side="right")
 
         # pausa del timer finché il mouse è sopra o si sta scrivendo una risposta
         def ferma(_e=None):
@@ -321,15 +367,16 @@ class UI:
     def _disponi(self):
         area = area_lavoro()
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        destra, basso = (area[2], area[3]) if area else (sw, sh - 48)
-        y = basso - 12
+        destra, basso = (area[2], area[3]) if area else (sw, sh - self.px(48))
+        margine, larghezza = self.px(12), self.px(self.LARGHEZZA)
+        y = basso - margine
         for stato in reversed(self.avvisi):
             w = stato["finestra"]
             w.update_idletasks()
             h = w.winfo_reqheight()
             y -= h
-            w.geometry(f"{self.LARGHEZZA}x{h}+{destra - self.LARGHEZZA - 12}+{y}")
-            y -= 10
+            w.geometry(f"{larghezza}x{h}+{destra - larghezza - margine}+{y}")
+            y -= self.px(10)
 
     # ---------- finestra di accesso ----------
     def chiedi_accesso(self):
@@ -344,22 +391,22 @@ class UI:
             w.iconbitmap(resource_path("favicon.ico"))
         except Exception:
             pass
-        f = tk.Frame(w, padx=22, pady=18)
+        f = tk.Frame(w, padx=self.px(22), pady=self.px(18))
         f.pack()
-        tk.Label(f, text="Accedi con il tuo utente del gestionale", font=("Segoe UI Semibold", 11)).grid(row=0, column=0, columnspan=2, sticky="w")
+        tk.Label(f, text="Accedi con il tuo utente del gestionale", font=self.font(11, "Segoe UI Semibold")).grid(row=0, column=0, columnspan=2, sticky="w")
         tk.Label(f, text="Serve una volta sola per abilitare questo PC. Poi qui arrivano i messaggi e le notifiche\n"
                          "di chi sta usando il gestionale su questo PC, e si può rispondere in chat da qui.",
-                 font=("Segoe UI", 9), fg="#64748b", justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 12))
-        tk.Label(f, text="Utente", font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w")
-        u = tk.Entry(f, width=28, font=("Segoe UI", 10))
-        u.grid(row=2, column=1, pady=3)
-        tk.Label(f, text="Password", font=("Segoe UI", 9)).grid(row=3, column=0, sticky="w")
-        p = tk.Entry(f, width=28, show="•", font=("Segoe UI", 10))
-        p.grid(row=3, column=1, pady=3)
-        msg = tk.Label(f, text="", fg="#dc2626", font=("Segoe UI", 9))
+                 font=self.font(9), fg="#64748b", justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(self.px(2), self.px(12)))
+        tk.Label(f, text="Utente", font=self.font(9)).grid(row=2, column=0, sticky="w")
+        u = tk.Entry(f, width=28, font=self.font(10))
+        u.grid(row=2, column=1, pady=self.px(3))
+        tk.Label(f, text="Password", font=self.font(9)).grid(row=3, column=0, sticky="w")
+        p = tk.Entry(f, width=28, show="•", font=self.font(10))
+        p.grid(row=3, column=1, pady=self.px(3))
+        msg = tk.Label(f, text="", fg="#dc2626", font=self.font(9))
         msg.grid(row=4, column=0, columnspan=2, sticky="w")
         bottoni = tk.Frame(f)
-        bottoni.grid(row=5, column=0, columnspan=2, sticky="e", pady=(8, 0))
+        bottoni.grid(row=5, column=0, columnspan=2, sticky="e", pady=(self.px(8), 0))
 
         def chiudi():
             self._login_aperto = False
@@ -380,8 +427,8 @@ class UI:
 
             threading.Thread(target=lavoro, daemon=True).start()
 
-        tk.Button(bottoni, text="Più tardi", command=chiudi, relief="flat", bg="#f1f5f9", padx=10).pack(side="left", padx=(0, 6))
-        tk.Button(bottoni, text="Accedi", command=accedi, relief="flat", bg="#4f46e5", fg="#ffffff", padx=14).pack(side="left")
+        tk.Button(bottoni, text="Più tardi", command=chiudi, relief="flat", bg="#f1f5f9", padx=self.px(10), font=self.font(9)).pack(side="left", padx=(0, self.px(6)))
+        tk.Button(bottoni, text="Accedi", command=accedi, relief="flat", bg="#4f46e5", fg="#ffffff", padx=self.px(14), font=self.font(9)).pack(side="left")
         w.bind("<Return>", accedi)
         w.protocol("WM_DELETE_WINDOW", chiudi)
         w.update_idletasks()
@@ -405,6 +452,9 @@ class ClientNotifiche:
         self.salutato = None         # ultimo utente a cui si è mostrato "ora arrivano i messaggi di..."
         self.rilasciato = False      # PC bloccato/inattivo già segnalato al server
         self.minuti_inattivita = self.cfg.get("minuti_inattivita", MINUTI_INATTIVITA)
+        self.dimensione = self.cfg.get("dimensione", 1.0)
+        self.versione_server = None  # versione del programma notifiche offerta dal server
+        self.prossimo_tentativo = 0  # dopo un download fallito si riprova più tardi
         self.ultimo_id = None        # attività
         self.ultimo_msg = None       # messaggi chat
         self.notifiche_viste = None  # id notifiche già mostrate
@@ -426,7 +476,8 @@ class ClientNotifiche:
         try:
             CONFIG.parent.mkdir(parents=True, exist_ok=True)
             self.cfg.update({"server": self.server, "notifiche": self.attive, "suono": self.suono_attivo,
-                             "token": self.token, "minuti_inattivita": self.minuti_inattivita})
+                             "token": self.token, "minuti_inattivita": self.minuti_inattivita,
+                             "dimensione": self.dimensione})
             self.cfg.pop("utente_nome", None)  # l'utente non è più fisso: lo dice il server
             CONFIG.write_text(json.dumps(self.cfg), encoding="utf-8")
         except Exception:
@@ -560,7 +611,7 @@ class ClientNotifiche:
     def _menu(self):
         M = pystray.MenuItem
         return pystray.Menu(
-            M(APP, None, enabled=False),
+            M(f"{APP} v{APP_VERSION}", None, enabled=False),
             M(lambda i: self._stato(), None, enabled=False),
             M(lambda i: self._chi(), None, enabled=False),
             pystray.Menu.SEPARATOR,
@@ -571,6 +622,10 @@ class ClientNotifiche:
             M("Mostra avvisi", self._toggle_notifiche, checked=lambda i: self.attive),
             M("Suono", self._toggle_suono, checked=lambda i: self.suono_attivo),
             M("Avvia con Windows", self._toggle_avvio, checked=lambda i: self.avvio_automatico()),
+            M("Dimensione avvisi", pystray.Menu(*[
+                M(nome, self._imposta_dimensione(valore), radio=True,
+                  checked=lambda i, v=valore: abs(self.dimensione - v) < 0.01)
+                for nome, valore in DIMENSIONI])),
             pystray.Menu.SEPARATOR,
             M(lambda i: f"Non sono {self.utente}: nascondi i suoi messaggi" if self.utente else "-", self.rilascia,
               visible=lambda i: bool(self.utente)),
@@ -601,6 +656,14 @@ class ClientNotifiche:
         self.imposta_avvio_automatico(not self.avvio_automatico())
         self.icon.update_menu()
 
+    def _imposta_dimensione(self, valore):
+        def imposta(*_):
+            self.dimensione = valore
+            self._salva_config()
+            self.icon.update_menu()
+            self.avviso("sistema", "Dimensione avvisi", "Gli avvisi ora avranno questa dimensione.", durata=6)
+        return imposta
+
     def _ricerca(self, *_):
         self.server = None
         self.collegato = None
@@ -615,6 +678,73 @@ class ClientNotifiche:
         if self.attive:
             self.ui.esegui(lambda: self.ui.avviso(*args, **kwargs))
 
+    # ---------- aggiornamento automatico ----------
+    # Il programma arriva sul server insieme al gestionale (stesso installer, che il gestionale
+    # scarica da solo da GitHub): quando il server ne ha una versione più nuova, questo PC la
+    # scarica dal server, sostituisce il proprio .exe e si riavvia.
+    def _controlla_aggiornamento(self):
+        if not getattr(sys, "frozen", False) or not self.versione_server:
+            return  # avviato da sorgente (sviluppo) o server vecchio che non offre aggiornamenti
+        if versione_tupla(self.versione_server) <= versione_tupla(APP_VERSION):
+            return
+        if self.cfg.get("aggiornamento_tentato") == self.versione_server:
+            return  # già provato per questa versione: niente tentativi a ripetizione
+        if self.ui.avvisi or time.time() < self.prossimo_tentativo:
+            return  # non si interrompe chi sta leggendo o rispondendo a un avviso
+        exe = Path(sys.executable)
+        nuovo = exe.with_name(exe.stem + ".nuovo.exe")
+        try:
+            req = urllib.request.Request(self.server + "api/notifiche/programma")
+            with urllib.request.urlopen(req, timeout=120) as r, open(nuovo, "wb") as f:
+                while True:
+                    blocco = r.read(1 << 16)
+                    if not blocco:
+                        break
+                    f.write(blocco)
+            with open(nuovo, "rb") as f:
+                if f.read(2) != b"MZ" or nuovo.stat().st_size < 1_000_000:
+                    raise ValueError("file scaricato non valido")
+        except Exception as e:
+            # cartella non scrivibile (es. Programmi sul PC server: lì lo aggiorna l'installer) o rete
+            print(f"Aggiornamento non riuscito: {e}")
+            self.prossimo_tentativo = time.time() + 3600
+            try:
+                nuovo.unlink()
+            except Exception:
+                pass
+            return
+        try:
+            self._avvia_sostituzione(exe, nuovo)
+        except Exception as e:
+            print(f"Aggiornamento non avviato: {e}")
+            self.prossimo_tentativo = time.time() + 3600
+            return
+        # segnato prima di chiudere: se il nuovo .exe avesse ancora la vecchia versione non si riprova
+        self.cfg["aggiornamento_tentato"] = self.versione_server
+        self._salva_config()
+        self._esci()
+
+    def _avvia_sostituzione(self, exe, nuovo):
+        """Come per il gestionale: un piccolo .bat aspetta che questo programma si chiuda,
+        mette il nuovo .exe al posto del vecchio e lo riavvia."""
+        bat = Path(os.environ.get("TEMP", str(Path.home()))) / f"aggiorna_notifiche_{os.getpid()}.bat"
+        bat.write_text(f"""@echo off
+chcp 65001 > nul
+set /a n=0
+:attendi
+timeout /t 1 /nobreak > nul
+move /y "{nuovo}" "{exe}" > nul 2>&1 && goto avvia
+set /a n+=1
+if %n% lss 60 goto attendi
+del "{nuovo}" > nul 2>&1
+:avvia
+start "" "{exe}"
+del "%~f0"
+""", encoding="utf-8")
+        import subprocess
+        subprocess.Popen(["cmd.exe", "/c", str(bat)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                         close_fds=True)
+
     # ---------- ciclo principale ----------
     def _controlla_attivita(self):
         url = self.server + "api/attivita" + (f"?dopo={self.ultimo_id}" if self.ultimo_id is not None else "")
@@ -623,6 +753,7 @@ class ClientNotifiche:
         if self.ultimo_id is not None and dati.get("ultimo_id", 0) < self.ultimo_id:
             eventi = []  # server riavviato: il contatore riparte da zero
         self.mio_ip = dati.get("tuo_ip")
+        self.versione_server = dati.get("notifiche_version")
         if self.ultimo_id is not None:
             # niente avvisi per le azioni fatte da questo stesso PC (tranne i PDF falliti)
             altrui = [e for e in eventi if e.get("ip") != self.mio_ip or e.get("tipo") == "pdf_errore"]
@@ -709,6 +840,7 @@ class ClientNotifiche:
                 if self.token:
                     self._controlla_presenza()
                 self._controlla_personali()
+                self._controlla_aggiornamento()
             except Exception:
                 fallimenti += 1
                 if self.collegato and fallimenti >= 3:

@@ -1891,8 +1891,11 @@ def api_attivita():
     with _ATTIVITA_LOCK:
         ultimo = _ATTIVITA_ULTIMO_ID
         eventi = [e for e in _ATTIVITA_RECENTI if e["id"] > dopo] if "dopo" in request.args else []
+    # il programma notifiche viene compilato insieme al gestionale con la stessa versione:
+    # i PC che ne hanno una più vecchia lo riscaricano da /api/notifiche/programma
+    notifiche_version = APP_VERSION if _percorso_programma_notifiche() else None
     return jsonify({"app": "Gestionale Cerlab", "version": APP_VERSION, "ultimo_id": ultimo,
-                    "eventi": eventi, "tuo_ip": request.remote_addr,
+                    "eventi": eventi, "tuo_ip": request.remote_addr, "notifiche_version": notifiche_version,
                     "utenti_collegati": len(get_utenti_collegati())})
 
 def _percorso_programma_notifiche():
@@ -1909,6 +1912,16 @@ def scarica_programma_notifiche():
     if not exe:
         flash("Il programma notifiche non è incluso in questa installazione.", "error")
         return redirect(request.referrer or url_for("dashboard"))
+    return send_from_directory(exe.parent, exe.name, as_attachment=True)
+
+@app.route("/api/notifiche/programma")
+def api_programma_notifiche():
+    """Aggiornamento automatico del programma notifiche sugli altri PC (solo rete locale)."""
+    if not _ip_rete_locale(request.remote_addr):
+        return jsonify({"error": "Accesso consentito solo dalla rete locale"}), 403
+    exe = _percorso_programma_notifiche()
+    if not exe:
+        return jsonify({"error": "Programma notifiche non incluso in questa installazione"}), 404
     return send_from_directory(exe.parent, exe.name, as_attachment=True)
 
 # --- API per il programma "Gestionale Notifiche" (widget sui PC): accesso con token personale ---
