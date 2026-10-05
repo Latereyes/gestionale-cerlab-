@@ -4286,12 +4286,14 @@ def _articoli_magazzino_con_disponibilita():
     return lista
 
 
-def _registra_movimento(db, articolo, delta, tipo, preventivo_id="", note=""):
+def _registra_movimento(db, articolo, delta, tipo, preventivo_id="", note="", costo_unitario=None):
     articolo.giacenza = (articolo.giacenza or 0.0) + delta
     articolo.aggiornato_il = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
     db.add(_MovimentoMagazzino(
         articolo_id=articolo.id, data=articolo.aggiornato_il, tipo=tipo, quantita=delta,
-        giacenza_dopo=articolo.giacenza, costo_unitario=articolo.costo or 0.0, preventivo_id=preventivo_id,
+        giacenza_dopo=articolo.giacenza,
+        costo_unitario=(articolo.costo or 0.0) if costo_unitario is None else costo_unitario,
+        preventivo_id=preventivo_id,
         utente=session.get("user_name", "") if session else "", note=note))
 
 
@@ -4371,7 +4373,7 @@ def acquisti_magazzino(start_date, end_date):
     try:
         rows = (db.query(_MovimentoMagazzino, _ArticoloMagazzino.descrizione, _ArticoloMagazzino.codice)
                   .join(_ArticoloMagazzino, _ArticoloMagazzino.id == _MovimentoMagazzino.articolo_id)
-                  .filter(_MovimentoMagazzino.tipo.in_(["creazione", "rettifica"])).all())
+                  .filter(_MovimentoMagazzino.tipo.in_(["creazione", "rettifica", "carico"])).all())
     finally:
         db.close()
     out = []
@@ -4449,6 +4451,47 @@ def salva_articolo_magazzino():
     finally:
         db.close()
     return jsonify({"ok": True})
+
+
+def costo_medio_ponderato(giacenza, costo, quantita, prezzo):
+    """Costo medio dopo un carico: la merce gia' in magazzino pesa al suo costo, quella arrivata al prezzo pagato."""
+    giacenza = max(giacenza or 0.0, 0.0)
+    if giacenza + quantita <= 0:
+        return prezzo
+    return (giacenza * (costo or 0.0) + quantita * prezzo) / (giacenza + quantita)
+
+
+@app.route("/magazzino/articolo/<int:articolo_id>/carico", methods=["POST"])
+@login_required
+def carico_articolo_magazzino(articolo_id):
+    """Arrivo merce: aumenta la giacenza, registra la spesa al prezzo pagato e porta il costo
+    dell'articolo al costo medio ponderato."""
+    if session.get("user_role") not in RUOLI_GESTIONE_MAGAZZINO:
+        return jsonify({"ok": False, "error": "Non disponi delle autorizzazioni."}), 403
+    data = request.get_json(silent=True) or request.form
+    quantita = _to_num(data.get("quantita"))
+    prezzo = _to_num(data.get("prezzo"))
+    if quantita <= 0:
+        return jsonify({"ok": False, "error": "Inserisci la quantita' arrivata."}), 400
+    if prezzo < 0:
+        return jsonify({"ok": False, "error": "Il prezzo non puo' essere negativo."}), 400
+    db = _DBSession()
+    try:
+        art = db.get(_ArticoloMagazzino, articolo_id)
+        if not art or art.attivo is False:
+            return jsonify({"ok": False, "error": "Articolo non trovato."}), 404
+        art.costo = round(costo_medio_ponderato(art.giacenza, art.costo, quantita, prezzo), 2)
+        _registra_movimento(db, art, quantita, "carico", note=str(data.get("note", "")).strip(),
+                            costo_unitario=round(prezzo, 2))
+        db.commit()
+        nuovo_costo = art.costo
+    except Exception as e:
+        db.rollback()
+        print(f"[magazzino] Errore carico articolo: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True, "costo": nuovo_costo})
 
 
 @app.route("/magazzino/articolo/<int:articolo_id>/elimina", methods=["POST"])

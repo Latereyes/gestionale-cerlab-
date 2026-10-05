@@ -97,6 +97,11 @@
                         <td class="row-actions">
                             <button type="button" class="btn icon-btn btn-storico" data-id="{{ a.id }}" data-nome="{{ a.descrizione }}" title="Storico movimenti"><i class="fas fa-history"></i></button>
                             {% if puo_modificare %}
+                            <button type="button" class="btn icon-btn btn-carico" title="Carico merce (arrivo)"
+                                    data-id="{{ a.id }}" data-nome="{{ a.descrizione }}" data-unita="{{ a.unita }}"
+                                    data-giacenza="{{ a.giacenza }}" data-costo="{{ a.costo }}">
+                                <i class="fas fa-truck-loading"></i>
+                            </button>
                             <button type="button" class="btn icon-btn btn-modifica" title="Modifica articolo"
                                     data-articolo='{{ {"id": a.id, "codice": a.codice, "descrizione": a.descrizione, "unita": a.unita, "costo": a.costo, "giacenza": a.giacenza, "note": a.note} | tojson | forceescape }}'>
                                 <i class="fas fa-pen"></i>
@@ -153,7 +158,8 @@
                 <label class="full">Descrizione *<input name="descrizione" required></label>
                 <label>Costo unitario (€)<input name="costo" inputmode="decimal" placeholder="0,00"></label>
                 <label>Quantità in giacenza<input name="giacenza" inputmode="decimal" placeholder="0"></label>
-                <label class="full">Motivo variazione quantità <small class="muted">(facoltativo, finisce nello storico)</small><input name="nota_movimento" placeholder="es. arrivo merce, inventario"></label>
+                <label class="full">Motivo variazione quantità <small class="muted">(facoltativo, finisce nello storico)</small><input name="nota_movimento" placeholder="es. inventario, correzione"></label>
+                <div class="full mag-hint" id="articolo-hint-carico"><i class="fas fa-info-circle"></i> Per la merce arrivata usa il tasto <strong>Carico merce</strong>: registra il prezzo pagato e aggiorna il costo medio.</div>
                 <label class="full">Note<textarea name="note" rows="2"></textarea></label>
             </div>
             <div class="mag-err" id="articolo-err"></div>
@@ -164,14 +170,33 @@
         </form>
     </div>
 </div>
+
+<div id="modal-carico" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 480px;">
+        <h3 id="modal-carico-titolo">Carico merce</h3>
+        <form id="form-carico" autocomplete="off">
+            <div class="mag-grid">
+                <label>Quantità arrivata<input name="quantita" inputmode="decimal" required></label>
+                <label>Prezzo pagato (€ cad., IVA esclusa)<input name="prezzo" inputmode="decimal" required></label>
+                <label class="full">Nota <small class="muted">(facoltativa, es. fornitore o n. DDT)</small><input name="note"></label>
+            </div>
+            <div class="mag-preview" id="carico-preview"></div>
+            <div class="mag-err" id="carico-err"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn" id="carico-annulla">Annulla</button>
+                <button type="submit" class="btn primary" id="carico-salva"><i class="fas fa-truck-loading"></i> Registra carico</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endif %}
 
 <div id="modal-storico" class="modal-overlay" style="display: none;">
     <div class="modal-content" style="max-width: 760px;">
         <h3 id="modal-storico-titolo">Storico movimenti</h3>
         <div class="table-wrap" style="max-height: 60vh; overflow-y: auto;">
-            <table class="styled-table" style="min-width: 0;">
-                <thead><tr><th>Data</th><th>Tipo</th><th class="right">Variazione</th><th class="right">Giacenza</th><th>Riferimento</th><th>Utente</th></tr></thead>
+            <table class="styled-table" style="min-width: 0; table-layout: auto;">
+                <thead><tr><th>Data</th><th>Tipo</th><th class="right">Variazione</th><th class="right">Prezzo</th><th class="right">Giacenza</th><th>Riferimento</th><th>Utente</th></tr></thead>
                 <tbody id="storico-body"></tbody>
             </table>
         </div>
@@ -193,6 +218,8 @@
 .mag-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
 .mag-grid label.full { grid-column: 1 / -1; }
 .mag-grid input, .mag-grid select, .mag-grid textarea { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; font-weight: 400; color: var(--text); background: var(--surface); font-family: inherit; }
+.mag-hint { font-size: 12px; color: var(--text-muted); }
+.mag-preview { font-size: 13px; background: var(--surface-2); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 10px; line-height: 1.5; }
 .mag-err { display: none; color: var(--danger-text); font-size: 13px; margin-bottom: 8px; }
 .mov-pos { color: var(--success-text); font-weight: 600; }
 .mov-neg { color: var(--danger-text); font-weight: 600; }
@@ -270,29 +297,71 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
     }
 
+    // --- Carico merce (arrivo): spesa al prezzo pagato, costo dell'articolo al costo medio ponderato ---
+    const modalCarico = document.getElementById('modal-carico');
+    if (modalCarico) {
+        const form = document.getElementById('form-carico');
+        const err = document.getElementById('carico-err');
+        const preview = document.getElementById('carico-preview');
+        // stessa lettura del server: con la virgola il punto e' separatore delle migliaia, senza e' il decimale
+        const parse = (v) => { const t = String(v || '').trim(); return parseFloat(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t); };
+        const eur = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+        let art = null;
+        const aggiorna = () => {
+            const q = parse(form.quantita.value), pr = parse(form.prezzo.value);
+            if (!(q > 0) || !(pr >= 0)) { preview.textContent = 'Inserisci quantità e prezzo pagato.'; return; }
+            const g = Math.max(art.giacenza, 0);
+            const medio = (g * art.costo + q * pr) / (g + q);
+            preview.innerHTML = `Spesa registrata: <strong>${eur(q * pr)}</strong><br>`
+                + `Giacenza: ${fmtNum(art.giacenza)} → <strong>${fmtNum(art.giacenza + q)} ${esc(art.unita)}</strong><br>`
+                + `Costo medio: ${eur(art.costo)} → <strong>${eur(medio)}</strong>`;
+        };
+        document.querySelectorAll('.btn-carico').forEach(btn => btn.addEventListener('click', () => {
+            art = { id: btn.dataset.id, unita: btn.dataset.unita, giacenza: Number(btn.dataset.giacenza), costo: Number(btn.dataset.costo) };
+            form.reset(); err.style.display = 'none';
+            document.getElementById('modal-carico-titolo').textContent = 'Carico merce · ' + btn.dataset.nome;
+            form.prezzo.value = art.costo.toFixed(2).replace('.', ',');
+            aggiorna();
+            modalCarico.style.display = 'flex';
+            form.quantita.focus();
+        }));
+        form.addEventListener('input', aggiorna);
+        document.getElementById('carico-annulla').addEventListener('click', () => { modalCarico.style.display = 'none'; });
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('carico-salva');
+            btn.disabled = true;
+            post(`/magazzino/articolo/${art.id}/carico`, Object.fromEntries(new FormData(form)))
+                .then(d => { if (!d.ok) throw new Error(d.error || 'Errore nel salvataggio.'); location.reload(); })
+                .catch(e => { err.textContent = e.message; err.style.display = 'block'; btn.disabled = false; });
+        });
+    }
+
     // --- Storico movimenti ---
     const storico = document.getElementById('modal-storico');
-    const tipi = { creazione: 'Creazione', rettifica: 'Modifica quantità', scarico: 'Consegna', storno: 'Consegna annullata' };
+    const tipi = { creazione: 'Creazione', carico: 'Carico merce', rettifica: 'Modifica quantità', scarico: 'Consegna', storno: 'Consegna annullata' };
+    const euro = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
     document.querySelectorAll('.btn-storico').forEach(btn => btn.addEventListener('click', () => {
         document.getElementById('modal-storico-titolo').textContent = 'Storico movimenti · ' + btn.dataset.nome;
         const body = document.getElementById('storico-body');
-        body.innerHTML = '<tr><td colspan="6" class="muted">Caricamento...</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" class="muted">Caricamento...</td></tr>';
         storico.style.display = 'flex';
         fetch(`/api/magazzino/articolo/${btn.dataset.id}/movimenti`, { credentials: 'same-origin' })
             .then(r => r.json()).then(d => {
                 if (!d.ok) throw new Error();
-                if (!d.movimenti.length) { body.innerHTML = '<tr><td colspan="6" class="muted">Nessun movimento registrato.</td></tr>'; return; }
+                if (!d.movimenti.length) { body.innerHTML = '<tr><td colspan="7" class="muted">Nessun movimento registrato.</td></tr>'; return; }
                 body.innerHTML = d.movimenti.map(m => `
                     <tr>
                         <td class="nowrap">${esc(m.data)}</td>
                         <td>${esc(tipi[m.tipo] || m.tipo)}${m.note ? `<div class="cell-sub">${esc(m.note)}</div>` : ''}</td>
                         <td class="right ${m.quantita >= 0 ? 'mov-pos' : 'mov-neg'}">${m.quantita >= 0 ? '+' : ''}${fmtNum(m.quantita)}</td>
+                        <td class="right">${['creazione', 'carico', 'rettifica'].includes(m.tipo) && m.costo_unitario ? euro(m.costo_unitario) : ''}</td>
                         <td class="right">${fmtNum(m.giacenza_dopo)}</td>
                         <td>${m.preventivo_id ? `<a href="/preventivo/edit/${encodeURIComponent(m.preventivo_id)}">${esc(m.preventivo_id)}</a>` : '—'}</td>
                         <td>${esc(m.utente)}</td>
                     </tr>`).join('');
             })
-            .catch(() => { body.innerHTML = '<tr><td colspan="6" class="muted">Impossibile caricare lo storico.</td></tr>'; });
+            .catch(() => { body.innerHTML = '<tr><td colspan="7" class="muted">Impossibile caricare lo storico.</td></tr>'; });
     }));
     document.getElementById('storico-chiudi').addEventListener('click', () => { storico.style.display = 'none'; });
 });
