@@ -8,7 +8,7 @@ import shutil
 
 # ... (tutte le definizioni di file e le funzioni rimangono invariate) ...
 VERSION_FILE = "version.txt"
-PYTHON_FILES_TO_UPDATE = ["gestionale.py"]
+PYTHON_FILES_TO_UPDATE = ["gestionale.py", "notifiche_client.py"]  # stessa versione: serve all'auto update delle notifiche
 INNO_SETUP_FILE = "crea_installer.iss"
 FOLDERS_TO_CLEAN = ["dist", "build", "userdesktop"]
 
