@@ -973,6 +973,7 @@ from models import (
     Task as _Task, AdminTask as _AdminTask,
     Message as _Message, TagboxEntry as _TagboxEntry,
     Notification as _Notification, ConfigMargini as _ConfigMargini,
+    ArticoloMagazzino as _ArticoloMagazzino, MovimentoMagazzino as _MovimentoMagazzino,
     init_db as _init_db
 )
 _init_db()  # Assicura che tutte le tabelle V3 esistano
@@ -1280,7 +1281,7 @@ def aggiorna_stato_consegna_globale(preventivo_data):
 
     # 1. Trova tutti gli indici confermati (Per preventivi STANDARD)
     ordini_confermati = [
-        o for o in preventivo_data.get("ordini_fornitore", []) 
+        o for o in _ordini_con_magazzino(preventivo_data)
         if o.get("numero_conferma", "").strip()
     ]
     
@@ -1300,7 +1301,7 @@ def aggiorna_stato_consegna_globale(preventivo_data):
     # 2b. Trova tutti gli indici già ordinati e quelli in attesa di conferma
     indici_gia_ordinati = set()
     articoli_in_attesa_conferma = 0
-    ordini_fornitore = preventivo_data.get("ordini_fornitore", [])
+    ordini_fornitore = _ordini_con_magazzino(preventivo_data)
     
     for ordine in ordini_fornitore:
         indici_ordine = set(ordine.get("indici_righe", []))
@@ -2126,7 +2127,7 @@ def _ha_consegne_aperte(p):
         return any(r.get("stato_consegna") != "Consegnato"
                    for s in p.get("sezioni_edili", []) for r in s.get("righe", []))
     righe = p.get("righe", [])
-    for o in p.get("ordini_fornitore", []):
+    for o in _ordini_con_magazzino(p):
         if not o.get("numero_conferma", "").strip():
             continue
         for i in o.get("indici_righe", []):
@@ -2218,7 +2219,7 @@ def dashboard():
             indici_gia_ordinati = set()
             articoli_in_attesa_conferma = 0
             
-            ordini_fornitore = p.get("ordini_fornitore", [])
+            ordini_fornitore = _ordini_con_magazzino(p)
             for ordine in ordini_fornitore:
                 indici_ordine = set(ordine.get("indici_righe", []))
                 indici_gia_ordinati.update(indici_ordine)
@@ -2701,7 +2702,7 @@ def dashboard_clienti():
 
             articoli_in_attesa_conferma = 0
             
-            ordini_fornitore = p.get("ordini_fornitore", [])
+            ordini_fornitore = _ordini_con_magazzino(p)
             for ordine in ordini_fornitore:
                 indici_ordine = set(ordine.get("indici_righe", []))
                 indici_gia_ordinati.update(indici_ordine)
@@ -3571,6 +3572,7 @@ def clona_preventivo(quote_id):
     if "righe" in p_clonato:
         for r in p_clonato["righe"]:
             r.pop("stato_consegna", None); r.pop("bolla_id", None); r.pop("data_consegna", None)
+            r.pop("magazzino_scaricato", None)
             
     if "sezioni_edili" in p_clonato:
         for sez in p_clonato["sezioni_edili"]:
@@ -3612,6 +3614,8 @@ def conferma_ordine(quote_id):
     tutti_gli_indici_validi = {
         i for i, r in enumerate(righe_preventivo) 
         if r.get("articolo", "").strip() and r.get("unt", "").strip().upper() != "S"}
+    # Le righe prese dal magazzino non vanno ordinate al fornitore
+    tutti_gli_indici_validi -= _indici_righe_magazzino(p)
 
     # Funzioni helper per i calcoli, ora include anche le spese di incasso
     def _get_shop_cost(riga):
@@ -4151,6 +4155,14 @@ def conferma_preventivo(quote_id):
                 riga["stato_consegna"] = "Pronto per Consegna"
             if not riga.get("data_arrivo_in_house"):
                 riga["data_arrivo_in_house"] = datetime.date.today().strftime('%Y-%m-%d')
+    else:
+        # Le righe prese dal magazzino sono gia' in sede: pronte per la consegna
+        for i in _indici_righe_magazzino(p):
+            riga = p["righe"][i]
+            if riga.get("stato_consegna") not in ("Consegnato", "In Bolla", "Pronto per Consegna"):
+                riga["stato_consegna"] = "Pronto per Consegna"
+            if not riga.get("data_arrivo_in_house"):
+                riga["data_arrivo_in_house"] = datetime.date.today().strftime('%Y-%m-%d')
 
     # --- BLOCCO AGGIUNTO ---
     # Aggiorniamo lo stato di pagamento, che passerà a "Da Pagare" se era "Non Definito"
@@ -4183,6 +4195,259 @@ def annulla_preventivo(quote_id):
     save_quote(quote_id, p)
     flash("Preventivo annullato.", "warning")
     return redirect(url_for("editor_preventivo", quote_id=quote_id))
+
+# ===============================================
+# === MAGAZZINO ===
+# ===============================================
+# Gli articoli stanno in 'magazzino_articoli'. Una riga di un preventivo commerciale presa dal
+# magazzino porta il campo 'id_articolo_magazzino': finche' non e' consegnata la sua quantita'
+# risulta "prenotata"; quando la consegna viene registrata la giacenza viene scalata e la riga
+# riceve 'magazzino_scaricato' (quantita' scaricata), cosi' non viene scalata due volte.
+
+RUOLI_GESTIONE_MAGAZZINO = ('segreteria', 'ceo', 'amministratore')
+UNITA_MAGAZZINO = ('PZ', 'ML', 'MQ')
+
+
+def _fmt_qt(n):
+    """Quantita' in formato italiano senza decimali inutili (3 -> '3', 2.5 -> '2,5')."""
+    n = round(float(n or 0), 3)
+    return (f"{n:.3f}".rstrip("0").rstrip(".")).replace(".", ",") if n % 1 else str(int(n))
+
+
+def _id_articolo_riga(r):
+    try:
+        return int(str(r.get("id_articolo_magazzino") or "").strip())
+    except ValueError:
+        return None
+
+
+def _indici_righe_magazzino(p):
+    """Indici delle righe di un preventivo commerciale prese dal magazzino."""
+    if p.get("tipo_preventivo") == "edile":
+        return set()
+    return {i for i, r in enumerate(p.get("righe", []))
+            if _id_articolo_riga(r) and str(r.get("articolo", "")).strip()}
+
+
+def _ordini_con_magazzino(p):
+    """Ordini fornitore piu' un ordine 'virtuale' gia' confermato con le righe prese dal magazzino.
+    Non viene mai salvato: serve a far seguire a queste righe il flusso consegne senza ordinarle."""
+    ordini = list(p.get("ordini_fornitore", []))
+    indici = sorted(_indici_righe_magazzino(p))
+    if indici:
+        ordini.append({
+            "ordine_id": "MAGAZZINO", "numero_conferma": "MAGAZZINO", "azienda": "Magazzino interno",
+            "indici_righe": indici, "data_arrivo": "", "da_magazzino": True,
+        })
+    return ordini
+
+
+def calcola_prenotazioni_magazzino():
+    """articolo_id -> {"qt": totale prenotato, "preventivi": [...]}.
+    Prenotano le righe non ancora scaricate dei preventivi commerciali non annullati."""
+    prenotazioni = {}
+    db = _DBSession()
+    try:
+        rows = db.query(_Preventivo.numero, _Preventivo.cliente, _Preventivo.stato,
+                        _Preventivo.tipo_preventivo, _Preventivo.righe).all()
+    finally:
+        db.close()
+    for numero, cliente, stato, tipo, righe in rows:
+        if stato == "Annullato" or tipo == "edile":
+            continue
+        for r in righe or []:
+            aid = _id_articolo_riga(r)
+            if not aid or r.get("magazzino_scaricato") or not str(r.get("articolo", "")).strip():
+                continue
+            qt = _to_num(r.get("qt"))
+            if qt <= 0:
+                continue
+            voce = prenotazioni.setdefault(aid, {"qt": 0.0, "preventivi": []})
+            voce["qt"] += qt
+            voce["preventivi"].append({"numero": numero, "cliente": cliente or "", "stato": stato or "", "qt": qt})
+    return prenotazioni
+
+
+def _articoli_magazzino_con_disponibilita():
+    prenotazioni = calcola_prenotazioni_magazzino()
+    db = _DBSession()
+    try:
+        articoli = db.query(_ArticoloMagazzino).filter(_ArticoloMagazzino.attivo != False) \
+                     .order_by(_ArticoloMagazzino.descrizione).all()
+        lista = [a.to_dict() for a in articoli]
+    finally:
+        db.close()
+    for a in lista:
+        pren = prenotazioni.get(a["id"], {"qt": 0.0, "preventivi": []})
+        a["prenotato"] = pren["qt"]
+        a["prenotazioni"] = pren["preventivi"]
+        a["disponibile"] = a["giacenza"] - pren["qt"]
+        a["valore"] = a["giacenza"] * a["costo"]
+    return lista
+
+
+def _registra_movimento(db, articolo, delta, tipo, preventivo_id="", note=""):
+    articolo.giacenza = (articolo.giacenza or 0.0) + delta
+    articolo.aggiornato_il = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+    db.add(_MovimentoMagazzino(
+        articolo_id=articolo.id, data=articolo.aggiornato_il, tipo=tipo, quantita=delta,
+        giacenza_dopo=articolo.giacenza, preventivo_id=preventivo_id,
+        utente=session.get("user_name", "") if session else "", note=note))
+
+
+def scarica_righe_magazzino(p, indici):
+    """Scala dalla giacenza le righe consegnate prese dal magazzino (una volta sola per riga)."""
+    if p.get("tipo_preventivo") == "edile":
+        return
+    righe = p.get("righe", [])
+    db = _DBSession()
+    try:
+        for i in indici:
+            if not (0 <= i < len(righe)):
+                continue
+            r = righe[i]
+            aid = _id_articolo_riga(r)
+            if not aid or r.get("magazzino_scaricato"):
+                continue
+            art = db.get(_ArticoloMagazzino, aid)
+            qt = _to_num(r.get("qt"))
+            if not art or qt <= 0:
+                continue
+            _registra_movimento(db, art, -qt, "scarico", p.get("numero", ""), "Consegna al cliente")
+            r["magazzino_scaricato"] = _fmt_qt(qt)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def storna_righe_magazzino(p, indici):
+    """Se una consegna viene annullata, rimette in giacenza quanto era stato scaricato."""
+    if p.get("tipo_preventivo") == "edile":
+        return
+    righe = p.get("righe", [])
+    db = _DBSession()
+    try:
+        for i in indici:
+            if not (0 <= i < len(righe)):
+                continue
+            r = righe[i]
+            aid = _id_articolo_riga(r)
+            scaricato = _to_num(r.get("magazzino_scaricato"))
+            if not aid or scaricato <= 0:
+                continue
+            art = db.get(_ArticoloMagazzino, aid)
+            if art:
+                _registra_movimento(db, art, scaricato, "storno", p.get("numero", ""), "Consegna annullata")
+            r.pop("magazzino_scaricato", None)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.route("/magazzino")
+@login_required
+def dashboard_magazzino():
+    articoli = _articoli_magazzino_con_disponibilita()
+    return render_template("dashboard_magazzino.html",
+        title="Magazzino",
+        articoli=articoli,
+        unita=UNITA_MAGAZZINO,
+        puo_modificare=session.get("user_role") in RUOLI_GESTIONE_MAGAZZINO)
+
+
+@app.route("/api/magazzino/articoli")
+@login_required
+def api_magazzino_articoli():
+    return jsonify({"ok": True, "articoli": _articoli_magazzino_con_disponibilita()})
+
+
+@app.route("/magazzino/articolo/salva", methods=["POST"])
+@login_required
+def salva_articolo_magazzino():
+    if session.get("user_role") not in RUOLI_GESTIONE_MAGAZZINO:
+        return jsonify({"ok": False, "error": "Non disponi delle autorizzazioni."}), 403
+    data = request.get_json(silent=True) or request.form
+    descrizione = str(data.get("descrizione", "")).strip()
+    if not descrizione:
+        return jsonify({"ok": False, "error": "La descrizione e' obbligatoria."}), 400
+    unita = str(data.get("unita", "PZ")).strip().upper()
+    if unita not in UNITA_MAGAZZINO:
+        unita = "PZ"
+    costo = _to_num(data.get("costo"))
+    giacenza = _to_num(data.get("giacenza"))
+    if costo < 0 or giacenza < 0:
+        return jsonify({"ok": False, "error": "Costo e quantita' non possono essere negativi."}), 400
+
+    db = _DBSession()
+    try:
+        articolo_id = str(data.get("id", "")).strip()
+        adesso = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        if articolo_id:
+            art = db.get(_ArticoloMagazzino, int(articolo_id))
+            if not art or art.attivo is False:
+                return jsonify({"ok": False, "error": "Articolo non trovato."}), 404
+        else:
+            art = _ArticoloMagazzino(descrizione=descrizione, giacenza=0.0, attivo=True, creato_il=adesso)
+            db.add(art)
+            db.flush()
+        art.codice = str(data.get("codice", "")).strip()
+        art.descrizione = descrizione
+        art.unita = unita
+        art.costo = round(costo, 2)
+        art.note = str(data.get("note", "")).strip()
+        art.aggiornato_il = adesso
+        delta = round(giacenza - (art.giacenza or 0.0), 3)
+        if delta:
+            _registra_movimento(db, art, delta, "rettifica" if articolo_id else "creazione",
+                                note=str(data.get("nota_movimento", "")).strip())
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[magazzino] Errore salvataggio articolo: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/magazzino/articolo/<int:articolo_id>/elimina", methods=["POST"])
+@login_required
+def elimina_articolo_magazzino(articolo_id):
+    if session.get("user_role") not in RUOLI_GESTIONE_MAGAZZINO:
+        return jsonify({"ok": False, "error": "Non disponi delle autorizzazioni."}), 403
+    if calcola_prenotazioni_magazzino().get(articolo_id):
+        return jsonify({"ok": False, "error": "L'articolo e' prenotato su uno o piu' preventivi: libera prima le prenotazioni."}), 400
+    db = _DBSession()
+    try:
+        art = db.get(_ArticoloMagazzino, articolo_id)
+        if not art:
+            return jsonify({"ok": False, "error": "Articolo non trovato."}), 404
+        # Disattivato e non cancellato: le righe dei preventivi e lo storico continuano a puntarci.
+        art.attivo = False
+        art.aggiornato_il = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        db.commit()
+    finally:
+        db.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/magazzino/articolo/<int:articolo_id>/movimenti")
+@login_required
+def api_movimenti_magazzino(articolo_id):
+    db = _DBSession()
+    try:
+        movimenti = db.query(_MovimentoMagazzino).filter_by(articolo_id=articolo_id) \
+                      .order_by(_MovimentoMagazzino.id.desc()).limit(100).all()
+        return jsonify({"ok": True, "movimenti": [m.to_dict() for m in movimenti]})
+    finally:
+        db.close()
+
 
 # ===============================================
 # === NUOVE ROUTE PER GESTIONE CONSEGNE/BOLLE ===
@@ -5306,6 +5571,8 @@ def dashboard_ordini():
         ordini_fornitore = p.get("ordini_fornitore", [])
         for ordine in ordini_fornitore:
             indici_gia_ordinati.update(ordine.get("indici_righe", []))
+        # Le righe prese dal magazzino non vanno ordinate al fornitore
+        indici_gia_ordinati.update(_indici_righe_magazzino(p))
 
         # 3. Calcoliamo gli articoli ancora da ordinare
         articoli_da_ordinare_count = len(indici_righe_valide - indici_gia_ordinati)
@@ -5391,7 +5658,7 @@ def dashboard_consegne():
                     preventivi_da_consegnare.append(p)
             continue
 
-        ordini_confermati = [o for o in p.get("ordini_fornitore", []) if o.get("numero_conferma", "").strip()]
+        ordini_confermati = [o for o in _ordini_con_magazzino(p) if o.get("numero_conferma", "").strip()]
         if not ordini_confermati: continue
 
         # --- RECUPERO INDICI CONFERMATI ---
@@ -5457,7 +5724,7 @@ def gestione_consegna(quote_id):
             "articoli": items
         }]
     else:
-        ordini_confermati = [o for o in p.get("ordini_fornitore", []) if o.get("numero_conferma", "").strip()]
+        ordini_confermati = [o for o in _ordini_con_magazzino(p) if o.get("numero_conferma", "").strip()]
         
         for ordine in ordini_confermati:
             items_in_ordine = []
@@ -5569,6 +5836,8 @@ def marca_consegnato(quote_id):
             if 0 <= index < len(p["righe"]):
                 p["righe"][index]["stato_consegna"] = "Consegnato"
                 p["righe"][index]["data_consegna"] = today_str
+        # Gli articoli presi dal magazzino escono dalla giacenza alla consegna
+        scarica_righe_magazzino(p, indici_da_marcare)
 
     aggiorna_stato_consegna_globale(p)
     aggiorna_stato_avanzamento(p)
@@ -5640,6 +5909,9 @@ def annulla_stato_consegna(quote_id):
                             if index in bolla.get("indici_righe", []):
                                 bolla["indici_righe"].remove(index)
                             break
+        # Consegna annullata: quanto era stato scaricato dal magazzino torna in giacenza
+        if target_status != "Consegnato":
+            storna_righe_magazzino(p, item_indices)
     
     # Ricalcola lo stato globale e salva
     aggiorna_stato_consegna_globale(p)

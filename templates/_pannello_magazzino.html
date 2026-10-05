@@ -1,0 +1,163 @@
+{# Pannello laterale "Magazzino": sceglie un articolo e lo aggiunge come riga del preventivo con il costo salvato #}
+<style>
+.magazzino-fab { background: linear-gradient(135deg, hsl(200,65%,42%) 0%, hsl(200,65%,32%) 100%); }
+.magazzino-fab .fab-label { font-size: 7px; letter-spacing: 0; }
+.mag-badge {
+    display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 10.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .3px; padding: 3px 8px; border-radius: 10px;
+    background: hsl(200,70%,94%); color: hsl(200,65%,30%);
+}
+.magazzino-panel {
+    position: fixed; top: 0; right: 0; height: 100vh; width: 440px; max-width: 100vw;
+    background: var(--surface, #fff); border-left: 1px solid var(--border, #e2e8f0);
+    box-shadow: -8px 0 28px rgba(0,0,0,0.18); z-index: 10001;
+    display: flex; flex-direction: column;
+    transform: translateX(105%); transition: transform 0.25s ease;
+}
+.magazzino-panel.open { transform: translateX(0); }
+.magazzino-panel .mp-header { padding: 16px 20px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.magazzino-panel .mp-title { font-size: 16px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.magazzino-panel .mp-search { padding: 12px 20px 4px; }
+.magazzino-panel .mp-search input { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-md, 8px); font-size: 14px; }
+.magazzino-panel .mp-hint { font-size: 12px; color: var(--text-muted, #64748b); padding: 6px 20px 0; }
+.magazzino-panel .mp-hint.warn { color: var(--warning-text, #92400e); }
+.magazzino-panel .mp-list { flex: 1; overflow-y: auto; padding: 10px 20px 20px; display: flex; flex-direction: column; gap: 8px; }
+.mp-item { border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-md, 8px); padding: 10px 12px; cursor: pointer; background: var(--surface, #fff); }
+.mp-item:hover { border-color: hsl(200,65%,55%); }
+.mp-item.selected { border-color: hsl(200,65%,42%); box-shadow: 0 0 0 2px hsl(200,70%,90%); cursor: default; }
+.mp-item .mp-row { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.mp-item .mp-name { font-weight: 600; font-size: 14px; color: var(--text); }
+.mp-item .mp-code { font-size: 11.5px; color: var(--text-muted, #64748b); }
+.mp-item .mp-cost { font-weight: 600; white-space: nowrap; }
+.mp-item .mp-stock { font-size: 12px; color: var(--text-muted, #64748b); margin-top: 3px; }
+.mp-item .mp-stock .zero { color: var(--danger-text, #b02a37); font-weight: 600; }
+.mp-item .mp-add { display: none; margin-top: 10px; gap: 8px; align-items: center; }
+.mp-item.selected .mp-add { display: flex; }
+.mp-item .mp-add input { width: 90px; padding: 7px 9px; border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-md, 8px); text-align: right; font-size: 14px; }
+.mp-item .mp-err { display: none; font-size: 12px; color: var(--danger-text, #b02a37); margin-top: 6px; }
+.mp-empty { text-align: center; color: var(--text-muted, #64748b); font-size: 13px; padding: 30px 10px; }
+</style>
+
+<aside class="magazzino-panel" id="magazzinoPanel" aria-hidden="true">
+    <div class="mp-header">
+        <div class="mp-title"><i class="fas fa-warehouse" style="color: hsl(200,65%,38%);"></i> Articoli in magazzino</div>
+        <button type="button" class="btn" id="magazzinoClose"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="mp-search"><input type="search" id="magazzinoSearch" placeholder="Cerca per descrizione o codice..."></div>
+    <div class="mp-hint" id="magazzinoHint">Scegli un articolo e la quantità: diventa una riga del preventivo con il costo di magazzino, a cui aggiungere il ricarico.</div>
+    <div class="mp-list" id="magazzinoList"><div class="mp-empty">Caricamento...</div></div>
+</aside>
+
+<script>
+// Il pulsante MAGAZZINO sta nel gruppo di pulsanti flottanti di base.html, reso dopo questo blocco
+document.addEventListener('DOMContentLoaded', function () {
+    const panel = document.getElementById('magazzinoPanel');
+    const list = document.getElementById('magazzinoList');
+    const search = document.getElementById('magazzinoSearch');
+    const hint = document.getElementById('magazzinoHint');
+    const form = document.getElementById('grid-form');
+    let articoli = [];
+
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const num = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+    const euro = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+    // Il preventivo è modificabile solo se i campi delle righe non sono bloccati
+    const bloccato = () => { const fee = form.querySelector('input[name="fee_pct"]'); return !fee || fee.disabled; };
+
+    function render() {
+        const q = search.value.trim().toLowerCase();
+        const visibili = articoli.filter(a => !q || (a.descrizione + ' ' + a.codice).toLowerCase().includes(q));
+        if (!visibili.length) {
+            list.innerHTML = `<div class="mp-empty">${articoli.length ? 'Nessun articolo trovato.' : 'Il magazzino è vuoto.'}</div>`;
+            return;
+        }
+        list.innerHTML = visibili.map(a => `
+            <div class="mp-item" data-id="${a.id}">
+                <div class="mp-row">
+                    <div><div class="mp-name">${esc(a.descrizione)}</div>${a.codice ? `<div class="mp-code">${esc(a.codice)}</div>` : ''}</div>
+                    <div class="mp-cost">${euro(a.costo)} / ${esc(a.unita)}</div>
+                </div>
+                <div class="mp-stock">Disponibili: <span class="${a.disponibile > 0 ? '' : 'zero'}">${num(a.disponibile)} ${esc(a.unita)}</span>
+                    · Giacenza ${num(a.giacenza)} · Prenotati ${num(a.prenotato)}</div>
+                <div class="mp-add">
+                    <label style="font-size:12.5px;">Quantità</label>
+                    <input type="number" min="0" step="any" value="1" class="mp-qt">
+                    <button type="button" class="btn primary mp-confirm"><i class="fas fa-plus"></i> Aggiungi al preventivo</button>
+                </div>
+                <div class="mp-err"></div>
+            </div>`).join('');
+    }
+
+    function load() {
+        return fetch("{{ url_for('api_magazzino_articoli') }}", { credentials: 'same-origin' })
+            .then(r => r.json()).then(d => {
+                if (!d.ok) throw new Error();
+                articoli = d.articoli || [];
+                render();
+            }).catch(() => { list.innerHTML = '<div class="mp-empty">Impossibile caricare il magazzino.</div>'; });
+    }
+
+    function aggiungi(a, qt) {
+        // Nuova riga in coda: salva_righe la calcola e la salva insieme al resto del preventivo
+        const i = form.querySelectorAll('#sortable-rows .rt-row').length;
+        const ivaDefault = (document.getElementById('default-iva-switch-input') || {}).value || '22';
+        const campi = {
+            articolo: a.descrizione, unt: a.unita, qt: String(qt).replace('.', ','),
+            prezzo_catalogo: Number(a.costo || 0).toFixed(2).replace('.', ','),
+            costo_trasporto: '', extra: '', s1: '', s2: '', s3: '', ricarico_pct: '',
+            iva_pct: ivaDefault + ' %', id_articolo_magazzino: String(a.id)
+        };
+        // I campi si aggiungono solo ai dati inviati (evento 'formdata'), non al form:
+        // cosi' la copia di sicurezza locale (_bozza_locale.html) non li vede come modifiche non salvate
+        form.addEventListener('formdata', (e) => {
+            Object.entries(campi).forEach(([k, v]) => e.formData.append(`r[${i}][${k}]`, v));
+        }, { once: true });
+        form.requestSubmit(document.getElementById('save-quote-btn'));
+    }
+
+    list.addEventListener('click', (e) => {
+        const item = e.target.closest('.mp-item');
+        if (!item) return;
+        const a = articoli.find(x => String(x.id) === item.dataset.id);
+        if (!a) return;
+        if (!e.target.closest('.mp-confirm')) {
+            if (!item.classList.contains('selected')) {
+                list.querySelectorAll('.mp-item.selected').forEach(el => el.classList.remove('selected'));
+                item.classList.add('selected');
+                const qtInput = item.querySelector('.mp-qt');
+                qtInput.focus(); qtInput.select();
+            }
+            return;
+        }
+        const err = item.querySelector('.mp-err');
+        const qt = parseFloat(String(item.querySelector('.mp-qt').value).replace(',', '.'));
+        const errore = (msg) => { err.textContent = msg; err.style.display = 'block'; };
+        if (bloccato()) return errore('Il preventivo è bloccato: sbloccalo per aggiungere articoli.');
+        if (!(qt > 0)) return errore('Inserisci una quantità maggiore di zero.');
+        if (qt > a.disponibile + 1e-9) return errore(`Disponibili solo ${num(a.disponibile)} ${a.unita}.`);
+        e.target.closest('.mp-confirm').disabled = true;
+        aggiungi(a, qt);
+    });
+    list.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.target.classList.contains('mp-qt')) {
+            e.preventDefault();
+            e.target.closest('.mp-item').querySelector('.mp-confirm').click();
+        }
+    });
+
+    function open() {
+        hint.className = 'mp-hint' + (bloccato() ? ' warn' : '');
+        hint.textContent = bloccato()
+            ? 'Il preventivo è bloccato: puoi consultare il magazzino ma per aggiungere righe devi sbloccarlo.'
+            : 'Scegli un articolo e la quantità: diventa una riga del preventivo con il costo di magazzino, a cui aggiungere il ricarico.';
+        panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false');
+        load().then(() => search.focus());
+    }
+    function close() { panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true'); }
+
+    document.getElementById('magazzinoFab').addEventListener('click', () => panel.classList.contains('open') ? close() : open());
+    document.getElementById('magazzinoClose').addEventListener('click', close);
+    search.addEventListener('input', render);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && panel.classList.contains('open')) close(); });
+});
+</script>

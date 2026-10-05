@@ -28,8 +28,13 @@
         <div class="card order-card">
             <div class="card-header">
                 <div class="order-info">
+                    {% if ordine.da_magazzino %}
+                    <h3><i class="fas fa-warehouse"></i> Articoli dal <strong>Magazzino</strong></h3>
+                    <span class="muted">Già in sede: alla consegna vengono scalati dalla giacenza</span>
+                    {% else %}
                     <h3>Ordine Fornitore: <strong>{{ ordine.numero_conferma }}</strong></h3>
                     <span class="muted">Fornitore: <strong>{{ ordine.azienda }}</strong></span>
+                    {% endif %}
                 </div>
                  {% if (ordine.articoli | rejectattr('stato_consegna', 'equalto', 'Consegnato') | list | length) == 0 %}
                     <span class="status-tag success header-status">Completato</span>

@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 
 {% block extra_fab %}
+    <a href="javascript:void(0)" class="fab-btn magazzino-fab" id="magazzinoFab" title="Aggiungi articoli dal magazzino">
+        <i class="fas fa-warehouse"></i>
+        <span class="fab-label">MAGAZZINO</span>
+    </a>
     <a href="javascript:void(0)" class="fab-btn task-fab" onclick="window.openQuickTask('{{ p.numero }}', 'CONSEGNA', '{{ p.cliente }}')" title="Nuova Task Editor">
         <i class="fas fa-plus"></i>
         <span class="fab-label">TASK</span>
@@ -99,11 +103,18 @@
                     <div class="rt-row">
                         <input type="hidden" name="r[{{i}}][stato_consegna]" value="{{ r.stato_consegna | default('', true) }}" />
                         <input type="hidden" name="r[{{i}}][bolla_id]" value="{{ r.bolla_id | default('', true) }}" />
+                        <input type="hidden" name="r[{{i}}][id_articolo_magazzino]" value="{{ r.id_articolo_magazzino | default('', true) }}" />
+                        <input type="hidden" name="r[{{i}}][magazzino_scaricato]" value="{{ r.magazzino_scaricato | default('', true) }}" />
                         
                         <div class="rt-col col-main">
                             <div class="article-cell-wrapper">
                                 <div class="drag-handle" title="Trascina per riordinare"><i class="fas fa-grip-vertical"></i></div>
                                 <input class="cell-input main-article-input" name="r[{{i}}][articolo]" value="{{ r.articolo }}" placeholder="Nome articolo o descrizione" />
+                                {% if r.id_articolo_magazzino %}
+                                <span class="mag-badge" title="{{ 'Scaricato dal magazzino alla consegna' if r.magazzino_scaricato else 'Prenotato in magazzino fino alla consegna' }}">
+                                    <i class="fas fa-warehouse"></i> {{ 'Scaricato' if r.magazzino_scaricato else 'Prenotato' }}
+                                </span>
+                                {% endif %}
                                 
                                 <button type="button" class="edit-icon" title="Modifica descrizione lunga"><i class="fas fa-pencil-alt"></i></button>
                                 
@@ -1840,6 +1851,7 @@ document.addEventListener('DOMContentLoaded', () => {
 }); // <-- CHIUSURA 'DOMContentLoaded'
 </script>
 
+{% include "_pannello_magazzino.html" %}
 {% include "_bozza_locale.html" %}
 {% endblock %}
 

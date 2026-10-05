@@ -783,7 +783,7 @@
     }
     .dashboard-nav-grid {
         display: grid;
-        grid-template-columns: repeat(5, 1fr);
+        grid-template-columns: repeat(6, 1fr);
         gap: 8px;
         width: 100%;
         max-width: 900px;
@@ -995,6 +995,12 @@
        class="btn {{ 'disabled' if active_page == 'fatture' else '' }}" 
        title="Dashboard Fatture">
        <i class="fas fa-file-invoice"></i> Fatture
+    </a>
+
+    <a href="{{ url_for('dashboard_magazzino') }}" 
+       class="btn {{ 'disabled' if active_page == 'magazzino' else '' }}" 
+       title="Magazzino">
+       <i class="fas fa-warehouse"></i> Magazzino
     </a>
 
 </div> 

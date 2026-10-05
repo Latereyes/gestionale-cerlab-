@@ -476,6 +476,69 @@ class ConfigMargini(Base):
         }
 
 
+class ArticoloMagazzino(Base):
+    """Articolo presente in magazzino (dashboard Magazzino).
+    La quantita' prenotata non e' salvata qui: si ricava dalle righe dei preventivi commerciali
+    che puntano all'articolo (campo 'id_articolo_magazzino') e non sono ancora state scaricate."""
+    __tablename__ = "magazzino_articoli"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    codice = Column(String, default="")
+    descrizione = Column(String, nullable=False)
+    unita = Column(String, default="PZ")
+    giacenza = Column(Float, default=0.0)
+    costo = Column(Float, default=0.0)
+    note = Column(Text, default="")
+    attivo = Column(Boolean, default=True)
+    creato_il = Column(String)
+    aggiornato_il = Column(String)
+
+    def __repr__(self):
+        return f"<ArticoloMagazzino(id={self.id}, descrizione='{self.descrizione}')>"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "codice": self.codice or "",
+            "descrizione": self.descrizione or "",
+            "unita": self.unita or "PZ",
+            "giacenza": self.giacenza or 0.0,
+            "costo": self.costo or 0.0,
+            "note": self.note or "",
+            "attivo": self.attivo if self.attivo is not None else True,
+            "creato_il": self.creato_il or "",
+            "aggiornato_il": self.aggiornato_il or "",
+        }
+
+
+class MovimentoMagazzino(Base):
+    """Storico delle variazioni di giacenza: carichi/rettifiche manuali e scarichi alla consegna."""
+    __tablename__ = "magazzino_movimenti"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    articolo_id = Column(Integer, ForeignKey("magazzino_articoli.id"), index=True)
+    data = Column(String)
+    tipo = Column(String)          # creazione | rettifica | scarico | storno
+    quantita = Column(Float)       # variazione (+ entra, - esce)
+    giacenza_dopo = Column(Float)
+    preventivo_id = Column(String)
+    utente = Column(String)
+    note = Column(Text, default="")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "articolo_id": self.articolo_id,
+            "data": self.data,
+            "tipo": self.tipo,
+            "quantita": self.quantita or 0.0,
+            "giacenza_dopo": self.giacenza_dopo or 0.0,
+            "preventivo_id": self.preventivo_id or "",
+            "utente": self.utente or "",
+            "note": self.note or "",
+        }
+
+
 # Factory per creare sessioni al DB
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

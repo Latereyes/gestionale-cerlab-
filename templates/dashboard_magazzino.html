@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-warehouse"></i> Magazzino</h1>
+{% endblock %}
+
+{% macro qt(n) %}{{ ('%.3f' % n).rstrip('0').rstrip('.').replace('.', ',') if n % 1 else '%d' % n }}{% endmacro %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+
+    <div class="kpi-strip">
+        <div class="kpi-tile">
+            <div class="kpi-icon"><i class="fas fa-boxes"></i></div>
+            <div>
+                <div class="kpi-label">Articoli</div>
+                <div class="kpi-value">{{ articoli | length }}</div>
+                <div class="kpi-sub">in anagrafica magazzino</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon success"><i class="fas fa-euro-sign"></i></div>
+            <div>
+                <div class="kpi-label">Valore giacenza</div>
+                <div class="kpi-value">{{ money_ui(articoli | sum(attribute='valore')) }}</div>
+                <div class="kpi-sub">giacenza × costo</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon warning"><i class="fas fa-bookmark"></i></div>
+            <div>
+                <div class="kpi-label">Prenotati</div>
+                <div class="kpi-value">{{ articoli | selectattr('prenotato') | list | length }}</div>
+                <div class="kpi-sub">articoli impegnati su preventivi</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon danger"><i class="fas fa-exclamation-triangle"></i></div>
+            <div>
+                <div class="kpi-label">Esauriti</div>
+                <div class="kpi-value">{{ articoli | selectattr('disponibile', 'le', 0) | list | length }}</div>
+                <div class="kpi-sub">nessuna quantità disponibile</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3><i class="fas fa-warehouse"></i> Articoli in magazzino</h3>
+            <div class="client-meta">
+                <input type="search" id="mag-search" class="mag-search" placeholder="Cerca per descrizione o codice...">
+                {% if puo_modificare %}
+                <button type="button" class="btn primary" id="btn-nuovo-articolo"><i class="fas fa-plus"></i> Nuovo articolo</button>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if articoli %}
+        <div class="table-wrap">
+            <table class="styled-table" id="mag-table">
+                <colgroup><col style="width: 10%"><col style="width: 23%"><col style="width: 6%"><col style="width: 10%"><col style="width: 9%"><col style="width: 9%"><col style="width: 10%"><col style="width: 10%"><col style="width: 13%"></colgroup>
+                <thead>
+                    <tr>
+                        <th>Codice</th>
+                        <th>Descrizione</th>
+                        <th>UM</th>
+                        <th class="right">Costo</th>
+                        <th class="right">Giacenza</th>
+                        <th class="right">Prenotati</th>
+                        <th class="right">Disponibili</th>
+                        <th class="right">Valore</th>
+                        <th class="actions-column"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in articoli %}
+                    <tr class="main-row" data-search="{{ (a.descrizione ~ ' ' ~ a.codice) | lower }}">
+                        <td class="nowrap">{{ a.codice or '—' }}</td>
+                        <td>
+                            <div class="cell-main">{{ a.descrizione }}</div>
+                            {% if a.note %}<div class="cell-sub" title="{{ a.note }}"><i class="fas fa-sticky-note"></i>{{ a.note | truncate(60) }}</div>{% endif %}
+                        </td>
+                        <td>{{ a.unita }}</td>
+                        <td class="right cell-money">{{ money_ui(a.costo) }}</td>
+                        <td class="right">{{ qt(a.giacenza) }}</td>
+                        <td class="right">
+                            {% if a.prenotato %}
+                            <button type="button" class="link-btn toggle-pren" title="Mostra i preventivi che lo prenotano">{{ qt(a.prenotato) }} <i class="fas fa-chevron-down"></i></button>
+                            {% else %}<span class="muted">0</span>{% endif %}
+                        </td>
+                        <td class="right">
+                            <span class="chip {{ 'danger' if a.disponibile <= 0 else ('warning' if a.prenotato else 'success') }}"><strong>{{ qt(a.disponibile) }}</strong></span>
+                        </td>
+                        <td class="right cell-money">{{ money_ui(a.valore) }}</td>
+                        <td class="row-actions">
+                            <button type="button" class="btn icon-btn btn-storico" data-id="{{ a.id }}" data-nome="{{ a.descrizione }}" title="Storico movimenti"><i class="fas fa-history"></i></button>
+                            {% if puo_modificare %}
+                            <button type="button" class="btn icon-btn btn-modifica" title="Modifica articolo"
+                                    data-articolo='{{ {"id": a.id, "codice": a.codice, "descrizione": a.descrizione, "unita": a.unita, "costo": a.costo, "giacenza": a.giacenza, "note": a.note} | tojson | forceescape }}'>
+                                <i class="fas fa-pen"></i>
+                            </button>
+                            <button type="button" class="btn icon-btn btn-elimina" data-id="{{ a.id }}" data-nome="{{ a.descrizione }}" title="Elimina articolo"><i class="fas fa-trash-alt"></i></button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if a.prenotazioni %}
+                    <tr class="pren-row" style="display: none;">
+                        <td colspan="9">
+                            <div class="pren-list">
+                                {% for pr in a.prenotazioni %}
+                                <a href="{{ url_for('editor_preventivo', quote_id=pr.numero) }}" class="pren-item">
+                                    <strong>{{ pr.numero }}</strong> · {{ pr.cliente }} · <span class="muted">{{ pr.stato }}</span>
+                                    <span class="chip warning"><strong>{{ qt(pr.qt) }}</strong> {{ a.unita }}</span>
+                                </a>
+                                {% endfor %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <i class="fas fa-warehouse"></i>
+            <h4>Il magazzino è vuoto</h4>
+            <p>{% if puo_modificare %}Aggiungi il primo articolo con "Nuovo articolo".{% else %}La segreteria non ha ancora caricato articoli.{% endif %}</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <p class="muted mag-legend">
+        <i class="fas fa-info-circle"></i>
+        Un articolo aggiunto a un preventivo commerciale resta <strong>prenotato</strong> finché non viene consegnato; alla consegna viene scalato dalla giacenza.
+        Se la riga viene tolta o il preventivo annullato la prenotazione si libera.
+    </p>
+</div>
+
+{% if puo_modificare %}
+<div id="modal-articolo" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 520px;">
+        <h3 id="modal-articolo-titolo">Nuovo articolo</h3>
+        <form id="form-articolo" class="mag-form" autocomplete="off">
+            <input type="hidden" name="id">
+            <div class="mag-grid">
+                <label>Codice<input name="codice"></label>
+                <label>Unità di misura
+                    <select name="unita">{% for u in unita %}<option value="{{ u }}">{{ u }}</option>{% endfor %}</select>
+                </label>
+                <label class="full">Descrizione *<input name="descrizione" required></label>
+                <label>Costo unitario (€)<input name="costo" inputmode="decimal" placeholder="0,00"></label>
+                <label>Quantità in giacenza<input name="giacenza" inputmode="decimal" placeholder="0"></label>
+                <label class="full">Motivo variazione quantità <small class="muted">(facoltativo, finisce nello storico)</small><input name="nota_movimento" placeholder="es. arrivo merce, inventario"></label>
+                <label class="full">Note<textarea name="note" rows="2"></textarea></label>
+            </div>
+            <div class="mag-err" id="articolo-err"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn" id="articolo-annulla">Annulla</button>
+                <button type="submit" class="btn primary" id="articolo-salva"><i class="fas fa-save"></i> Salva</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div id="modal-storico" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 760px;">
+        <h3 id="modal-storico-titolo">Storico movimenti</h3>
+        <div class="table-wrap" style="max-height: 60vh; overflow-y: auto;">
+            <table class="styled-table" style="min-width: 0;">
+                <thead><tr><th>Data</th><th>Tipo</th><th class="right">Variazione</th><th class="right">Giacenza</th><th>Riferimento</th><th>Utente</th></tr></thead>
+                <tbody id="storico-body"></tbody>
+            </table>
+        </div>
+        <div class="modal-actions"><button type="button" class="btn" id="storico-chiudi">Chiudi</button></div>
+    </div>
+</div>
+
+{% include '_workflow_dashboard_styles.html' %}
+<style>
+.mag-search { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; width: 260px; max-width: 100%; }
+.link-btn { background: none; border: none; cursor: pointer; color: var(--accent); font-weight: 600; font-size: 14px; padding: 0; }
+.link-btn i { font-size: 10px; }
+.pren-row td { background: var(--surface-2); padding: 10px 18px; }
+.pren-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.pren-item { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); text-decoration: none; font-size: 13px; }
+.pren-item:hover { border-color: var(--accent); }
+.mag-legend { font-size: 12.5px; margin-top: -6px; }
+.mag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0; }
+.mag-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
+.mag-grid label.full { grid-column: 1 / -1; }
+.mag-grid input, .mag-grid select, .mag-grid textarea { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; font-weight: 400; color: var(--text); background: var(--surface); font-family: inherit; }
+.mag-err { display: none; color: var(--danger-text); font-size: 13px; margin-bottom: 8px; }
+.mov-pos { color: var(--success-text); font-weight: 600; }
+.mov-neg { color: var(--danger-text); font-weight: 600; }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const fmtNum = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const post = (url, body) => fetch(url, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
+    }).then(r => r.json().catch(() => ({ ok: false, error: 'Risposta non valida dal server.' })));
+
+    // --- Ricerca ---
+    const search = document.getElementById('mag-search');
+    search?.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        document.querySelectorAll('#mag-table tr.main-row').forEach(row => {
+            const show = !q || row.dataset.search.includes(q);
+            row.style.display = show ? '' : 'none';
+            const next = row.nextElementSibling;
+            if (next && next.classList.contains('pren-row') && !show) next.style.display = 'none';
+        });
+    });
+
+    // --- Prenotazioni (espandi/chiudi) ---
+    document.querySelectorAll('.toggle-pren').forEach(btn => btn.addEventListener('click', () => {
+        const row = btn.closest('tr').nextElementSibling;
+        if (row && row.classList.contains('pren-row')) row.style.display = row.style.display === 'none' ? '' : 'none';
+    }));
+
+    // --- Nuovo / modifica articolo ---
+    const modal = document.getElementById('modal-articolo');
+    if (modal) {
+        const form = document.getElementById('form-articolo');
+        const err = document.getElementById('articolo-err');
+        const num = (n) => (n === null || n === undefined || n === '') ? '' : String(n).replace('.', ',');
+        const apri = (a) => {
+            form.reset();
+            err.style.display = 'none';
+            document.getElementById('modal-articolo-titolo').textContent = a ? 'Modifica articolo' : 'Nuovo articolo';
+            form.id.value = a ? a.id : '';
+            form.codice.value = a ? a.codice : '';
+            form.descrizione.value = a ? a.descrizione : '';
+            form.unita.value = a ? a.unita : 'PZ';
+            form.costo.value = a ? Number(a.costo || 0).toFixed(2).replace('.', ',') : '';
+            form.giacenza.value = a ? num(a.giacenza) : '';
+            form.note.value = a ? a.note : '';
+            modal.style.display = 'flex';
+            form.descrizione.focus();
+        };
+        document.getElementById('btn-nuovo-articolo').addEventListener('click', () => apri(null));
+        document.querySelectorAll('.btn-modifica').forEach(btn => btn.addEventListener('click', () => apri(JSON.parse(btn.dataset.articolo))));
+        document.getElementById('articolo-annulla').addEventListener('click', () => { modal.style.display = 'none'; });
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('articolo-salva');
+            btn.disabled = true;
+            post("{{ url_for('salva_articolo_magazzino') }}", Object.fromEntries(new FormData(form)))
+                .then(d => {
+                    if (!d.ok) throw new Error(d.error || 'Errore nel salvataggio.');
+                    location.reload();
+                })
+                .catch(e => { err.textContent = e.message; err.style.display = 'block'; btn.disabled = false; });
+        });
+
+        document.querySelectorAll('.btn-elimina').forEach(btn => btn.addEventListener('click', () => {
+            window.showConfirmation('Elimina articolo', `Eliminare <strong>${esc(btn.dataset.nome)}</strong> dal magazzino?`, () => {
+                post(`/magazzino/articolo/${btn.dataset.id}/elimina`).then(d => {
+                    if (!d.ok) return window.showNotification('Impossibile eliminare', esc(d.error || 'Errore.'));
+                    location.reload();
+                });
+            });
+        }));
+    }
+
+    // --- Storico movimenti ---
+    const storico = document.getElementById('modal-storico');
+    const tipi = { creazione: 'Creazione', rettifica: 'Modifica quantità', scarico: 'Consegna', storno: 'Consegna annullata' };
+    document.querySelectorAll('.btn-storico').forEach(btn => btn.addEventListener('click', () => {
+        document.getElementById('modal-storico-titolo').textContent = 'Storico movimenti · ' + btn.dataset.nome;
+        const body = document.getElementById('storico-body');
+        body.innerHTML = '<tr><td colspan="6" class="muted">Caricamento...</td></tr>';
+        storico.style.display = 'flex';
+        fetch(`/api/magazzino/articolo/${btn.dataset.id}/movimenti`, { credentials: 'same-origin' })
+            .then(r => r.json()).then(d => {
+                if (!d.ok) throw new Error();
+                if (!d.movimenti.length) { body.innerHTML = '<tr><td colspan="6" class="muted">Nessun movimento registrato.</td></tr>'; return; }
+                body.innerHTML = d.movimenti.map(m => `
+                    <tr>
+                        <td class="nowrap">${esc(m.data)}</td>
+                        <td>${esc(tipi[m.tipo] || m.tipo)}${m.note ? `<div class="cell-sub">${esc(m.note)}</div>` : ''}</td>
+                        <td class="right ${m.quantita >= 0 ? 'mov-pos' : 'mov-neg'}">${m.quantita >= 0 ? '+' : ''}${fmtNum(m.quantita)}</td>
+                        <td class="right">${fmtNum(m.giacenza_dopo)}</td>
+                        <td>${m.preventivo_id ? `<a href="/preventivo/edit/${encodeURIComponent(m.preventivo_id)}">${esc(m.preventivo_id)}</a>` : '—'}</td>
+                        <td>${esc(m.utente)}</td>
+                    </tr>`).join('');
+            })
+            .catch(() => { body.innerHTML = '<tr><td colspan="6" class="muted">Impossibile caricare lo storico.</td></tr>'; });
+    }));
+    document.getElementById('storico-chiudi').addEventListener('click', () => { storico.style.display = 'none'; });
+});
+</script>
+
+{% block footer_nav %}
+<div class="dashboard-footer-nav">
+    {{ dashboard_navbar('magazzino') }}
+</div>
+{% endblock %}
+
+{% endblock %}
