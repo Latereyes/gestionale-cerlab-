@@ -4367,13 +4367,13 @@ def costo_righe_magazzino(p):
 
 def acquisti_magazzino(start_date, end_date):
     """Spesa per la merce messa in magazzino nel periodo (logica di cassa, come gli ordini fornitore):
-    ogni aggiunta di quantita' vale quantita' x costo dell'articolo in quel momento.
-    Una riduzione fatta a mano (correzione) riduce la spesa; consegne e storni non sono spese."""
+    la quantita' iniziale di un articolo nuovo al suo costo e ogni "Carico merce" al prezzo pagato.
+    Le correzioni da "Modifica" (errori, inventario), le consegne e gli storni non sono spese."""
     db = _DBSession()
     try:
         rows = (db.query(_MovimentoMagazzino, _ArticoloMagazzino.descrizione, _ArticoloMagazzino.codice)
                   .join(_ArticoloMagazzino, _ArticoloMagazzino.id == _MovimentoMagazzino.articolo_id)
-                  .filter(_MovimentoMagazzino.tipo.in_(["creazione", "rettifica", "carico"])).all())
+                  .filter(_MovimentoMagazzino.tipo.in_(["creazione", "carico"])).all())
     finally:
         db.close()
     out = []
