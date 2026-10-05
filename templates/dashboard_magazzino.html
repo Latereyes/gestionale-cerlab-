@@ -95,7 +95,7 @@
                         </td>
                         <td class="right cell-money">{{ money_ui(a.valore) }}</td>
                         <td class="row-actions">
-                            <button type="button" class="btn icon-btn btn-storico" data-id="{{ a.id }}" data-nome="{{ a.descrizione }}" title="Storico movimenti"><i class="fas fa-history"></i></button>
+                            <button type="button" class="btn icon-btn btn-storico" data-id="{{ a.id }}" data-nome="{{ a.descrizione }}" data-unita="{{ a.unita }}" data-giacenza="{{ a.giacenza }}" data-costo="{{ a.costo }}" title="Storico movimenti"><i class="fas fa-history"></i></button>
                             {% if puo_modificare %}
                             <button type="button" class="btn icon-btn btn-carico" title="Carico merce (arrivo)"
                                     data-id="{{ a.id }}" data-nome="{{ a.descrizione }}" data-unita="{{ a.unita }}"
@@ -181,6 +181,7 @@
                 <label class="full">Nota <small class="muted">(facoltativa, es. fornitore o n. DDT)</small><input name="note"></label>
             </div>
             <div class="mag-preview" id="carico-preview"></div>
+            <div class="mag-warn" id="carico-avviso" style="display: none;"><i class="fas fa-exclamation-triangle"></i> I preventivi che hanno già questo articolo in lista non vengono aggiornati automaticamente: le loro righe tengono il costo con cui sono state inserite.</div>
             <div class="mag-err" id="carico-err"></div>
             <div class="modal-actions">
                 <button type="button" class="btn" id="carico-annulla">Annulla</button>
@@ -192,11 +193,11 @@
 {% endif %}
 
 <div id="modal-storico" class="modal-overlay" style="display: none;">
-    <div class="modal-content" style="max-width: 760px;">
+    <div class="modal-content" style="max-width: 880px;">
         <h3 id="modal-storico-titolo">Storico movimenti</h3>
         <div class="table-wrap" style="max-height: 60vh; overflow-y: auto;">
             <table class="styled-table" style="min-width: 0; table-layout: auto;">
-                <thead><tr><th>Data</th><th>Tipo</th><th class="right">Variazione</th><th class="right">Prezzo</th><th class="right">Giacenza</th><th>Riferimento</th><th>Utente</th></tr></thead>
+                <thead><tr><th>Data</th><th>Tipo</th><th class="right">Variazione</th><th class="right">Prezzo</th><th class="right">Giacenza</th><th>Riferimento</th><th>Utente</th><th></th></tr></thead>
                 <tbody id="storico-body"></tbody>
             </table>
         </div>
@@ -218,8 +219,11 @@
 .mag-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
 .mag-grid label.full { grid-column: 1 / -1; }
 .mag-grid input, .mag-grid select, .mag-grid textarea { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; font-weight: 400; color: var(--text); background: var(--surface); font-family: inherit; }
+#modal-storico .styled-table th, #modal-storico .styled-table td { padding: 10px 10px; }
+#modal-storico .styled-table td.right { white-space: nowrap; }
 .mag-hint { font-size: 12px; color: var(--text-muted); }
 .mag-preview { font-size: 13px; background: var(--surface-2); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 10px; line-height: 1.5; }
+.mag-warn { font-size: 12.5px; background: var(--warning-bg); color: var(--warning-text); border: 1px solid var(--warning-border); border-radius: var(--radius-md); padding: 8px 12px; margin-bottom: 10px; }
 .mag-err { display: none; color: var(--danger-text); font-size: 13px; margin-bottom: 8px; }
 .mov-pos { color: var(--success-text); font-weight: 600; }
 .mov-neg { color: var(--danger-text); font-weight: 600; }
@@ -229,6 +233,9 @@
 document.addEventListener('DOMContentLoaded', () => {
     const fmtNum = (n) => Number(n || 0).toLocaleString('it-IT', { maximumFractionDigits: 3 });
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const euro = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+    const artDa = (btn) => ({ id: btn.dataset.id, nome: btn.dataset.nome, unita: btn.dataset.unita,
+                              giacenza: Number(btn.dataset.giacenza), costo: Number(btn.dataset.costo) });
     const post = (url, body) => fetch(url, {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
@@ -297,41 +304,59 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
     }
 
-    // --- Carico merce (arrivo): spesa al prezzo pagato, costo dell'articolo al costo medio ponderato ---
+    // --- Carico merce (arrivo) e correzione dell'ultimo carico ---
+    // Spesa al prezzo pagato, costo dell'articolo al costo medio ponderato.
     const modalCarico = document.getElementById('modal-carico');
+    const media = (g, c, q, p) => { g = Math.max(g, 0); return g + q > 0 ? (g * c + q * p) / (g + q) : p; };
+    let apriCarico = null;
     if (modalCarico) {
         const form = document.getElementById('form-carico');
         const err = document.getElementById('carico-err');
         const preview = document.getElementById('carico-preview');
+        const avviso = document.getElementById('carico-avviso');
         // stessa lettura del server: con la virgola il punto e' separatore delle migliaia, senza e' il decimale
         const parse = (v) => { const t = String(v || '').trim(); return parseFloat(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t); };
-        const eur = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
-        let art = null;
+        let stato = null;   // { art, mov }  mov presente = correzione di un carico esistente
         const aggiorna = () => {
             const q = parse(form.quantita.value), pr = parse(form.prezzo.value);
             if (!(q > 0) || !(pr >= 0)) { preview.textContent = 'Inserisci quantità e prezzo pagato.'; return; }
-            const g = Math.max(art.giacenza, 0);
-            const medio = (g * art.costo + q * pr) / (g + q);
-            preview.innerHTML = `Spesa registrata: <strong>${eur(q * pr)}</strong><br>`
-                + `Giacenza: ${fmtNum(art.giacenza)} → <strong>${fmtNum(art.giacenza + q)} ${esc(art.unita)}</strong><br>`
-                + `Costo medio: ${eur(art.costo)} → <strong>${eur(medio)}</strong>`;
+            const { art, mov } = stato;
+            let giacenzaDopo, medio, spesa = `<strong>${euro(q * pr)}</strong>`;
+            if (mov) {
+                const g0 = mov.giacenza_dopo - mov.quantita;
+                const c0 = mov.tipo === 'creazione' ? 0 : (mov.costo_precedente ?? art.costo);
+                giacenzaDopo = art.giacenza + (q - mov.quantita);
+                medio = media(g0, c0, q, pr);
+                spesa += ` (era ${euro(mov.quantita * mov.costo_unitario)})`;
+            } else {
+                giacenzaDopo = art.giacenza + q;
+                medio = media(art.giacenza, art.costo, q, pr);
+            }
+            preview.innerHTML = `Spesa registrata: ${spesa}<br>`
+                + `Giacenza: ${fmtNum(art.giacenza)} → <strong>${fmtNum(giacenzaDopo)} ${esc(art.unita)}</strong><br>`
+                + `Costo medio: ${euro(art.costo)} → <strong>${euro(medio)}</strong>`;
         };
-        document.querySelectorAll('.btn-carico').forEach(btn => btn.addEventListener('click', () => {
-            art = { id: btn.dataset.id, unita: btn.dataset.unita, giacenza: Number(btn.dataset.giacenza), costo: Number(btn.dataset.costo) };
+        apriCarico = (art, mov) => {
+            stato = { art, mov };
             form.reset(); err.style.display = 'none';
-            document.getElementById('modal-carico-titolo').textContent = 'Carico merce · ' + btn.dataset.nome;
-            form.prezzo.value = art.costo.toFixed(2).replace('.', ',');
+            document.getElementById('modal-carico-titolo').textContent = (mov ? 'Correggi carico · ' : 'Carico merce · ') + art.nome;
+            document.getElementById('carico-salva').innerHTML = mov ? '<i class="fas fa-save"></i> Salva correzione' : '<i class="fas fa-truck-loading"></i> Registra carico';
+            avviso.style.display = mov ? 'block' : 'none';
+            form.quantita.value = mov ? String(mov.quantita).replace('.', ',') : '';
+            form.prezzo.value = (mov ? mov.costo_unitario : art.costo).toFixed(2).replace('.', ',');
             aggiorna();
             modalCarico.style.display = 'flex';
             form.quantita.focus();
-        }));
+        };
+        document.querySelectorAll('.btn-carico').forEach(btn => btn.addEventListener('click', () => apriCarico(artDa(btn), null)));
         form.addEventListener('input', aggiorna);
         document.getElementById('carico-annulla').addEventListener('click', () => { modalCarico.style.display = 'none'; });
         form.addEventListener('submit', (e) => {
             e.preventDefault();
             const btn = document.getElementById('carico-salva');
             btn.disabled = true;
-            post(`/magazzino/articolo/${art.id}/carico`, Object.fromEntries(new FormData(form)))
+            const url = stato.mov ? `/magazzino/movimento/${stato.mov.id}/correggi` : `/magazzino/articolo/${stato.art.id}/carico`;
+            post(url, Object.fromEntries(new FormData(form)))
                 .then(d => { if (!d.ok) throw new Error(d.error || 'Errore nel salvataggio.'); location.reload(); })
                 .catch(e => { err.textContent = e.message; err.style.display = 'block'; btn.disabled = false; });
         });
@@ -340,16 +365,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Storico movimenti ---
     const storico = document.getElementById('modal-storico');
     const tipi = { creazione: 'Creazione', carico: 'Carico merce', rettifica: 'Modifica quantità', scarico: 'Consegna', storno: 'Consegna annullata' };
-    const euro = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+    const puoModificare = {{ 'true' if puo_modificare else 'false' }};
+    const avvisoPreventivi = 'I preventivi che hanno già questo articolo in lista non vengono aggiornati automaticamente: le loro righe tengono il costo con cui sono state inserite.';
+    let artStorico = null;
     document.querySelectorAll('.btn-storico').forEach(btn => btn.addEventListener('click', () => {
+        artStorico = artDa(btn);
         document.getElementById('modal-storico-titolo').textContent = 'Storico movimenti · ' + btn.dataset.nome;
         const body = document.getElementById('storico-body');
-        body.innerHTML = '<tr><td colspan="7" class="muted">Caricamento...</td></tr>';
+        body.innerHTML = '<tr><td colspan="8" class="muted">Caricamento...</td></tr>';
         storico.style.display = 'flex';
         fetch(`/api/magazzino/articolo/${btn.dataset.id}/movimenti`, { credentials: 'same-origin' })
             .then(r => r.json()).then(d => {
                 if (!d.ok) throw new Error();
-                if (!d.movimenti.length) { body.innerHTML = '<tr><td colspan="7" class="muted">Nessun movimento registrato.</td></tr>'; return; }
+                if (!d.movimenti.length) { body.innerHTML = '<tr><td colspan="8" class="muted">Nessun movimento registrato.</td></tr>'; return; }
                 body.innerHTML = d.movimenti.map(m => `
                     <tr>
                         <td class="nowrap">${esc(m.data)}</td>
@@ -359,9 +387,29 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td class="right">${fmtNum(m.giacenza_dopo)}</td>
                         <td>${m.preventivo_id ? `<a href="/preventivo/edit/${encodeURIComponent(m.preventivo_id)}">${esc(m.preventivo_id)}</a>` : '—'}</td>
                         <td>${esc(m.utente)}</td>
+                        <td class="row-actions">${puoModificare && m.modificabile ? `
+                            <button type="button" class="btn icon-btn mov-correggi" data-id="${m.id}" title="Correggi questo carico"><i class="fas fa-pen"></i></button>
+                            ${m.tipo === 'carico' ? `<button type="button" class="btn icon-btn mov-elimina" data-id="${m.id}" title="Elimina questo carico"><i class="fas fa-trash-alt"></i></button>` : ''}` : ''}</td>
                     </tr>`).join('');
+                const trova = (el) => d.movimenti.find(x => String(x.id) === el.dataset.id);
+                body.querySelectorAll('.mov-correggi').forEach(b => b.addEventListener('click', () => {
+                    storico.style.display = 'none';
+                    apriCarico(artStorico, trova(b));
+                }));
+                body.querySelectorAll('.mov-elimina').forEach(b => b.addEventListener('click', () => {
+                    const m = trova(b);
+                    storico.style.display = 'none';
+                    window.showConfirmation('Elimina carico',
+                        `Eliminare il carico di <strong>${fmtNum(m.quantita)} ${esc(artStorico.unita)}</strong> a ${euro(m.costo_unitario)}? `
+                        + `Giacenza, costo medio e spesa in cassa verranno ricalcolati.<br><br><small>${avvisoPreventivi}</small>`, () => {
+                        post(`/magazzino/movimento/${m.id}/correggi`, { elimina: true }).then(r => {
+                            if (!r.ok) return window.showNotification('Impossibile eliminare', esc(r.error || 'Errore.'));
+                            location.reload();
+                        });
+                    });
+                }));
             })
-            .catch(() => { body.innerHTML = '<tr><td colspan="7" class="muted">Impossibile caricare lo storico.</td></tr>'; });
+            .catch(() => { body.innerHTML = '<tr><td colspan="8" class="muted">Impossibile caricare lo storico.</td></tr>'; });
     }));
     document.getElementById('storico-chiudi').addEventListener('click', () => { storico.style.display = 'none'; });
 });

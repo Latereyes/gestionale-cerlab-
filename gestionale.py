@@ -4289,12 +4289,14 @@ def _articoli_magazzino_con_disponibilita():
 def _registra_movimento(db, articolo, delta, tipo, preventivo_id="", note="", costo_unitario=None):
     articolo.giacenza = (articolo.giacenza or 0.0) + delta
     articolo.aggiornato_il = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
-    db.add(_MovimentoMagazzino(
+    mov = _MovimentoMagazzino(
         articolo_id=articolo.id, data=articolo.aggiornato_il, tipo=tipo, quantita=delta,
         giacenza_dopo=articolo.giacenza,
         costo_unitario=(articolo.costo or 0.0) if costo_unitario is None else costo_unitario,
         preventivo_id=preventivo_id,
-        utente=session.get("user_name", "") if session else "", note=note))
+        utente=session.get("user_name", "") if session else "", note=note)
+    db.add(mov)
+    return mov
 
 
 def scarica_righe_magazzino(p, indici):
@@ -4480,9 +4482,11 @@ def carico_articolo_magazzino(articolo_id):
         art = db.get(_ArticoloMagazzino, articolo_id)
         if not art or art.attivo is False:
             return jsonify({"ok": False, "error": "Articolo non trovato."}), 404
+        costo_prima = art.costo or 0.0
         art.costo = round(costo_medio_ponderato(art.giacenza, art.costo, quantita, prezzo), 2)
-        _registra_movimento(db, art, quantita, "carico", note=str(data.get("note", "")).strip(),
-                            costo_unitario=round(prezzo, 2))
+        mov = _registra_movimento(db, art, quantita, "carico", note=str(data.get("note", "")).strip(),
+                                  costo_unitario=round(prezzo, 2))
+        mov.costo_precedente = costo_prima
         db.commit()
         nuovo_costo = art.costo
     except Exception as e:
@@ -4522,9 +4526,86 @@ def api_movimenti_magazzino(articolo_id):
     try:
         movimenti = db.query(_MovimentoMagazzino).filter_by(articolo_id=articolo_id) \
                       .order_by(_MovimentoMagazzino.id.desc()).limit(100).all()
-        return jsonify({"ok": True, "movimenti": [m.to_dict() for m in movimenti]})
+        ultimo = _ultimo_carico(db, articolo_id)
+        lista = []
+        for m in movimenti:
+            d = m.to_dict()
+            d["modificabile"] = bool(ultimo and m.id == ultimo.id)
+            lista.append(d)
+        return jsonify({"ok": True, "movimenti": lista})
     finally:
         db.close()
+
+
+def _ultimo_carico(db, articolo_id):
+    """L'ultimo ingresso di merce (carico o quantita' iniziale): e' l'unico che si puo' correggere,
+    perche' il costo medio dei carichi successivi dipende da quelli precedenti."""
+    return db.query(_MovimentoMagazzino) \
+             .filter(_MovimentoMagazzino.articolo_id == articolo_id,
+                     _MovimentoMagazzino.tipo.in_(["creazione", "carico"])) \
+             .order_by(_MovimentoMagazzino.id.desc()).first()
+
+
+@app.route("/magazzino/movimento/<int:movimento_id>/correggi", methods=["POST"])
+@login_required
+def correggi_carico_magazzino(movimento_id):
+    """Corregge (quantita'/prezzo) o elimina l'ultimo carico di un articolo.
+    Giacenza, costo medio e spesa nel cashflow si ricalcolano; le righe dei preventivi no."""
+    if session.get("user_role") not in RUOLI_GESTIONE_MAGAZZINO:
+        return jsonify({"ok": False, "error": "Non disponi delle autorizzazioni."}), 403
+    data = request.get_json(silent=True) or request.form
+    elimina = str(data.get("elimina", "")).lower() in ("1", "true")
+    db = _DBSession()
+    try:
+        mov = db.get(_MovimentoMagazzino, movimento_id)
+        if not mov or mov.tipo not in ("creazione", "carico"):
+            return jsonify({"ok": False, "error": "Carico non trovato."}), 404
+        ultimo = _ultimo_carico(db, mov.articolo_id)
+        if not ultimo or ultimo.id != mov.id:
+            return jsonify({"ok": False, "error": "Si puo' correggere solo l'ultimo carico dell'articolo."}), 400
+        if elimina and mov.tipo == "creazione":
+            return jsonify({"ok": False, "error": "La quantita' iniziale si corregge, non si elimina."}), 400
+        art = db.get(_ArticoloMagazzino, mov.articolo_id)
+        quantita = 0.0 if elimina else _to_num(data.get("quantita"))
+        prezzo = (mov.costo_unitario or 0.0) if elimina else _to_num(data.get("prezzo"))
+        if not elimina and (quantita <= 0 or prezzo < 0):
+            return jsonify({"ok": False, "error": "Inserisci quantita' e prezzo validi."}), 400
+        delta = round(quantita - (mov.quantita or 0.0), 3)
+        if (art.giacenza or 0.0) + delta < -1e-9:
+            return jsonify({"ok": False, "error": "Una parte di questo carico e' gia' stata consegnata: "
+                                                  "la giacenza andrebbe sotto zero."}), 400
+
+        # Costo medio ricalcolato come se il carico fosse stato registrato giusto
+        giacenza_prima = (mov.giacenza_dopo or 0.0) - (mov.quantita or 0.0)
+        if mov.tipo == "creazione":
+            costo_prima = 0.0
+        elif mov.costo_precedente is not None:
+            costo_prima = mov.costo_precedente
+        else:
+            costo_prima = art.costo or 0.0
+        art.costo = round(costo_medio_ponderato(giacenza_prima, costo_prima, quantita, prezzo), 2) if quantita else costo_prima
+        art.giacenza = (art.giacenza or 0.0) + delta
+        art.aggiornato_il = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        # Le giacenze mostrate nello storico dopo questo carico si spostano della differenza
+        for m in db.query(_MovimentoMagazzino).filter(_MovimentoMagazzino.articolo_id == art.id,
+                                                      _MovimentoMagazzino.id > mov.id).all():
+            m.giacenza_dopo = (m.giacenza_dopo or 0.0) + delta
+        if elimina:
+            db.delete(mov)
+        else:
+            nota = f"Corretto da {session.get('user_name', '')}: era {_fmt_qt(mov.quantita)} x {money_ui(mov.costo_unitario)}"
+            mov.quantita = quantita
+            mov.costo_unitario = round(prezzo, 2)
+            mov.giacenza_dopo = giacenza_prima + quantita
+            mov.note = (f"{mov.note} · " if mov.note else "") + nota
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[magazzino] Errore correzione carico: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True})
 
 
 # ===============================================
