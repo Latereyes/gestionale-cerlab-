@@ -302,16 +302,19 @@ class TrayWidget:
     def _open(self, icon=None, item_=None):
         webbrowser.open(self.url)
 
-    def _copy_url(self, icon=None, item_=None, url=None, dove="degli altri PC"):
-        url = url or self.url
+    # le azioni del menu possono avere al massimo (icon, item): pystray rifiuta metodi con più parametri
+    def _copy_url(self, icon=None, item_=None):
+        self._copia_indirizzo(self.url, "degli altri PC")
+
+    def _copy_tailscale_url(self, icon=None, item_=None):
+        self._copia_indirizzo(self.tailscale_url, "del telefono o dei PC collegati a Tailscale")
+
+    def _copia_indirizzo(self, url, dove):
         try:
             subprocess.run(["clip"], input=url, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             self.icon.notify(f"Indirizzo copiato: {url}\nIncollalo nel browser {dove}.", "Gestionale Cerlab")
         except Exception as e:
             print(f"[tray] Impossibile copiare l'indirizzo: {e}")
-
-    def _copy_tailscale_url(self, icon=None, item_=None):
-        self._copy_url(url=self.tailscale_url, dove="del telefono o dei PC collegati a Tailscale")
 
     @staticmethod
     def _open_path(path):
