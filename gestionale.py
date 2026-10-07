@@ -18,6 +18,7 @@ import pystray
 from waitress import serve
 import sys
 import socket
+import ipaddress
 import ctypes
 import subprocess
 import datetime
@@ -196,6 +197,7 @@ class TrayWidget:
         self.online = None          # None = ancora in avvio
         self.last_error = ""
         self.lan_ip = LAN_IP
+        self.tailscale_ip = get_tailscale_ip()
         self.notifiche_attivita = self._load_settings().get("notifiche_attivita", True)
         self.base_image = Image.open(resource_path("static/favicon.ico")).convert("RGBA").resize((64, 64))
         self.icon = pystray.Icon("Gestionale", self._image_for(None), self._tooltip(), self._menu())
@@ -206,6 +208,10 @@ class TrayWidget:
     @property
     def url(self):
         return f"http://{self.lan_ip}:{PORT}/"
+
+    @property
+    def tailscale_url(self):
+        return f"http://{self.tailscale_ip}:{PORT}/" if self.tailscale_ip else ""
 
     def _check_server(self):
         try:
@@ -262,6 +268,7 @@ class TrayWidget:
             ip_changed = new_ip != self.lan_ip and new_ip != "127.0.0.1"
             if ip_changed:
                 self.lan_ip = new_ip
+            self.tailscale_ip = get_tailscale_ip()
             try:
                 self._refresh()
                 if was is True and not ok:
@@ -295,12 +302,16 @@ class TrayWidget:
     def _open(self, icon=None, item_=None):
         webbrowser.open(self.url)
 
-    def _copy_url(self, icon=None, item_=None):
+    def _copy_url(self, icon=None, item_=None, url=None, dove="degli altri PC"):
+        url = url or self.url
         try:
-            subprocess.run(["clip"], input=self.url, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            self.icon.notify(f"Indirizzo copiato: {self.url}\nIncollalo nel browser degli altri PC.", "Gestionale Cerlab")
+            subprocess.run(["clip"], input=url, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            self.icon.notify(f"Indirizzo copiato: {url}\nIncollalo nel browser {dove}.", "Gestionale Cerlab")
         except Exception as e:
             print(f"[tray] Impossibile copiare l'indirizzo: {e}")
+
+    def _copy_tailscale_url(self, icon=None, item_=None):
+        self._copy_url(url=self.tailscale_url, dove="del telefono o dei PC collegati a Tailscale")
 
     @staticmethod
     def _open_path(path):
@@ -345,6 +356,8 @@ class TrayWidget:
             pystray.Menu.SEPARATOR,
             M("Apri Gestionale", self._open, default=True),
             M(lambda i: f"Copia indirizzo  ({self.url})", self._copy_url),
+            M(lambda i: f"Copia indirizzo Tailscale  ({self.tailscale_url})", self._copy_tailscale_url,
+              visible=lambda i: bool(self.tailscale_ip)),
             M(lambda i: self._users_text(), None, enabled=False),
             M("Notifiche attività colleghi", self._toggle_notifiche, checked=lambda it: self.notifiche_attivita),
             pystray.Menu.SEPARATOR,
@@ -1873,9 +1886,18 @@ def notifica_attivita_nel_widget(response):
         print(f"[tray] Errore notifica attività: {e}")
     return response
 
+_RETE_TAILSCALE = ipaddress.ip_network("100.64.0.0/10")  # indirizzi che Tailscale dà ai dispositivi della VPN
+
+def _ip_tailscale(ip):
+    try:
+        return ipaddress.ip_address(ip) in _RETE_TAILSCALE
+    except ValueError:
+        return False
+
 def _ip_rete_locale(ip):
+    """Rete dell'ufficio, oppure un dispositivo collegato via Tailscale (VPN privata)."""
     ip = ip or ""
-    return ip in ("127.0.0.1", "::1") or ip.startswith(("192.168.", "10.", "172."))
+    return ip in ("127.0.0.1", "::1") or ip.startswith(("192.168.", "10.", "172.")) or _ip_tailscale(ip)
 
 @app.route("/api/attivita")
 def api_attivita():
@@ -6783,6 +6805,22 @@ def get_lan_ip():
     except Exception:
         return "127.0.0.1"
 
+def get_tailscale_ip():
+    """IP Tailscale di questo PC (100.x.y.z), o None se Tailscale non è attivo:
+    è l'indirizzo con cui telefono e PC fuori ufficio raggiungono il gestionale."""
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            if _ip_tailscale(info[4][0]):
+                return info[4][0]
+    except Exception:
+        pass
+    try:  # in alternativa lo si chiede al programma di Tailscale
+        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        return next((ip for ip in out.split() if _ip_tailscale(ip)), None)
+    except Exception:
+        return None
+
 def is_admin():
     """Controlla se lo script ha i privilegi di amministratore su Windows."""
     try:
@@ -6799,7 +6837,8 @@ def manage_firewall_rule(port, rule_name="Gestionale Flask"):
     try:
         check_cmd = f'netsh advfirewall firewall show rule name="{rule_name}"'
         result = subprocess.run(check_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        if "Nessuna regola corrispondente ai criteri specificati" in result.stdout:
+        # netsh esce con errore se la regola non c'è (il testo del messaggio dipende dalla lingua di Windows)
+        if result.returncode != 0 or "Nessuna regola corrispondente ai criteri specificati" in result.stdout:
             print(f"INFO: Regola firewall '{rule_name}' non trovata. Tentativo di creazione...")
             add_cmd = (f'netsh advfirewall firewall add rule name="{rule_name}" '
                        f'dir=in action=allow protocol=TCP localport={port}')
