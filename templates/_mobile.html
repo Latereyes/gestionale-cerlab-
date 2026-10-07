@@ -1,0 +1,160 @@
+{#
+  Adattamenti per telefono (schermi fino a 768px), es. gestionale aperto da Tailscale.
+  Incluso in fondo a base.html: viene dopo gli stili delle singole pagine e li corregge solo su schermi piccoli.
+  Sul PC non cambia nulla.
+#}
+<style>
+.m-fab-toggle { display: none; }
+@media (max-width: 768px) {
+    /* --- Testata compatta e non fissa: sul telefono occupava mezzo schermo --- */
+    .site-header { position: static; padding: 8px 12px; }
+    .header-container { flex-direction: column; align-items: stretch; gap: 6px; }
+    .header-main-content { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px 8px; }
+    .brand-link .logo { height: 26px; }
+    .back-link { width: 32px; height: 32px; }
+    .back-link i { font-size: 18px; }
+    .page-title-header { flex: 1 1 100%; flex-wrap: wrap; gap: 4px; }
+    .page-title-header h1 { font-size: 17px; white-space: normal; flex-wrap: wrap; gap: 6px; }
+    .page-title-header .header-client-info { font-size: 13px; border-left: 0; padding-left: 0; margin-left: 0; }
+    .page-title-header .status-badge { margin-left: 0; }
+    .user-menu { justify-content: flex-start; gap: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+    .user-menu .user-info { display: none; }
+    .user-menu .user-avatar { width: 30px; height: 30px; font-size: 11px; }
+    .user-menu .btn { padding: 6px 12px; }
+    /* Il programma notifiche è per i PC Windows dell'ufficio, non per il telefono */
+    .user-menu a[href*="notifiche/scarica"] { display: none; }
+
+    /* --- Campi: a 16px iPhone non ingrandisce la pagina quando si tocca un campo --- */
+    input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px; }
+
+    /* --- Tabelle: scorrono di lato invece di essere tagliate --- */
+    .m-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+    .m-scroll > table { min-width: 100%; }
+
+    /* --- Bottoni laterali (Notifiche, Messaggi, Task...): raccolti in un solo pulsante in basso a destra --- */
+    .floating-action-group {
+        top: auto; transform: none; right: 12px;
+        bottom: calc(var(--m-footer-h, 0px) + 12px);
+        flex-direction: column; align-items: center; gap: 8px;
+        z-index: 900; /* sotto le finestre (1000): non copre i pulsanti Salva/Chiudi */
+    }
+    .floating-action-group .fab-btn { width: 52px; height: 52px; font-size: 18px; }
+    .floating-action-group .fab-label { font-size: 7px; letter-spacing: 0; }
+    .floating-action-group .fab-btn::after { display: none; }
+    .floating-action-group .fab-btn:hover { transform: none; }
+    .floating-action-group.m-ready:not(.m-open) > :not(.m-fab-toggle) { display: none; }
+    .m-fab-toggle {
+        display: flex; width: 48px; height: 48px; border-radius: 50%; border: 0; cursor: pointer;
+        align-items: center; justify-content: center; position: relative;
+        background: var(--text); color: #fff; font-size: 18px; box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+    }
+    .m-fab-toggle .m-dot {
+        position: absolute; top: 2px; right: 2px; width: 12px; height: 12px; border-radius: 50%;
+        background: hsl(354,90%,56%); border: 2px solid #fff; display: none;
+    }
+    .m-fab-toggle.has-unread .m-dot { display: block; }
+
+    /* --- Barre in basso (flusso di lavoro / dashboard): una riga sola che scorre di lato --- */
+    .sticky-footer, .dashboard-footer-nav { padding: 6px 8px; min-height: 0; gap: 6px; }
+    .action-buttons-grid, .dashboard-nav-grid {
+        display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 4px;
+        -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    .action-buttons-grid::-webkit-scrollbar, .dashboard-nav-grid::-webkit-scrollbar { display: none; }
+    .action-buttons-grid .btn, .dashboard-nav-grid .btn {
+        flex: 0 0 auto; width: auto; min-width: 74px; height: 46px; font-size: 9.5px; padding: 6px 8px;
+    }
+    .action-buttons-grid .btn i, .dashboard-nav-grid .btn i { font-size: 15px; }
+
+    /* --- Finestre: chat a tutto schermo, finestre di conferma dentro lo schermo --- */
+    .chat-modal, #chatModal {
+        left: 0; right: 0; bottom: 0; top: 0; width: 100%; max-width: 100%;
+        height: 100%; max-height: 100%; border-radius: 0;
+    }
+    .modal-content { width: calc(100% - 24px); max-height: calc(100vh - 24px); overflow-y: auto; padding: 20px; box-sizing: border-box; }
+
+    /* --- Editor preventivo: righe una sotto l'altra, campi leggibili --- */
+    .rt-col { padding: 12px; }
+    .col-main { padding-left: 12px; min-width: 0; }
+    .col-totals { flex: none; flex-wrap: wrap; gap: 8px 16px; padding: 10px 12px; }
+    .col-actions { position: static; flex: none; align-items: flex-start; padding: 0 12px 10px; }
+    .article-cell-wrapper { flex-wrap: wrap; gap: 6px; }
+    .article-cell-wrapper .main-article-input { flex: 1 1 calc(100% - 40px); min-width: 0; }
+    .article-cell-wrapper .edit-icon, .article-cell-wrapper .toggle-calc-grid-btn { margin-left: 0; }
+    .calculation-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .calculation-grid .grid-span-2 { grid-column: 1 / -1; }
+}
+</style>
+<script>
+(function () {
+    var mq = window.matchMedia('(max-width: 768px)');
+
+    // Tabelle: avvolte in un contenitore che scorre di lato (solo se non lo sono già)
+    function avvolgiTabelle() {
+        document.querySelectorAll('table').forEach(function (t) {
+            var p = t.parentElement;
+            if (!p || p.classList.contains('m-scroll') || t.closest('.modal-content, .chat-modal')) return;
+            var ov = getComputedStyle(p).overflowX;
+            if (ov === 'auto' || ov === 'scroll') return;
+            var w = document.createElement('div');
+            w.className = 'm-scroll';
+            p.insertBefore(w, t);
+            w.appendChild(t);
+        });
+    }
+
+    // Altezza della barra in basso: i bottoni flottanti stanno sopra e la pagina non finisce sotto la barra
+    function misuraBarra() {
+        var h = 0;
+        document.querySelectorAll('.sticky-footer, .dashboard-footer-nav').forEach(function (f) {
+            var s = getComputedStyle(f);
+            if (s.display !== 'none' && s.position === 'fixed') h = Math.max(h, f.offsetHeight);
+        });
+        document.documentElement.style.setProperty('--m-footer-h', h + 'px');
+        if (mq.matches && h) document.body.style.paddingBottom = (h + 76) + 'px';
+    }
+
+    // Bottoni flottanti: un pulsante che li apre/chiude, con pallino rosso se ci sono messaggi/notifiche non letti
+    function preparaFab() {
+        var g = document.querySelector('.floating-action-group');
+        if (!g || g.querySelector('.m-fab-toggle')) return;
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'm-fab-toggle';
+        b.title = 'Notifiche, messaggi e strumenti';
+        b.innerHTML = '<i class="fas fa-ellipsis-v"></i><span class="m-dot"></span>';
+        g.appendChild(b);
+        g.classList.add('m-ready');
+        b.addEventListener('click', function (e) {
+            e.stopPropagation();
+            g.classList.toggle('m-open');
+            b.querySelector('i').className = g.classList.contains('m-open') ? 'fas fa-times' : 'fas fa-ellipsis-v';
+        });
+        // tocco su un bottone o fuori: il gruppo si richiude
+        document.addEventListener('click', function (e) {
+            if (!g.classList.contains('m-open')) return;
+            if (e.target.closest('.m-fab-toggle')) return;
+            g.classList.remove('m-open');
+            b.querySelector('i').className = 'fas fa-ellipsis-v';
+        });
+        function aggiornaPallino() {
+            var non_letti = Array.prototype.some.call(g.querySelectorAll('.unread-badge, .note-dot'), function (x) {
+                return x.style.display && x.style.display !== 'none' && (x.textContent.trim() !== '0');
+            });
+            b.classList.toggle('has-unread', non_letti);
+        }
+        new MutationObserver(aggiornaPallino).observe(g, { subtree: true, attributes: true, childList: true, characterData: true });
+        aggiornaPallino();
+    }
+
+    function avvia() {
+        preparaFab();
+        if (mq.matches) avvolgiTabelle();
+        misuraBarra();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', avvia); else avvia();
+    window.addEventListener('load', misuraBarra);
+    window.addEventListener('resize', misuraBarra);
+    if (mq.addEventListener) mq.addEventListener('change', function () { if (mq.matches) avvolgiTabelle(); misuraBarra(); });
+})();
+</script>

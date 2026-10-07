@@ -18,6 +18,7 @@ import pystray
 from waitress import serve
 import sys
 import socket
+import ipaddress
 import ctypes
 import subprocess
 import datetime
@@ -196,6 +197,7 @@ class TrayWidget:
         self.online = None          # None = ancora in avvio
         self.last_error = ""
         self.lan_ip = LAN_IP
+        self.tailscale_ip = get_tailscale_ip()
         self.notifiche_attivita = self._load_settings().get("notifiche_attivita", True)
         self.base_image = Image.open(resource_path("static/favicon.ico")).convert("RGBA").resize((64, 64))
         self.icon = pystray.Icon("Gestionale", self._image_for(None), self._tooltip(), self._menu())
@@ -206,6 +208,10 @@ class TrayWidget:
     @property
     def url(self):
         return f"http://{self.lan_ip}:{PORT}/"
+
+    @property
+    def tailscale_url(self):
+        return f"http://{self.tailscale_ip}:{PORT}/" if self.tailscale_ip else ""
 
     def _check_server(self):
         try:
@@ -262,6 +268,7 @@ class TrayWidget:
             ip_changed = new_ip != self.lan_ip and new_ip != "127.0.0.1"
             if ip_changed:
                 self.lan_ip = new_ip
+            self.tailscale_ip = get_tailscale_ip()
             try:
                 self._refresh()
                 if was is True and not ok:
@@ -295,10 +302,17 @@ class TrayWidget:
     def _open(self, icon=None, item_=None):
         webbrowser.open(self.url)
 
+    # le azioni del menu possono avere al massimo (icon, item): pystray rifiuta metodi con più parametri
     def _copy_url(self, icon=None, item_=None):
+        self._copia_indirizzo(self.url, "degli altri PC")
+
+    def _copy_tailscale_url(self, icon=None, item_=None):
+        self._copia_indirizzo(self.tailscale_url, "del telefono o dei PC collegati a Tailscale")
+
+    def _copia_indirizzo(self, url, dove):
         try:
-            subprocess.run(["clip"], input=self.url, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            self.icon.notify(f"Indirizzo copiato: {self.url}\nIncollalo nel browser degli altri PC.", "Gestionale Cerlab")
+            subprocess.run(["clip"], input=url, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            self.icon.notify(f"Indirizzo copiato: {url}\nIncollalo nel browser {dove}.", "Gestionale Cerlab")
         except Exception as e:
             print(f"[tray] Impossibile copiare l'indirizzo: {e}")
 
@@ -345,6 +359,8 @@ class TrayWidget:
             pystray.Menu.SEPARATOR,
             M("Apri Gestionale", self._open, default=True),
             M(lambda i: f"Copia indirizzo  ({self.url})", self._copy_url),
+            M(lambda i: f"Copia indirizzo Tailscale  ({self.tailscale_url})", self._copy_tailscale_url,
+              visible=lambda i: bool(self.tailscale_ip)),
             M(lambda i: self._users_text(), None, enabled=False),
             M("Notifiche attività colleghi", self._toggle_notifiche, checked=lambda it: self.notifiche_attivita),
             pystray.Menu.SEPARATOR,
@@ -714,6 +730,23 @@ class AppLauncher(Tk):
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "change-me"
+
+class _IndirizzoDaTailscaleServe:
+    """Con `tailscale serve` (indirizzo https per installare l'app sul telefono) le richieste arrivano
+    da 127.0.0.1: si usa l'IP del dispositivo che Tailscale mette in X-Forwarded-For, altrimenti il
+    telefono passerebbe per il PC server (che per alcune pagine non chiede il login).
+    Solo per le richieste da 127.0.0.1: un PC della rete non può fingersi un altro."""
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        if environ.get("REMOTE_ADDR") in ("127.0.0.1", "::1"):
+            inoltrato = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[-1].strip()
+            if inoltrato:
+                environ["REMOTE_ADDR"] = inoltrato
+        return self.wsgi_app(environ, start_response)
+
+app.wsgi_app = _IndirizzoDaTailscaleServe(app.wsgi_app)
 APP_NAME = "Gestionale Preventivi"
 
 import hmac, hashlib, time as _time
@@ -1757,7 +1790,7 @@ _UTENTI_ATTIVITA_LOCK = threading.Lock()
 
 @app.before_request
 def traccia_utente_collegato():
-    if request.endpoint in (None, "static", "health") or "user_id" not in session:
+    if request.endpoint in (None, "static", "health", "manifest_app", "icona_app") or "user_id" not in session:
         return
     with _UTENTI_ATTIVITA_LOCK:
         _UTENTI_ATTIVITA[session["user_id"]] = {
@@ -1873,9 +1906,18 @@ def notifica_attivita_nel_widget(response):
         print(f"[tray] Errore notifica attività: {e}")
     return response
 
+_RETE_TAILSCALE = ipaddress.ip_network("100.64.0.0/10")  # indirizzi che Tailscale dà ai dispositivi della VPN
+
+def _ip_tailscale(ip):
+    try:
+        return ipaddress.ip_address(ip) in _RETE_TAILSCALE
+    except ValueError:
+        return False
+
 def _ip_rete_locale(ip):
+    """Rete dell'ufficio, oppure un dispositivo collegato via Tailscale (VPN privata)."""
     ip = ip or ""
-    return ip in ("127.0.0.1", "::1") or ip.startswith(("192.168.", "10.", "172."))
+    return ip in ("127.0.0.1", "::1") or ip.startswith(("192.168.", "10.", "172.")) or _ip_tailscale(ip)
 
 @app.route("/api/attivita")
 def api_attivita():
@@ -2050,6 +2092,34 @@ def api_widget_rilascia():
 def health():
     """Controllo leggero usato dal widget del server per sapere se risponde."""
     return jsonify({"ok": True, "version": APP_VERSION, "utenti_collegati": len(get_utenti_collegati())})
+
+# --- App sul telefono: il gestionale si installa dal browser sulla schermata Home (iOS e Android) ---
+_ICONE_APP = {}
+
+@app.route("/manifest.webmanifest")
+def manifest_app():
+    """Descrive l'app al telefono: nome, icona e apertura a schermo intero senza la barra del browser."""
+    icone = [{"src": url_for("icona_app", size=n), "sizes": f"{n}x{n}", "type": "image/png", "purpose": "any maskable"}
+             for n in (192, 512)]
+    dati = {"name": "Gestionale Cerlab", "short_name": "Cerlab", "lang": "it", "start_url": "/", "scope": "/",
+            "display": "standalone", "background_color": "#ffffff", "theme_color": "#ffffff", "icons": icone}
+    return app.response_class(json.dumps(dati), mimetype="application/manifest+json")
+
+@app.route("/icona-app-<int:size>.png")
+def icona_app(size):
+    """Icona dell'app: il logo su fondo bianco, con margine perché Android la ritaglia a cerchio."""
+    if size not in (180, 192, 512):
+        return "", 404
+    if size not in _ICONE_APP:
+        logo = Image.open(Path(app.static_folder) / "favicon.png").convert("RGBA")
+        lato = int(size * 0.6)
+        logo.thumbnail((lato, lato), Image.LANCZOS)
+        icona = Image.new("RGB", (size, size), "white")
+        icona.paste(logo, ((size - logo.width) // 2, (size - logo.height) // 2), logo)
+        buf = io.BytesIO()
+        icona.save(buf, "PNG")
+        _ICONE_APP[size] = buf.getvalue()
+    return app.response_class(_ICONE_APP[size], mimetype="image/png", headers={"Cache-Control": "max-age=86400"})
 
 # ### NUOVE ROUTE PER GESTIONE PASSWORD ###
 @app.route("/cambia-password", methods=["GET", "POST"])
@@ -6783,6 +6853,22 @@ def get_lan_ip():
     except Exception:
         return "127.0.0.1"
 
+def get_tailscale_ip():
+    """IP Tailscale di questo PC (100.x.y.z), o None se Tailscale non è attivo:
+    è l'indirizzo con cui telefono e PC fuori ufficio raggiungono il gestionale."""
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            if _ip_tailscale(info[4][0]):
+                return info[4][0]
+    except Exception:
+        pass
+    try:  # in alternativa lo si chiede al programma di Tailscale
+        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        return next((ip for ip in out.split() if _ip_tailscale(ip)), None)
+    except Exception:
+        return None
+
 def is_admin():
     """Controlla se lo script ha i privilegi di amministratore su Windows."""
     try:
@@ -6799,7 +6885,8 @@ def manage_firewall_rule(port, rule_name="Gestionale Flask"):
     try:
         check_cmd = f'netsh advfirewall firewall show rule name="{rule_name}"'
         result = subprocess.run(check_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        if "Nessuna regola corrispondente ai criteri specificati" in result.stdout:
+        # netsh esce con errore se la regola non c'è (il testo del messaggio dipende dalla lingua di Windows)
+        if result.returncode != 0 or "Nessuna regola corrispondente ai criteri specificati" in result.stdout:
             print(f"INFO: Regola firewall '{rule_name}' non trovata. Tentativo di creazione...")
             add_cmd = (f'netsh advfirewall firewall add rule name="{rule_name}" '
                        f'dir=in action=allow protocol=TCP localport={port}')
