@@ -36,6 +36,7 @@
         top: auto; transform: none; right: 12px;
         bottom: calc(var(--m-footer-h, 0px) + 12px);
         flex-direction: column; align-items: center; gap: 8px;
+        z-index: 900; /* sotto le finestre (1000): non copre i pulsanti Salva/Chiudi */
     }
     .floating-action-group .fab-btn { width: 52px; height: 52px; font-size: 18px; }
     .floating-action-group .fab-label { font-size: 7px; letter-spacing: 0; }
