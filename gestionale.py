@@ -727,6 +727,23 @@ class AppLauncher(Tk):
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "change-me"
+
+class _IndirizzoDaTailscaleServe:
+    """Con `tailscale serve` (indirizzo https per installare l'app sul telefono) le richieste arrivano
+    da 127.0.0.1: si usa l'IP del dispositivo che Tailscale mette in X-Forwarded-For, altrimenti il
+    telefono passerebbe per il PC server (che per alcune pagine non chiede il login).
+    Solo per le richieste da 127.0.0.1: un PC della rete non può fingersi un altro."""
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        if environ.get("REMOTE_ADDR") in ("127.0.0.1", "::1"):
+            inoltrato = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[-1].strip()
+            if inoltrato:
+                environ["REMOTE_ADDR"] = inoltrato
+        return self.wsgi_app(environ, start_response)
+
+app.wsgi_app = _IndirizzoDaTailscaleServe(app.wsgi_app)
 APP_NAME = "Gestionale Preventivi"
 
 import hmac, hashlib, time as _time
@@ -1770,7 +1787,7 @@ _UTENTI_ATTIVITA_LOCK = threading.Lock()
 
 @app.before_request
 def traccia_utente_collegato():
-    if request.endpoint in (None, "static", "health") or "user_id" not in session:
+    if request.endpoint in (None, "static", "health", "manifest_app", "icona_app") or "user_id" not in session:
         return
     with _UTENTI_ATTIVITA_LOCK:
         _UTENTI_ATTIVITA[session["user_id"]] = {
@@ -2072,6 +2089,34 @@ def api_widget_rilascia():
 def health():
     """Controllo leggero usato dal widget del server per sapere se risponde."""
     return jsonify({"ok": True, "version": APP_VERSION, "utenti_collegati": len(get_utenti_collegati())})
+
+# --- App sul telefono: il gestionale si installa dal browser sulla schermata Home (iOS e Android) ---
+_ICONE_APP = {}
+
+@app.route("/manifest.webmanifest")
+def manifest_app():
+    """Descrive l'app al telefono: nome, icona e apertura a schermo intero senza la barra del browser."""
+    icone = [{"src": url_for("icona_app", size=n), "sizes": f"{n}x{n}", "type": "image/png", "purpose": "any maskable"}
+             for n in (192, 512)]
+    dati = {"name": "Gestionale Cerlab", "short_name": "Cerlab", "lang": "it", "start_url": "/", "scope": "/",
+            "display": "standalone", "background_color": "#ffffff", "theme_color": "#ffffff", "icons": icone}
+    return app.response_class(json.dumps(dati), mimetype="application/manifest+json")
+
+@app.route("/icona-app-<int:size>.png")
+def icona_app(size):
+    """Icona dell'app: il logo su fondo bianco, con margine perché Android la ritaglia a cerchio."""
+    if size not in (180, 192, 512):
+        return "", 404
+    if size not in _ICONE_APP:
+        logo = Image.open(Path(app.static_folder) / "favicon.png").convert("RGBA")
+        lato = int(size * 0.6)
+        logo.thumbnail((lato, lato), Image.LANCZOS)
+        icona = Image.new("RGB", (size, size), "white")
+        icona.paste(logo, ((size - logo.width) // 2, (size - logo.height) // 2), logo)
+        buf = io.BytesIO()
+        icona.save(buf, "PNG")
+        _ICONE_APP[size] = buf.getvalue()
+    return app.response_class(_ICONE_APP[size], mimetype="image/png", headers={"Cache-Control": "max-age=86400"})
 
 # ### NUOVE ROUTE PER GESTIONE PASSWORD ###
 @app.route("/cambia-password", methods=["GET", "POST"])
