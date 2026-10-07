@@ -37,7 +37,7 @@ import pystray
 from PIL import Image, ImageDraw
 
 APP = "Gestionale Notifiche"
-APP_VERSION = "3.0.0"    # aggiornata da build.py insieme a quella del gestionale
+APP_VERSION = "3.1.0"    # aggiornata da build.py insieme a quella del gestionale
 PORTA = 5001
 INTERVALLO_SECS = 5
 MINUTI_INATTIVITA = 30   # PC senza mouse/tastiera per tanto tempo: si nascondono i messaggi personali
