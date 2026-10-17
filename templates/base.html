@@ -784,7 +784,7 @@
     }
     .dashboard-nav-grid {
         display: grid;
-        grid-template-columns: repeat(7, 1fr);
+        grid-template-columns: repeat(8, 1fr);
         gap: 8px;
         width: 100%;
         max-width: 900px;
@@ -1002,6 +1002,12 @@
        class="btn {{ 'disabled' if active_page == 'magazzino' else '' }}" 
        title="Magazzino">
        <i class="fas fa-warehouse"></i> Magazzino
+    </a>
+
+    <a href="{{ url_for('dashboard_catalogo') }}" 
+       class="btn {{ 'disabled' if active_page == 'catalogo' else '' }}" 
+       title="Catalogo (bozza)">
+       <i class="fas fa-book"></i> Catalogo
     </a>
 
     <a href="{{ url_for('dashboard_campionari') }}" 
