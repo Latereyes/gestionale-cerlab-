@@ -1,0 +1,373 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-swatchbook"></i> Campionari</h1>
+{% endblock %}
+
+{% block body %}
+<div class="editor-container">
+
+    <div class="kpi-strip">
+        <div class="kpi-tile">
+            <div class="kpi-icon"><i class="fas fa-swatchbook"></i></div>
+            <div>
+                <div class="kpi-label">Campioni</div>
+                <div class="kpi-value" id="kpi-campioni">—</div>
+                <div class="kpi-sub">campioni fisici in sala</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon success"><i class="fas fa-camera"></i></div>
+            <div>
+                <div class="kpi-label">Bagni realizzati</div>
+                <div class="kpi-value" id="kpi-bagni">—</div>
+                <div class="kpi-sub">schede con foto di bagni reali</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3><i class="fas fa-swatchbook"></i> Catalogo</h3>
+            <div class="client-meta">
+                <input type="search" id="camp-search" class="camp-search" placeholder="Cerca per nome, codice o descrizione...">
+                <button type="button" class="btn primary" id="btn-nuovo-campione"><i class="fas fa-plus"></i> Nuovo campione</button>
+                <button type="button" class="btn" id="btn-nuova-foto"><i class="fas fa-camera"></i> Foto bagno</button>
+            </div>
+        </div>
+        <div id="camp-catalogo" class="camp-catalogo"><p class="muted camp-pad">Caricamento...</p></div>
+    </div>
+
+    <p class="muted camp-legend">
+        <i class="fas fa-info-circle"></i>
+        Il <strong>codice</strong> (es. PIA-001) viene assegnato al salvataggio: scrivilo sul campione fisico. Un codice eliminato non viene mai riassegnato.
+    </p>
+</div>
+
+<!-- Nuovo campione / foto bagno -->
+<div id="modal-campione" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 560px;">
+        <h3 id="modal-campione-titolo">Nuovo campione</h3>
+        <form id="form-campione" class="camp-form" autocomplete="off">
+            <div class="camp-drop" id="camp-drop">
+                <i class="fas fa-image"></i>
+                <div id="camp-drop-testo">Trascina qui l'immagine o <u>clicca</u> per sceglierla</div>
+                <small class="muted" id="camp-drop-sub">Facoltativa · ridotta a 1920 px sul lato lungo</small>
+                <input type="file" id="camp-file" accept="image/*" hidden>
+            </div>
+            <div class="camp-thumbs" id="camp-thumbs"></div>
+            <div class="mag-grid">
+                <label id="campo-categoria">Gruppo *
+                    <select name="categoria"></select>
+                    <small class="muted" id="camp-prossimo"></small>
+                </label>
+                <label id="campo-prezzo"><span>Prezzo <small class="muted">(facoltativo)</small></span>
+                    <span class="camp-prezzo">
+                        <input name="prezzo" inputmode="decimal" placeholder="0,00">
+                        <select name="unita"><option value="mq">€/mq</option><option value="pz">€/pz</option></select>
+                    </span>
+                </label>
+                <label class="full"><span id="label-nome">Nome *</span><input name="nome" required></label>
+                <label class="full">Descrizione<textarea name="descrizione" rows="2"></textarea></label>
+                <label class="full">Note<textarea name="note" rows="2"></textarea></label>
+            </div>
+            <div class="mag-err" id="campione-err"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn" id="campione-annulla">Annulla</button>
+                <button type="submit" class="btn primary" id="campione-salva"><i class="fas fa-save"></i> Salva</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Dettaglio -->
+<div id="modal-dettaglio" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 760px;">
+        <div id="dettaglio-body"></div>
+        <div class="modal-actions">
+            {% if puo_eliminare %}<button type="button" class="btn camp-btn-danger" id="dettaglio-elimina"><i class="fas fa-trash-alt"></i> Elimina</button>{% endif %}
+            <button type="button" class="btn" id="dettaglio-chiudi">Chiudi</button>
+        </div>
+    </div>
+</div>
+
+<div class="camp-lightbox" id="camp-lightbox"><img alt=""></div>
+
+{% include '_workflow_dashboard_styles.html' %}
+<style>
+.camp-search { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; width: 260px; max-width: 100%; }
+.camp-pad { padding: 18px 22px; margin: 0; }
+.camp-legend { font-size: 12.5px; margin-top: -6px; }
+.camp-cat { padding: 16px 22px; border-bottom: 1px solid var(--border); }
+.camp-cat:last-child { border-bottom: none; }
+.camp-cat h4 { margin: 0 0 12px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.camp-cat h4 .chip { font-weight: 600; }
+.camp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.camp-tile { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); cursor: pointer; overflow: hidden; text-align: left; padding: 0; font: inherit; color: var(--text); display: flex; flex-direction: column; }
+.camp-tile:hover, .camp-tile:focus-visible { border-color: var(--accent); }
+.camp-tile .img { aspect-ratio: 4 / 3; background: var(--surface-2); display: flex; align-items: center; justify-content: center; color: var(--text-subtle); font-size: 26px; }
+.camp-tile .img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.camp-tile .txt { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.camp-tile .nome { font-weight: 600; font-size: 13.5px; line-height: 1.3; }
+.camp-tile .meta { font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between; gap: 6px; }
+.camp-code { font-family: ui-monospace, Consolas, monospace; font-weight: 600; color: var(--accent); }
+.camp-drop { border: 2px dashed var(--border); border-radius: var(--radius-md); padding: 18px; text-align: center; cursor: pointer; display: flex; flex-direction: column; gap: 4px; align-items: center; font-size: 13.5px; margin-top: 12px; }
+.camp-drop i { font-size: 22px; color: var(--text-subtle); }
+.camp-drop.drag { border-color: var(--accent); background: var(--accent-light); }
+.camp-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.camp-thumbs .t { position: relative; width: 84px; height: 64px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border); }
+.camp-thumbs .t img { width: 100%; height: 100%; object-fit: cover; }
+.camp-thumbs .t button { position: absolute; top: 2px; right: 2px; border: none; border-radius: 50%; width: 20px; height: 20px; line-height: 18px; padding: 0; cursor: pointer; background: rgba(0,0,0,.6); color: #fff; }
+.camp-prezzo { display: flex; gap: 6px; }
+.camp-prezzo input { flex: 1; min-width: 0; width: auto; }
+.camp-prezzo select { flex: 0 0 92px; width: 92px; }
+.mag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0; }
+.mag-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
+.mag-grid label.full { grid-column: 1 / -1; }
+.mag-grid input, .mag-grid select, .mag-grid textarea { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; font-weight: 400; color: var(--text); background: var(--surface); font-family: inherit; }
+.mag-grid small { font-weight: 400; }
+.camp-form .mag-grid > label { min-width: 0; }
+.camp-form .mag-grid input, .camp-form .mag-grid select, .camp-form .mag-grid textarea { box-sizing: border-box; width: 100%; max-width: 100%; }
+.mag-err { display: none; color: var(--danger-text); font-size: 13px; margin-bottom: 8px; }
+.camp-det { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.camp-det.solo { grid-template-columns: 1fr; }
+.camp-det .main-img { border-radius: var(--radius-md); overflow: hidden; background: var(--surface-2); cursor: zoom-in; }
+.camp-det .main-img img { width: 100%; display: block; }
+.camp-det h3 { margin: 0 0 2px; }
+.camp-det .blk { margin-top: 12px; font-size: 14px; white-space: pre-wrap; }
+.camp-det .lbl { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; color: var(--text-muted); margin-bottom: 2px; white-space: normal; }
+.camp-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 6px; }
+.camp-gallery img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--radius-md); cursor: zoom-in; display: block; }
+.camp-btn-danger { color: var(--danger-text); border-color: var(--danger-border); margin-right: auto; }
+.camp-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 10001; cursor: zoom-out; padding: 20px; }
+.camp-lightbox.show { display: flex; }
+.camp-lightbox img { max-width: 100%; max-height: 100%; border-radius: 6px; }
+@media (max-width: 600px) {
+    .mag-grid, .camp-det { grid-template-columns: 1fr; }
+    .camp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .camp-cat { padding: 14px; }
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const FOTO_BAGNI = {{ foto_bagni | tojson }};
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const euro = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+    const prezzo = (p) => p.prezzo === null || p.prezzo === undefined ? '' : `${euro(p.prezzo)}/${p.unita === 'pz' ? 'pz' : 'mq'}`;
+    const imgUrl = (f) => f ? `/campionari/immagini/${encodeURIComponent(f)}` : '';
+    const data = (d) => { const t = new Date(d); return isNaN(t) ? (d || '—') : t.toLocaleDateString('it-IT') + ' ' + t.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }); };
+    let stato = { categorie: [], prodotti: [], contatori: {} };
+
+    // --- Catalogo ---
+    const catalogo = document.getElementById('camp-catalogo');
+    const search = document.getElementById('camp-search');
+    const carica = () => fetch('/api/campionari', { credentials: 'same-origin' })
+        .then(r => r.json()).then(d => {
+            if (!d.ok) throw new Error();
+            stato = d;
+            document.getElementById('kpi-campioni').textContent = d.prodotti.filter(p => p.categoria !== FOTO_BAGNI).length;
+            document.getElementById('kpi-bagni').textContent = d.prodotti.filter(p => p.categoria === FOTO_BAGNI).length;
+            disegna();
+        })
+        .catch(() => { catalogo.innerHTML = '<p class="muted camp-pad">Impossibile caricare il catalogo.</p>'; });
+
+    const disegna = () => {
+        const q = search.value.trim().toLowerCase();
+        const lista = stato.prodotti.filter(p => !q || [p.nome, p.codice, p.descrizione].some(v => (v || '').toLowerCase().includes(q)));
+        if (!lista.length) {
+            catalogo.innerHTML = `<div class="empty-state"><i class="fas fa-swatchbook"></i><h4>${q ? 'Nessun risultato' : 'Il catalogo è vuoto'}</h4>`
+                + `<p>${q ? `Nessun elemento corrisponde a “${esc(q)}”.` : 'Aggiungi il primo con "Nuovo campione" o "Foto bagno".'}</p></div>`;
+            return;
+        }
+        const ordine = [...stato.categorie];
+        lista.forEach(p => { if (!ordine.includes(p.categoria)) ordine.push(p.categoria); });
+        catalogo.innerHTML = ordine.map(cat => {
+            const items = lista.filter(p => p.categoria === cat);
+            if (!items.length) return '';
+            return `<div class="camp-cat"><h4>${esc(cat)} <span class="chip">${items.length}</span></h4><div class="camp-grid">`
+                + items.map(p => {
+                    const f = p.immagine || (p.foto_bagni || [])[0];
+                    return `<button type="button" class="camp-tile" data-codice="${esc(p.codice)}">`
+                        + `<div class="img">${f ? `<img src="${imgUrl(f)}" alt="" loading="lazy">` : '<i class="fas fa-image"></i>'}</div>`
+                        + `<div class="txt"><span class="nome">${esc(p.nome)}</span>`
+                        + `<span class="meta"><span class="camp-code">${esc(p.codice)}</span><span>${esc(prezzo(p))}</span></span></div></button>`;
+                }).join('') + '</div></div>';
+        }).join('');
+        catalogo.querySelectorAll('.camp-tile').forEach(t => t.addEventListener('click', () => apriDettaglio(t.dataset.codice)));
+    };
+    search.addEventListener('input', disegna);
+
+    // --- Lightbox ---
+    const lb = document.getElementById('camp-lightbox');
+    const zoom = (src) => { lb.querySelector('img').src = src; lb.classList.add('show'); };
+    lb.addEventListener('click', () => lb.classList.remove('show'));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') lb.classList.remove('show'); });
+
+    // --- Dettaglio ---
+    const modalDet = document.getElementById('modal-dettaglio');
+    let corrente = null;
+    const apriDettaglio = (codice) => {
+        const p = stato.prodotti.find(x => x.codice === codice);
+        if (!p) return;
+        corrente = p;
+        const foto = p.foto_bagni || [];
+        const blk = (lbl, txt) => txt ? `<div class="blk"><div class="lbl">${lbl}</div>${esc(txt)}</div>` : '';
+        document.getElementById('dettaglio-body').innerHTML = `
+            <div class="camp-det ${p.immagine ? '' : 'solo'}">
+                ${p.immagine ? `<div class="main-img"><img src="${imgUrl(p.immagine)}" alt=""></div>` : ''}
+                <div>
+                    <h3>${esc(p.nome)}</h3>
+                    <span class="camp-code">${esc(p.codice)}</span> <span class="muted">· ${esc(p.categoria)}</span>
+                    ${blk('Prezzo', prezzo(p))}
+                    ${blk('Descrizione', p.descrizione)}
+                    ${blk('Note', p.note)}
+                    <div class="blk muted" style="font-size: 12.5px;">Inserito il ${esc(data(p.creato))}${p.utente ? ' da ' + esc(p.utente) : ''}</div>
+                </div>
+            </div>
+            ${foto.length ? `<div class="blk"><div class="lbl">Foto (${foto.length})</div><div class="camp-gallery">${foto.map(f => `<img src="${imgUrl(f)}" alt="" loading="lazy">`).join('')}</div></div>` : ''}`;
+        document.querySelectorAll('#dettaglio-body img').forEach(i => i.addEventListener('click', () => zoom(i.src)));
+        modalDet.style.display = 'flex';
+    };
+    document.getElementById('dettaglio-chiudi').addEventListener('click', () => { modalDet.style.display = 'none'; });
+    document.getElementById('dettaglio-elimina')?.addEventListener('click', () => {
+        const p = corrente;
+        modalDet.style.display = 'none';
+        window.showConfirmation('Elimina dal campionario', `Eliminare <strong>${esc(p.nome)}</strong> (${esc(p.codice)}) e le sue foto?`, () => {
+            fetch(`/campionari/${encodeURIComponent(p.codice)}/elimina`, { method: 'POST', credentials: 'same-origin' })
+                .then(r => r.json()).then(d => {
+                    if (!d.ok) return window.showNotification('Impossibile eliminare', d.error || 'Errore.');
+                    carica();
+                });
+        });
+    });
+
+    // --- Nuovo campione / foto bagno ---
+    const modal = document.getElementById('modal-campione');
+    const form = document.getElementById('form-campione');
+    const err = document.getElementById('campione-err');
+    const drop = document.getElementById('camp-drop');
+    const fileInput = document.getElementById('camp-file');
+    const thumbs = document.getElementById('camp-thumbs');
+    const prossimo = document.getElementById('camp-prossimo');
+    let modoBagno = false, files = [];
+
+    const prefisso = (cat) => cat === FOTO_BAGNI ? 'BAG' : ((cat || '').replace(/[^A-Za-z]/g, '').toUpperCase() + 'XXX').slice(0, 3);
+    const prossimoCodice = (cat) => {
+        const pre = prefisso(cat);
+        let n = stato.contatori[pre] || 0;
+        stato.prodotti.forEach(p => { const m = new RegExp(`^${pre}-(\\d+)$`).exec(p.codice || ''); if (m) n = Math.max(n, +m[1]); });
+        return `${pre}-${String(n + 1).padStart(3, '0')}`;
+    };
+    const aggiornaCodice = () => {
+        const cat = modoBagno ? FOTO_BAGNI : form.categoria.value;
+        prossimo.innerHTML = cat ? `Codice che verrà assegnato: <span class="camp-code">${esc(prossimoCodice(cat))}</span>` : '';
+    };
+    form.categoria.addEventListener('change', aggiornaCodice);
+
+    const disegnaThumbs = () => {
+        thumbs.innerHTML = '';
+        files.forEach((f, i) => {
+            const el = document.createElement('div');
+            el.className = 't';
+            el.innerHTML = `<img src="${f.url}" alt=""><button type="button" title="Rimuovi">×</button>`;
+            el.querySelector('button').addEventListener('click', () => { URL.revokeObjectURL(f.url); files.splice(i, 1); disegnaThumbs(); });
+            thumbs.appendChild(el);
+        });
+        drop.style.display = !modoBagno && files.length ? 'none' : '';
+    };
+    const aggiungi = (lista) => {
+        const imgs = [...lista].filter(f => f.type.startsWith('image/'));
+        if (!modoBagno) { files.forEach(f => URL.revokeObjectURL(f.url)); files = []; imgs.splice(1); }
+        imgs.forEach(f => files.push({ file: f, url: URL.createObjectURL(f) }));
+        disegnaThumbs();
+    };
+    drop.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => { aggiungi(fileInput.files); fileInput.value = ''; });
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
+    drop.addEventListener('drop', (e) => aggiungi(e.dataTransfer.files));
+
+    const apri = (bagno) => {
+        modoBagno = bagno;
+        const cat = form.categoria.value;
+        form.reset();
+        files.forEach(f => URL.revokeObjectURL(f.url)); files = [];
+        err.style.display = 'none';
+        form.categoria.innerHTML = '<option value="">Seleziona...</option>'
+            + stato.categorie.filter(c => c !== FOTO_BAGNI).map(c => `<option>${esc(c)}</option>`).join('');
+        form.categoria.value = cat;  // resta il gruppo usato per ultimo, per caricarne diversi di fila
+        document.getElementById('modal-campione-titolo').textContent = bagno ? 'Foto bagno reale' : 'Nuovo campione';
+        document.getElementById('label-nome').textContent = bagno ? 'Nome / riferimento *' : 'Nome *';
+        document.getElementById('campo-categoria').style.display = bagno ? 'none' : '';
+        document.getElementById('campo-prezzo').style.display = bagno ? 'none' : '';
+        document.getElementById('camp-drop-testo').innerHTML = bagno ? 'Trascina qui una o più foto o <u>clicca</u> per sceglierle' : "Trascina qui l'immagine o <u>clicca</u> per sceglierla";
+        document.getElementById('camp-drop-sub').textContent = bagno ? 'Almeno una foto · ridotte a 1920 px sul lato lungo' : 'Facoltativa · ridotta a 1920 px sul lato lungo';
+        fileInput.multiple = bagno;
+        prossimo.innerHTML = '';
+        if (bagno) { document.getElementById('campo-categoria').after(prossimo); } else { document.getElementById('campo-categoria').appendChild(prossimo); }
+        disegnaThumbs();
+        aggiornaCodice();
+        modal.style.display = 'flex';
+    };
+    document.getElementById('btn-nuovo-campione').addEventListener('click', () => apri(false));
+    document.getElementById('btn-nuova-foto').addEventListener('click', () => apri(true));
+    document.getElementById('campione-annulla').addEventListener('click', () => { modal.style.display = 'none'; });
+
+    // Riduce l'immagine a 1920 px sul lato lungo e la converte in JPEG
+    const riduci = (file) => new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            const k = Math.min(1, 1920 / Math.max(img.naturalWidth, img.naturalHeight));
+            const c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round(img.naturalWidth * k));
+            c.height = Math.max(1, Math.round(img.naturalHeight * k));
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+            ctx.drawImage(img, 0, 0, c.width, c.height);
+            URL.revokeObjectURL(url);
+            resolve(c.toDataURL('image/jpeg', 0.85));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Immagine non valida.')); };
+        img.src = url;
+    });
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        err.style.display = 'none';
+        const mostra = (m) => { err.textContent = m; err.style.display = 'block'; };
+        if (!modoBagno && !form.categoria.value) return mostra('Scegli il gruppo.');
+        if (modoBagno && !files.length) return mostra('Aggiungi almeno una foto del bagno.');
+        const btn = document.getElementById('campione-salva');
+        btn.disabled = true;
+        Promise.all(files.map(f => riduci(f.file))).then(immagini => fetch('/api/campionari', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                categoria: modoBagno ? FOTO_BAGNI : form.categoria.value,
+                nome: form.nome.value, descrizione: form.descrizione.value, note: form.note.value,
+                prezzo: modoBagno ? null : form.prezzo.value, unita: modoBagno ? 'pz' : form.unita.value,
+                immagine: modoBagno ? '' : (immagini[0] || ''), foto_bagni: modoBagno ? immagini : [],
+            }),
+        }).then(r => r.json().catch(() => ({ ok: false, error: 'Risposta non valida dal server.' }))))
+            .then(d => {
+                if (!d.ok) throw new Error(d.error || 'Errore nel salvataggio.');
+                modal.style.display = 'none';
+                window.showNotification('Salvato', `Codice assegnato: ${d.prodotto.codice}. Scrivilo sul campione.`);
+                return carica();
+            })
+            .catch(e => mostra(e.message))
+            .finally(() => { btn.disabled = false; });
+    });
+
+    carica();
+});
+</script>
+
+{% block footer_nav %}
+<div class="dashboard-footer-nav">
+    {{ dashboard_navbar('campionari') }}
+</div>
+{% endblock %}
+
+{% endblock %}

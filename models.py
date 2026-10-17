@@ -543,6 +543,47 @@ class MovimentoMagazzino(Base):
         }
 
 
+class Campione(Base):
+    """Campione fisico in sala (piastrelle, sanitari...) o foto di un bagno realizzato (dashboard Campionari).
+    Il codice (PIA-001, BAG-001...) si scrive sul campione; le immagini stanno in DATA_DIR/campionari/immagini."""
+    __tablename__ = "campionari"
+
+    codice = Column(String, primary_key=True)
+    categoria = Column(String, nullable=False)
+    nome = Column(String, nullable=False)
+    prezzo = Column(Float)          # facoltativo
+    unita = Column(String, default="mq")  # mq | pz
+    descrizione = Column(Text, default="")
+    note = Column(Text, default="")
+    immagine = Column(String)       # nome file dell'immagine del campione
+    foto_bagni = Column(JSON, default=list)
+    creato_il = Column(String)
+    utente = Column(String)
+
+    def to_dict(self):
+        return {
+            "codice": self.codice,
+            "categoria": self.categoria or "",
+            "nome": self.nome or "",
+            "prezzo": self.prezzo,
+            "unita": self.unita or "mq",
+            "descrizione": self.descrizione or "",
+            "note": self.note or "",
+            "immagine": self.immagine or "",
+            "foto_bagni": self.foto_bagni or [],
+            "creato": self.creato_il or "",
+            "utente": self.utente or "",
+        }
+
+
+class ContatoreCampionari(Base):
+    """Ultimo numero usato per ogni prefisso: non torna indietro, cosi' un codice eliminato non viene riassegnato."""
+    __tablename__ = "campionari_contatori"
+
+    prefisso = Column(String, primary_key=True)
+    ultimo = Column(Integer, default=0)
+
+
 # Factory per creare sessioni al DB
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

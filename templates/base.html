@@ -784,7 +784,7 @@
     }
     .dashboard-nav-grid {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(7, 1fr);
         gap: 8px;
         width: 100%;
         max-width: 900px;
@@ -838,10 +838,10 @@
     .dashboard-nav-grid .btn.btn-hub.disabled {
         background: var(--accent-hover);
     }
-    @media (max-width: 992px) { .dashboard-nav-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 992px) { .dashboard-nav-grid { grid-template-columns: repeat(4, 1fr); } }
     @media (max-width: 768px) {
         .dashboard-footer-nav { padding: 10px 12px; height: auto; }
-        .dashboard-nav-grid { grid-template-columns: repeat(3, 1fr); }
+        .dashboard-nav-grid { grid-template-columns: repeat(4, 1fr); }
     }
 
 
@@ -1002,6 +1002,12 @@
        class="btn {{ 'disabled' if active_page == 'magazzino' else '' }}" 
        title="Magazzino">
        <i class="fas fa-warehouse"></i> Magazzino
+    </a>
+
+    <a href="{{ url_for('dashboard_campionari') }}" 
+       class="btn {{ 'disabled' if active_page == 'campionari' else '' }}" 
+       title="Campionari">
+       <i class="fas fa-swatchbook"></i> Campionari
     </a>
 
 </div> 

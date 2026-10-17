@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, json, re, datetime, uuid, copy
+import os, json, re, datetime, uuid, copy, base64
 import urllib.request
 from pathlib import Path
 from flask import Flask, request, redirect, url_for, flash, send_from_directory, render_template, session, jsonify
@@ -1007,6 +1007,7 @@ from models import (
     Message as _Message, TagboxEntry as _TagboxEntry,
     Notification as _Notification, ConfigMargini as _ConfigMargini,
     ArticoloMagazzino as _ArticoloMagazzino, MovimentoMagazzino as _MovimentoMagazzino,
+    Campione as _Campione, ContatoreCampionari as _ContatoreCampionari,
     init_db as _init_db
 )
 _init_db()  # Assicura che tutte le tabelle V3 esistano
@@ -4689,6 +4690,235 @@ def correggi_carico_magazzino(movimento_id):
     finally:
         db.close()
     return jsonify({"ok": True})
+
+
+# === CAMPIONARI ===
+# Catalogo dei campioni fisici in sala e delle foto di bagni realizzati (ex app "Campionari").
+# I record stanno nella tabella 'campionari'; le immagini in DATA_DIR/campionari/immagini,
+# con gli stessi nomi dell'app originale (<codice>.jpg, <codice>_bagno_N.jpg).
+# Per portare i dati dell'app originale basta copiare il contenuto della sua cartella 'dati'
+# in DATA_DIR/campionari: catalogo.json viene importato al primo avvio e rinominato.
+
+CAMPIONARI_DIR = DATA_DIR / "campionari"
+CAMPIONARI_IMG_DIR = CAMPIONARI_DIR / "immagini"
+CAMPIONARI_CATEGORIE_FILE = CAMPIONARI_DIR / "categorie.json"
+CAMPIONARI_FOTO_BAGNI = "Foto bagni reali"
+CAMPIONARI_CATEGORIE_DEFAULT = [
+    "Piastrelle", "Sanitari", "Mobili bagno", "Top", "Rubinetteria", "Colori",
+    "Texture", "Illuminazione", "Specchi", CAMPIONARI_FOTO_BAGNI,
+]
+RUOLI_ELIMINA_CAMPIONARI = RUOLI_GESTIONE_MAGAZZINO
+_CAMPIONARI_DATA_URL_RE = re.compile(r'^data:image/(png|jpeg|jpg|webp|gif);base64,(.+)$', re.S)
+_CAMPIONARI_LOCK = threading.Lock()
+
+
+def categorie_campionari():
+    """Gruppi del catalogo: modificabili da DATA_DIR/campionari/categorie.json."""
+    try:
+        with open(CAMPIONARI_CATEGORIE_FILE, encoding="utf-8") as f:
+            cats = json.load(f)
+        if isinstance(cats, list) and cats:
+            return [str(c) for c in cats]
+    except (OSError, ValueError):
+        pass
+    return list(CAMPIONARI_CATEGORIE_DEFAULT)
+
+
+def _prefisso_campionario(categoria):
+    """Prime tre lettere della categoria, es. Piastrelle -> PIA, Foto bagni reali -> BAG."""
+    if categoria == CAMPIONARI_FOTO_BAGNI:
+        return "BAG"
+    return (re.sub(r"[^A-Za-z]", "", categoria).upper() + "XXX")[:3]
+
+
+def _nuovo_codice_campionario(db, categoria):
+    pre = _prefisso_campionario(categoria)
+    cont = db.get(_ContatoreCampionari, pre)
+    if not cont:
+        cont = _ContatoreCampionari(prefisso=pre, ultimo=0)
+        db.add(cont)
+    n = cont.ultimo or 0
+    for (codice,) in db.query(_Campione.codice).filter(_Campione.codice.like(pre + "-%")):
+        m = re.match(re.escape(pre) + r"-(\d+)$", codice or "")
+        if m:
+            n = max(n, int(m.group(1)))
+    cont.ultimo = n + 1
+    return f"{pre}-{n + 1:03d}"
+
+
+def _salva_immagine_campionario(data_url, nome):
+    m = _CAMPIONARI_DATA_URL_RE.match(data_url or "")
+    if not m:
+        return None
+    ext = "jpg" if m.group(1) == "jpeg" else m.group(1)
+    filename = f"{nome}.{ext}"
+    with open(CAMPIONARI_IMG_DIR / filename, "wb") as f:
+        f.write(base64.b64decode(m.group(2)))
+    return filename
+
+
+def _cancella_immagini_campionario(nomi):
+    for fn in nomi:
+        if fn and os.path.basename(fn) == fn:
+            try:
+                (CAMPIONARI_IMG_DIR / fn).unlink()
+            except OSError:
+                pass
+
+
+def importa_catalogo_campionari():
+    """Importa una volta il catalogo.json dell'app Campionari originale, se copiato in DATA_DIR/campionari."""
+    sorgente = CAMPIONARI_DIR / "catalogo.json"
+    if not sorgente.exists():
+        return
+    try:
+        with open(sorgente, encoding="utf-8") as f:
+            catalogo = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"[campionari] catalogo.json non leggibile, import saltato: {e}")
+        return
+    db = _DBSession()
+    try:
+        importati = 0
+        for p in catalogo.get("prodotti", []):
+            codice = str(p.get("codice", "")).strip()
+            if not codice or db.get(_Campione, codice):
+                continue
+            db.add(_Campione(
+                codice=codice, categoria=p.get("categoria", ""), nome=p.get("nome", ""),
+                prezzo=p.get("prezzo"), unita=p.get("unita") or "mq",
+                descrizione=p.get("descrizione") or "", note=p.get("note") or "",
+                immagine=p.get("immagine") or None, foto_bagni=p.get("foto_bagni") or [],
+                creato_il=p.get("creato") or "", utente=""))
+            importati += 1
+        for pre, n in (catalogo.get("contatori") or {}).items():
+            cont = db.get(_ContatoreCampionari, pre)
+            if not cont:
+                db.add(_ContatoreCampionari(prefisso=pre, ultimo=int(n)))
+            elif (cont.ultimo or 0) < int(n):
+                cont.ultimo = int(n)
+        db.commit()
+        sorgente.replace(sorgente.with_name("catalogo.importato.json"))
+        print(f"[campionari] Importati {importati} elementi dall'app Campionari.")
+    except Exception as e:
+        db.rollback()
+        print(f"[campionari] Errore import catalogo: {e}")
+    finally:
+        db.close()
+
+
+CAMPIONARI_IMG_DIR.mkdir(parents=True, exist_ok=True)
+if not CAMPIONARI_CATEGORIE_FILE.exists():
+    with open(CAMPIONARI_CATEGORIE_FILE, "w", encoding="utf-8") as _f:
+        json.dump(CAMPIONARI_CATEGORIE_DEFAULT, _f, ensure_ascii=False, indent=2)
+importa_catalogo_campionari()
+
+
+@app.route("/campionari")
+@login_required
+def dashboard_campionari():
+    return render_template("dashboard_campionari.html", title="Campionari",
+        foto_bagni=CAMPIONARI_FOTO_BAGNI,
+        puo_eliminare=session.get("user_role") in RUOLI_ELIMINA_CAMPIONARI)
+
+
+@app.route("/api/campionari")
+@login_required
+def api_campionari():
+    db = _DBSession()
+    try:
+        prodotti = [c.to_dict() for c in db.query(_Campione).order_by(_Campione.codice).all()]
+        contatori = {c.prefisso: c.ultimo for c in db.query(_ContatoreCampionari).all()}
+    finally:
+        db.close()
+    return jsonify({"ok": True, "categorie": categorie_campionari(), "prodotti": prodotti, "contatori": contatori})
+
+
+@app.route("/api/campionari", methods=["POST"])
+@login_required
+def salva_campionario():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "Dati non validi."}), 400
+    nome = str(data.get("nome") or "").strip()
+    categoria = str(data.get("categoria") or "").strip()
+    unita = str(data.get("unita") or "pz").strip()
+    immagine = data.get("immagine") or ""
+    foto_bagni = data.get("foto_bagni") or []
+    if not nome:
+        return jsonify({"ok": False, "error": "Il nome e' obbligatorio."}), 400
+    if categoria not in categorie_campionari():
+        return jsonify({"ok": False, "error": "Categoria non valida."}), 400
+    if unita not in ("mq", "pz"):
+        return jsonify({"ok": False, "error": "Unita' non valida."}), 400
+    prezzo = None
+    if str(data.get("prezzo") if data.get("prezzo") is not None else "").strip():
+        try:
+            prezzo = float(str(data.get("prezzo")).replace(",", "."))
+        except ValueError:
+            prezzo = -1
+        if prezzo < 0:
+            return jsonify({"ok": False, "error": "Prezzo non valido."}), 400
+    if immagine and not _CAMPIONARI_DATA_URL_RE.match(immagine):
+        return jsonify({"ok": False, "error": "Immagine non valida."}), 400
+    if not isinstance(foto_bagni, list) or not all(isinstance(f, str) and _CAMPIONARI_DATA_URL_RE.match(f) for f in foto_bagni):
+        return jsonify({"ok": False, "error": "Foto non valide."}), 400
+    if categoria == CAMPIONARI_FOTO_BAGNI and not foto_bagni:
+        return jsonify({"ok": False, "error": "Aggiungi almeno una foto del bagno."}), 400
+
+    with _CAMPIONARI_LOCK:
+        db = _DBSession()
+        salvate = []
+        try:
+            codice = _nuovo_codice_campionario(db, categoria)
+            img = _salva_immagine_campionario(immagine, codice) if immagine else None
+            if img:
+                salvate.append(img)
+            for i, fb in enumerate(foto_bagni, start=1):
+                salvate.append(_salva_immagine_campionario(fb, f"{codice}_bagno_{i}"))
+            camp = _Campione(
+                codice=codice, categoria=categoria, nome=nome, prezzo=prezzo, unita=unita,
+                descrizione=str(data.get("descrizione") or "").strip(), note=str(data.get("note") or "").strip(),
+                immagine=img, foto_bagni=[f for f in salvate if f != img],
+                creato_il=datetime.datetime.now().isoformat(timespec="seconds"),
+                utente=session.get("user_name", ""))
+            db.add(camp)
+            db.commit()
+            record = camp.to_dict()
+        except Exception as e:
+            db.rollback()
+            _cancella_immagini_campionario(salvate)
+            print(f"[campionari] Errore salvataggio: {e}")
+            return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+        finally:
+            db.close()
+    return jsonify({"ok": True, "prodotto": record})
+
+
+@app.route("/campionari/<codice>/elimina", methods=["POST"])
+@login_required
+def elimina_campionario(codice):
+    if session.get("user_role") not in RUOLI_ELIMINA_CAMPIONARI:
+        return jsonify({"ok": False, "error": "Non disponi delle autorizzazioni."}), 403
+    with _CAMPIONARI_LOCK:
+        db = _DBSession()
+        try:
+            camp = db.get(_Campione, codice)
+            if not camp:
+                return jsonify({"ok": False, "error": "Elemento non trovato."}), 404
+            immagini = [camp.immagine] + list(camp.foto_bagni or [])
+            db.delete(camp)
+            db.commit()
+        finally:
+            db.close()
+    _cancella_immagini_campionario(immagini)
+    return jsonify({"ok": True})
+
+
+@app.route("/campionari/immagini/<path:filename>")
+@login_required
+def immagine_campionario(filename):
+    return send_from_directory(CAMPIONARI_IMG_DIR, filename)
 
 
 # ===============================================
