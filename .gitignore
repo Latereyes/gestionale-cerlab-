@@ -54,7 +54,6 @@ venv/
 # 5. DATI REALI, LOG E FILE PESANTI (repository pubblico)
 # ----------------------------------------------------------------
 # Elenchi clienti e storico preventivi: dati personali, non vanno mai versionati.
-# importa_clienti.py e importa_storico.py li leggono dalla cartella locale.
 clienti.xlsx
 storico.xlsx
 # Log e database generati dal programma
