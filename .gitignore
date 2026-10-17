@@ -49,3 +49,25 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+
+# ----------------------------------------------------------------
+# 5. DATI REALI, LOG E FILE PESANTI (repository pubblico)
+# ----------------------------------------------------------------
+# Elenchi clienti e storico preventivi: dati personali, non vanno mai versionati.
+# importa_clienti.py e importa_storico.py li leggono dalla cartella locale.
+clienti.xlsx
+storico.xlsx
+# Log e database generati dal programma
+*.log
+*.db
+*.sqlite
+# Token e chiavi locali
+gh_token.txt
+token*.txt
+secret_key.txt
+# Installer di terze parti: si scaricano dai siti ufficiali (vedi requirments/leggimi.txt)
+requirments/*.exe
+# Copie di lavoro
+*_OLD.*
+* - Copia.*
+Nuovo Documento di testo*.txt

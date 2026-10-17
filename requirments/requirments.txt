@@ -1,4 +1,0 @@
-Flask
-WeasyPrint
-waitress
-Pillow waitress
