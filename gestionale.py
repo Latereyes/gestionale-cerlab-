@@ -4940,6 +4940,98 @@ def immagine_campionario(filename):
     return send_from_directory(CAMPIONARI_IMG_DIR, filename)
 
 
+# === CATALOGO (BOZZA, SOLA CONSULTAZIONE) ===
+# Catalogo interno ricavato dai preventivi passati: articoli con ultimo listino, sconti a cascata,
+# prezzi di vendita e margini, piu' gli sconti per marca. Il file non fa parte del programma
+# (contiene dati dei preventivi): va copiato a mano in DATA_DIR/catalogo/catalogo.db.
+# La pagina lo apre in sola lettura; per aggiornarlo basta sostituire il file.
+
+CATALOGO_DIR = DATA_DIR / "catalogo"
+CATALOGO_DB = CATALOGO_DIR / "catalogo.db"
+CATALOGO_DIR.mkdir(parents=True, exist_ok=True)
+CATALOGO_CATEGORIE = {
+    "piastrelle": "Piastrelle", "battiscopa_profili": "Battiscopa e profili", "sanitari": "Sanitari",
+    "rubinetteria": "Rubinetteria", "box_doccia": "Box doccia", "piatti_doccia": "Piatti doccia",
+    "vasche": "Vasche", "mobili_bagno": "Mobili bagno", "specchi_illuminazione": "Specchi e illuminazione",
+    "termoarredi": "Termoarredi", "accessori": "Accessori", "porte": "Porte",
+    "lavorazioni_servizi": "Lavorazioni e servizi", "trasporto_spese": "Trasporto e spese", "altro": "Altro",
+}
+_CATALOGO_COLONNE = ("id", "nome", "marca", "categoria", "unita", "listino_ultimo", "data_listino_ultimo",
+                     "sconti_ultimi", "costo_netto_ultimo", "n_preventivi", "n_vendite", "prezzo_vendita_mediano",
+                     "prezzo_vendita_min", "prezzo_vendita_max", "margine_mediano_pct", "stato_bozza", "dubbio")
+
+
+def _catalogo_connessione():
+    """Connessione in sola lettura al catalogo, o None se il file non c'e'."""
+    import sqlite3
+    if not CATALOGO_DB.exists():
+        return None
+    con = sqlite3.connect(f"file:{CATALOGO_DB.as_posix()}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def _categoria_catalogo(c):
+    return CATALOGO_CATEGORIE.get(c or "", (c or "Altro").replace("_", " ").capitalize())
+
+
+@app.route("/catalogo")
+@login_required
+def dashboard_catalogo():
+    con = _catalogo_connessione()
+    if con is None:
+        return render_template("dashboard_catalogo.html", title="Catalogo", disponibile=False,
+                               percorso_db=str(CATALOGO_DB))
+    try:
+        articoli = [dict(r) for r in con.execute(
+            f"select {', '.join(_CATALOGO_COLONNE)}, nomi_originali from articoli order by categoria, marca, nome")]
+        marche = [dict(r) for r in con.execute(
+            "select marca, sconti_ultimi, data_ultima, sconti_piu_usati, quota_piu_usati_pct, n_righe, nota "
+            "from condizioni_marca order by n_righe desc, marca")]
+        info = {r["chiave"]: r["valore"] for r in con.execute("select chiave, valore from info")}
+    except Exception as e:
+        print(f"[catalogo] File non leggibile: {e}")
+        return render_template("dashboard_catalogo.html", title="Catalogo", disponibile=False,
+                               percorso_db=str(CATALOGO_DB))
+    finally:
+        con.close()
+    for a in articoli:
+        a["categoria"] = _categoria_catalogo(a["categoria"])
+        # testo per la ricerca: nome, marca, categoria e come e' stato scritto nei preventivi
+        originali = " ".join(json.loads(a.pop("nomi_originali") or "[]"))
+        a["cerca"] = " ".join((a["nome"] or "", a["marca"] or "", a["categoria"], originali)).lower()
+    aggiornato_il = datetime.datetime.fromtimestamp(CATALOGO_DB.stat().st_mtime).strftime("%d/%m/%Y")
+    return render_template("dashboard_catalogo.html", title="Catalogo", disponibile=True,
+        articoli=articoli, marche=marche, info=info, aggiornato_il=aggiornato_il,
+        categorie=sorted({a["categoria"] for a in articoli}),
+        elenco_marche=sorted({a["marca"] for a in articoli if a["marca"]}, key=str.lower),
+        url_editor=url_for("editor_preventivo", quote_id="__ID__"))
+
+
+@app.route("/api/catalogo/<int:articolo_id>")
+@login_required
+def api_catalogo_articolo(articolo_id):
+    con = _catalogo_connessione()
+    if con is None:
+        return jsonify({"ok": False, "error": "Catalogo non caricato."}), 404
+    try:
+        art = con.execute("select nome, nomi_originali from articoli where id = ?", (articolo_id,)).fetchone()
+        if not art:
+            return jsonify({"ok": False, "error": "Articolo non trovato."}), 404
+        righe = con.execute(
+            "select data, preventivo, stato, venduto, articolo_originale, qt, listino, s1, s2, s3, prezzo_vendita "
+            "from righe where articolo_id = ? order by data desc, preventivo desc", (articolo_id,)).fetchall()
+    finally:
+        con.close()
+    fmt = lambda v: f"{v:g}" if v else "0"
+    return jsonify({"ok": True,
+        "articolo": {"nome": art["nome"], "nomi_originali": json.loads(art["nomi_originali"] or "[]")},
+        "righe": [{"data": r["data"], "preventivo": r["preventivo"], "stato": r["stato"], "venduto": bool(r["venduto"]),
+                   "articolo_originale": r["articolo_originale"], "qt": r["qt"], "listino": r["listino"],
+                   "sconti": "+".join(fmt(r[k]) for k in ("s1", "s2", "s3")), "prezzo_vendita": r["prezzo_vendita"]}
+                  for r in righe]})
+
+
 # ===============================================
 # === NUOVE ROUTE PER GESTIONE CONSEGNE/BOLLE ===
 # ===============================================

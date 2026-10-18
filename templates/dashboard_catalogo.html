@@ -1,0 +1,385 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-book"></i> Catalogo</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+
+    {% if not disponibile %}
+    <div class="card">
+        <div class="empty-state">
+            <i class="fas fa-book"></i>
+            <h4>Catalogo non ancora caricato</h4>
+            <p>Copia il file del catalogo in <code>{{ percorso_db }}</code> e ricarica la pagina.</p>
+        </div>
+    </div>
+    {% else %}
+
+    <div class="kpi-strip">
+        <div class="kpi-tile">
+            <div class="kpi-icon"><i class="fas fa-book"></i></div>
+            <div>
+                <div class="kpi-label">Articoli</div>
+                <div class="kpi-value">{{ articoli | length }}</div>
+                <div class="kpi-sub">bozza del {{ aggiornato_il }}</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon success"><i class="fas fa-tag"></i></div>
+            <div>
+                <div class="kpi-label">Con listino</div>
+                <div class="kpi-value">{{ articoli | selectattr('listino_ultimo', 'ne', None) | list | length }}</div>
+                <div class="kpi-sub">con prezzo di listino</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon success"><i class="fas fa-shopping-cart"></i></div>
+            <div>
+                <div class="kpi-label">Venduti</div>
+                <div class="kpi-value">{{ articoli | selectattr('n_vendite', 'gt', 0) | list | length }}</div>
+                <div class="kpi-sub">con almeno una vendita</div>
+            </div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-icon warning"><i class="fas fa-exclamation-triangle"></i></div>
+            <div>
+                <div class="kpi-label">Da verificare</div>
+                <div class="kpi-value">{{ articoli | selectattr('stato_bozza', 'equalto', 'da verificare') | list | length }}</div>
+                <div class="kpi-sub">richiedono controllo</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mag-warn">
+        <i class="fas fa-info-circle"></i>
+        Bozza in sola consultazione: prezzi e sconti sono ricavati dai preventivi passati e vanno verificati prima di usarli.
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3><i class="fas fa-list"></i> Articoli</h3>
+            <div class="client-meta cat-filtri">
+                <input type="search" id="cat-search" class="cat-search" placeholder="Cerca per nome, marca o descrizione originale...">
+                <select id="cat-categoria" class="cat-select">
+                    <option value="">Tutte le categorie</option>
+                    {% for c in categorie %}
+                    <option value="{{ c }}">{{ c }}</option>
+                    {% endfor %}
+                </select>
+                <select id="cat-marca" class="cat-select">
+                    <option value="">Tutte le marche</option>
+                    {% for m in elenco_marche %}
+                    <option value="{{ m }}">{{ m }}</option>
+                    {% endfor %}
+                </select>
+                <select id="cat-stato" class="cat-select">
+                    <option value="">Tutti</option>
+                    <option value="pronto da controllare">pronto da controllare</option>
+                    <option value="da verificare">da verificare</option>
+                </select>
+                <label class="cat-check"><input type="checkbox" id="cat-venduti"> Solo venduti</label>
+            </div>
+        </div>
+
+        {% if articoli %}
+        <div class="table-wrap">
+            <table class="styled-table" id="cat-table">
+                <colgroup><col style="width: 22%"><col style="width: 5%"><col style="width: 10%"><col style="width: 10%"><col style="width: 10%"><col style="width: 12%"><col style="width: 10%"><col style="width: 10%"><col style="width: 10%"><col style="width: 11%"></colgroup>
+                <thead>
+                    <tr>
+                        <th>Articolo</th>
+                        <th>UM</th>
+                        <th class="right">Listino</th>
+                        <th>Sconti</th>
+                        <th class="right">Costo netto</th>
+                        <th class="right">Prezzo vendita</th>
+                        <th class="right">Margine</th>
+                        <th class="right">Preventivi</th>
+                        <th>Stato</th>
+                        <th class="actions-column"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {%- macro data_it(d) %}{{ d.split('-') | reverse | join('/') if d else '' }}{% endmacro %}
+                    {%- for a in articoli %}
+                    <tr class="main-row" data-search="{{ a.cerca }}" data-categoria="{{ a.categoria or '' }}" data-marca="{{ a.marca or '' }}" data-stato="{{ a.stato_bozza or '' }}" data-venduto="{{ '1' if (a.n_vendite or 0) > 0 else '0' }}">
+<td><div class="cell-main">{{ a.nome }}</div><div class="cell-sub">{{ a.marca or '—' }} · {{ a.categoria or '—' }}</div></td>
+<td>{{ a.unita or '—' }}</td>
+<td class="right cell-money">{% if a.listino_ultimo is not none %}{{ money_ui(a.listino_ultimo) }}{% else %}—{% endif %}{% if a.data_listino_ultimo %}<div class="cell-sub">{{ data_it(a.data_listino_ultimo) }}</div>{% endif %}</td>
+<td>{% if a.sconti_ultimi and a.sconti_ultimi != '0+0+0' %}<span class="chip">{{ a.sconti_ultimi }}</span>{% elif a.listino_ultimo is not none %}<span class="chip success">netto</span>{% else %}—{% endif %}</td>
+<td class="right cell-money">{% if a.costo_netto_ultimo is not none %}{{ money_ui(a.costo_netto_ultimo) }}{% else %}—{% endif %}</td>
+<td class="right cell-money">{% if a.prezzo_vendita_mediano is not none %}{{ money_ui(a.prezzo_vendita_mediano) }}{% if a.prezzo_vendita_min != a.prezzo_vendita_max %}<div class="cell-sub">{{ money_ui(a.prezzo_vendita_min) }} – {{ money_ui(a.prezzo_vendita_max) }}</div>{% endif %}{% else %}—{% endif %}</td>
+<td class="right">{% if a.margine_mediano_pct is not none %}<span class="chip {{ 'success' if a.margine_mediano_pct >= 35 else ('warning' if a.margine_mediano_pct >= 20 else 'danger') }}">{{ ('%.1f' % a.margine_mediano_pct) | replace('.', ',') }}%</span>{% else %}—{% endif %}</td>
+<td class="right">{{ a.n_preventivi or 0 }}<div class="cell-sub">{{ a.n_vendite or 0 }} {{ 'venduto' if a.n_vendite == 1 else 'venduti' }}</div></td>
+<td>{% if a.stato_bozza == 'da verificare' %}<span class="chip warning" title="{{ a.dubbio or '' }}">da verificare</span>{% else %}<span class="chip success">ok</span>{% endif %}</td>
+<td class="row-actions"><button type="button" class="btn icon-btn btn-dettaglio" data-id="{{ a.id }}" title="Storico prezzi"><i class="fas fa-history"></i></button></td>
+</tr>
+                    {%- endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="muted" id="cat-conteggio">{{ articoli | length }} articoli mostrati</p>
+        {% else %}
+        <div class="empty-state">
+            <i class="fas fa-list"></i>
+            <h4>Nessun articolo</h4>
+            <p>Il catalogo non contiene articoli.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3><i class="fas fa-percent"></i> Sconti per marca</h3>
+            <div class="client-meta cat-filtri">
+                <input type="search" id="marca-search" class="cat-search" placeholder="Cerca per marca...">
+            </div>
+        </div>
+
+        {% if marche %}
+        <div class="table-wrap">
+            <table class="styled-table" id="marche-table">
+                <colgroup><col style="width: 20%"><col style="width: 15%"><col style="width: 15%"><col style="width: 25%"><col style="width: 10%"><col style="width: 15%"></colgroup>
+                <thead>
+                    <tr>
+                        <th>Marca</th>
+                        <th>Sconti ultimi</th>
+                        <th>Data ultima</th>
+                        <th>Sconti più usati</th>
+                        <th class="right">Righe</th>
+                        <th>Nota</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in marche %}
+                    <tr class="main-row" data-search="{{ m.marca | lower }}">
+                        <td>
+                            <div class="cell-main">{{ m.marca }}</div>
+                        </td>
+                        <td>
+                            {% if m.sconti_ultimi and m.sconti_ultimi != '0+0+0' %}
+                            <span class="chip">{{ m.sconti_ultimi }}</span>
+                            {% else %}
+                            <span class="chip success">netto</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ m.data_ultima.split('-') | reverse | join('/') if m.data_ultima else '—' }}</td>
+                        <td>
+                            {% if m.sconti_piu_usati %}
+                            <span class="chip">{{ m.sconti_piu_usati }}</span>
+                            {% if m.quota_piu_usati_pct is not none %}<span class="cell-sub">({{ m.quota_piu_usati_pct }}%)</span>{% endif %}
+                            {% else %}—{% endif %}
+                        </td>
+                        <td class="right">{{ m.n_righe or 0 }}</td>
+                        <td>
+                            {% if m.nota %}<div class="cell-sub">{{ m.nota }}</div>{% else %}—{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <i class="fas fa-percent"></i>
+            <h4>Nessuna marca</h4>
+            <p>Nessun dato sugli sconti per marca.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if info %}
+    <details class="card">
+        <summary>Come sono calcolati i dati</summary>
+        <div class="card-body">
+            <dl>
+                {% for k, v in info.items() %}
+                <dt>{{ k }}</dt>
+                <dd>{{ v }}</dd>
+                {% endfor %}
+            </dl>
+        </div>
+    </details>
+    {% endif %}
+
+    {% endif %}
+</div>
+
+{% if disponibile %}
+<div id="modal-dettaglio" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 900px;">
+        <h3 id="dett-titolo">Storico prezzi</h3>
+        <div id="dett-nomi" class="mag-preview"></div>
+        <div class="table-wrap" style="max-height: 60vh; overflow-y: auto;">
+            <table class="styled-table" style="min-width: 0; table-layout: auto;">
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Preventivo</th>
+                        <th>Stato</th>
+                        <th>Descrizione originale</th>
+                        <th class="right">Qtà</th>
+                        <th class="right">Listino</th>
+                        <th>Sconti</th>
+                        <th class="right">Prezzo vendita</th>
+                    </tr>
+                </thead>
+                <tbody id="dett-body"></tbody>
+            </table>
+        </div>
+        <div class="modal-actions"><button type="button" class="btn" id="dett-chiudi">Chiudi</button></div>
+    </div>
+</div>
+{% endif %}
+
+{% include '_workflow_dashboard_styles.html' %}
+<style>
+.cat-search { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; width: 220px; max-width: 100%; }
+.cat-select { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; background: var(--surface); color: var(--text); font-family: inherit; }
+.cat-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); font-weight: 600; }
+.cat-check input { accent-color: var(--accent); width: auto; height: auto; margin: 0; }
+.cat-filtri { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.cat-filtri .cat-search, .cat-filtri .cat-select { width: auto; min-width: 150px; max-width: 240px; margin: 0; }
+#cat-table td .cell-sub { white-space: nowrap; }
+.card-body { padding: 14px 18px; }
+.card-body dl { margin: 0; display: grid; grid-template-columns: 220px 1fr; gap: 6px 16px; font-size: 13.5px; }
+.card-body dt { font-weight: 600; color: var(--text-muted); }
+.card-body dd { margin: 0; color: var(--text); line-height: 1.5; }
+details.card summary { cursor: pointer; padding: 14px 18px; font-weight: 600; color: var(--text); list-style: none; }
+details.card summary::marker { display: none; }
+details.card summary::before { content: '\f078'; font-family: 'Font Awesome 6 Free'; font-weight: 900; margin-right: 8px; font-size: 12px; }
+details.card[open] summary::before { content: '\f077'; }
+details.card[open] .card-body { border-top: 1px solid var(--border); }
+.mag-warn { font-size: 12.5px; background: var(--warning-bg); color: var(--warning-text); border: 1px solid var(--warning-border); border-radius: var(--radius-md); padding: 8px 12px; margin-bottom: 10px; }
+.mag-preview { font-size: 13px; background: var(--surface-2); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 10px; line-height: 1.5; }
+#modal-dettaglio .styled-table th, #modal-dettaglio .styled-table td { padding: 10px 10px; }
+#modal-dettaglio .styled-table td.right { white-space: nowrap; }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const euro = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+    const money = (n) => (n === null || n === undefined || n === '') ? '—' : euro(n);
+    const urlEditor = {{ (url_editor or '') | tojson }};
+
+    const catTable = document.getElementById('cat-table');
+    const catSearch = document.getElementById('cat-search');
+    const catCategoria = document.getElementById('cat-categoria');
+    const catMarca = document.getElementById('cat-marca');
+    const catStato = document.getElementById('cat-stato');
+    const catVenduti = document.getElementById('cat-venduti');
+    const catConteggio = document.getElementById('cat-conteggio');
+
+    const applyCatFilter = () => {
+        if (!catTable) return;
+        const q = (catSearch.value || '').trim().toLowerCase();
+        const cat = catCategoria.value;
+        const marca = catMarca.value;
+        const stato = catStato.value;
+        const soloVenduti = catVenduti.checked;
+        let n = 0;
+        catTable.querySelectorAll('tbody tr.main-row').forEach(tr => {
+            const okSearch = !q || (tr.dataset.search || '').includes(q);
+            const okCat = !cat || (tr.dataset.categoria || '') === cat;
+            const okMarca = !marca || (tr.dataset.marca || '') === marca;
+            const okStato = !stato || (tr.dataset.stato || '') === stato;
+            const okVenduti = !soloVenduti || tr.dataset.venduto === '1';
+            const show = okSearch && okCat && okMarca && okStato && okVenduti;
+            tr.style.display = show ? '' : 'none';
+            if (show) n++;
+        });
+        if (catConteggio) catConteggio.textContent = n + ' articoli mostrati';
+    };
+
+    if (catSearch) catSearch.addEventListener('input', applyCatFilter);
+    if (catCategoria) catCategoria.addEventListener('change', applyCatFilter);
+    if (catMarca) catMarca.addEventListener('change', applyCatFilter);
+    if (catStato) catStato.addEventListener('change', applyCatFilter);
+    if (catVenduti) catVenduti.addEventListener('change', applyCatFilter);
+
+    const marcaSearch = document.getElementById('marca-search');
+    const marcheTable = document.getElementById('marche-table');
+    if (marcaSearch && marcheTable) {
+        marcaSearch.addEventListener('input', () => {
+            const q = (marcaSearch.value || '').trim().toLowerCase();
+            marcheTable.querySelectorAll('tbody tr.main-row').forEach(tr => {
+                const show = !q || (tr.dataset.search || '').includes(q);
+                tr.style.display = show ? '' : 'none';
+            });
+        });
+    }
+
+    const modal = document.getElementById('modal-dettaglio');
+    const dettTitolo = document.getElementById('dett-titolo');
+    const dettNomi = document.getElementById('dett-nomi');
+    const dettBody = document.getElementById('dett-body');
+    const dettChiudi = document.getElementById('dett-chiudi');
+
+    const closeModal = () => { if (modal) modal.style.display = 'none'; };
+
+    if (dettChiudi) dettChiudi.addEventListener('click', closeModal);
+    if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    const openDettaglio = async (id) => {
+        if (!modal) return;
+        dettBody.innerHTML = '<tr><td colspan="8" class="muted">Caricamento...</td></tr>';
+        modal.style.display = 'flex';
+        try {
+            const res = await fetch('/api/catalogo/' + encodeURIComponent(id), { credentials: 'same-origin' });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || 'Errore sconosciuto');
+            const art = data.articolo || {};
+            if (dettTitolo) dettTitolo.textContent = 'Storico prezzi — ' + (art.nome || '');
+            if (dettNomi) {
+                const nomi = art.nomi_originali || [];
+                dettNomi.innerHTML = nomi.length
+                    ? 'Scritto nei preventivi come: ' + nomi.map(esc).join(' · ')
+                    : '';
+            }
+            const righe = data.righe || [];
+            if (!righe.length) {
+                dettBody.innerHTML = '<tr><td colspan="8" class="muted">Nessuna riga.</td></tr>';
+                return;
+            }
+            dettBody.innerHTML = righe.map(r => {
+                const href = urlEditor.replace('__ID__', encodeURIComponent(r.preventivo));
+                const statoChip = r.venduto
+                    ? '<span class="chip success">venduto</span>'
+                    : '<span class="chip">' + esc(r.stato || '—') + '</span>';
+                const sconti = (r.sconti && r.sconti !== '0+0+0')
+                    ? '<span class="chip">' + esc(r.sconti) + '</span>'
+                    : '<span class="chip success">netto</span>';
+                return '<tr>'
+                    + '<td class="nowrap">' + esc(r.data ? r.data.split('-').reverse().join('/') : '—') + '</td>'
+                    + '<td class="nowrap"><a href="' + href + '">' + esc(r.preventivo) + '</a></td>'
+                    + '<td>' + statoChip + '</td>'
+                    + '<td>' + esc(r.articolo_originale || '—') + '</td>'
+                    + '<td class="right">' + (r.qt == null ? '—' : Number(r.qt).toLocaleString('it-IT', { maximumFractionDigits: 2 })) + '</td>'
+                    + '<td class="right">' + money(r.listino) + '</td>'
+                    + '<td>' + sconti + '</td>'
+                    + '<td class="right">' + money(r.prezzo_vendita) + '</td>'
+                    + '</tr>';
+            }).join('');
+        } catch (err) {
+            dettBody.innerHTML = '<tr><td colspan="8" class="muted">' + esc(err.message || 'Errore nel caricamento') + '</td></tr>';
+        }
+    };
+
+    document.querySelectorAll('.btn-dettaglio').forEach(btn => {
+        btn.addEventListener('click', () => openDettaglio(btn.dataset.id));
+    });
+});
+</script>
+
+{% block footer_nav %}
+<div class="dashboard-footer-nav">
+    {{ dashboard_navbar('catalogo') }}
+</div>
+{% endblock %}
+
+{% endblock %}
