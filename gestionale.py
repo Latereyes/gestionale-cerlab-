@@ -728,8 +728,27 @@ class AppLauncher(Tk):
 # --- FINE CLASSE DEL LAUNCHER ---
 
 
+def _carica_secret_key():
+    """Chiave che firma le sessioni e i token di stampa. Non sta nel codice (il repository e' pubblico):
+    si genera al primo avvio in DATA_DIR/secret_key.txt e resta uguale ai riavvii.
+    GESTIONALE_SECRET_KEY, se impostata, ha la precedenza."""
+    import secrets
+    chiave = os.environ.get("GESTIONALE_SECRET_KEY", "").strip()
+    if chiave:
+        return chiave
+    percorso = DATA_DIR / "secret_key.txt"
+    try:
+        chiave = percorso.read_text(encoding="utf-8").strip()
+    except OSError:
+        chiave = ""
+    if not chiave:
+        chiave = secrets.token_hex(32)
+        percorso.write_text(chiave, encoding="utf-8")
+    return chiave
+
+
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "change-me"
+app.config["SECRET_KEY"] = _carica_secret_key()
 
 class _IndirizzoDaTailscaleServe:
     """Con `tailscale serve` (indirizzo https per installare l'app sul telefono) le richieste arrivano
