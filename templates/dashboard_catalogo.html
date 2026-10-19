@@ -14,7 +14,7 @@
         <div class="empty-state">
             <i class="fas fa-book"></i>
             <h4>Catalogo non ancora caricato</h4>
-            <p>Copia il file del catalogo in <code>{{ percorso_db }}</code> e ricarica la pagina.</p>
+            <p>Si riempie da solo a ogni preventivo salvato. Per partire dalla bozza gia' pronta copia il file del catalogo in <code>{{ percorso_db }}</code> e ricarica la pagina.</p>
         </div>
     </div>
     {% else %}
@@ -56,7 +56,7 @@
 
     <div class="mag-warn">
         <i class="fas fa-info-circle"></i>
-        Bozza in sola consultazione: prezzi e sconti sono ricavati dai preventivi passati e vanno verificati prima di usarli.
+        Bozza in sola consultazione: prezzi e sconti sono ricavati dai preventivi e vanno verificati prima di usarli. Ogni preventivo salvato aggiorna il catalogo; gli articoli nuovi compaiono come "da verificare".
     </div>
 
     <div class="card">

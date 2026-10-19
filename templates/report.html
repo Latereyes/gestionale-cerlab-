@@ -1,0 +1,440 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-clipboard-list"></i> Report</h1>
+{% endblock %}
+
+{% block body %}
+<main class="report-page">
+    <section class="report-head-box">
+        <div class="report-head-top">
+            <div>
+                <h2>Report del team</h2>
+                <p>Scrivi il tuo report (per esempio a fine giornata). Gli altri vedono il tuo ultimo report finché non ne scrivi uno nuovo.</p>
+            </div>
+            <a href="{{ url_for('tasks_page') }}" class="btn btn-outline"><i class="fas fa-tasks"></i> Task</a>
+        </div>
+        <div class="campo-menzioni">
+            <textarea id="reportTesto" placeholder="Cosa hai fatto oggi, cosa resta aperto, cosa serve dagli altri... Usa @ per un collega e # per un preventivo o un cliente"
+                      oninput="window.handleAutocomplete(this, document.getElementById('reportMenzioni'))"></textarea>
+            <div id="reportMenzioni" class="mention-list"></div>
+        </div>
+        <div id="reportErrore" class="report-errore" style="display: none;"></div>
+        <div class="report-azioni">
+            <button id="reportSalva" class="btn primary"><i class="fas fa-save"></i> Salva report</button>
+        </div>
+    </section>
+
+    <section id="taskCollegate" class="report-head-box task-collegate" style="display: none;">
+        <h3><i class="fas fa-link"></i> Task collegate al report</h3>
+        <div id="taskRighe"></div>
+        <div class="report-azioni">
+            <button id="taskAggiungi" type="button" class="btn btn-outline"><i class="fas fa-plus"></i> Altra task</button>
+            <button id="taskAnnulla" type="button" class="btn">Chiudi</button>
+            <button id="taskCrea" type="button" class="btn primary">Crea task</button>
+        </div>
+        <div id="taskEsito" class="task-esito"></div>
+    </section>
+
+    <div class="report-schede" role="tablist">
+        <button type="button" class="report-scheda attiva" data-scheda="recenti" role="tab" aria-selected="true">Recenti</button>
+        <button type="button" class="report-scheda" data-scheda="archivio" role="tab" aria-selected="false"><i class="fas fa-archive"></i> Archivio report</button>
+    </div>
+
+    <div id="schedaRecenti">
+        <h3 class="section-label">Ultimi report dei colleghi</h3>
+        <div id="reportUltimi" class="report-lista"></div>
+        <div id="reportVuoto" class="report-vuoto" style="display: none;">Nessun collega ha ancora scritto un report.</div>
+
+        <h3 class="section-label">I miei report</h3>
+        <div id="reportMiei" class="report-lista"></div>
+    </div>
+
+    <div id="schedaArchivio" style="display: none;">
+        <div class="arch-filtri">
+            <select id="archFiltroAutore" aria-label="Autore"><option value="">Tutti gli autori</option></select>
+            <label>Dal <input type="date" id="archDal"></label>
+            <label>Al <input type="date" id="archAl"></label>
+            <button id="archCerca" type="button" class="btn btn-outline"><i class="fas fa-search"></i> Cerca</button>
+        </div>
+        <div id="archErrore" class="report-errore" style="display: none;"></div>
+        <div id="archLista" class="report-lista"></div>
+        <div id="archVuoto" class="report-vuoto" style="display: none;">Nessun report trovato.</div>
+        <div class="report-azioni" style="justify-content: center;">
+            <button id="archAltri" type="button" class="btn btn-outline" style="display: none;">Carica altri</button>
+        </div>
+    </div>
+</main>
+
+<style>
+    .report-page { max-width: 860px; margin: 0 auto; padding: 28px 20px 110px; }
+    .report-head-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 22px 24px; margin-bottom: 24px; }
+    .report-head-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    .report-head-box h2 { margin: 0 0 4px; font-size: 22px; font-weight: 700; }
+    .report-head-box h3 { margin: 0 0 12px; font-size: 16px; }
+    .report-head-box p { margin: 0; color: var(--text-muted); font-size: 13.5px; }
+    #reportTesto { width: 100%; min-height: 130px; box-sizing: border-box; font: inherit; font-size: 15px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); resize: vertical; }
+    #reportTesto:focus { outline: none; border-color: var(--accent); }
+    .report-azioni { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .report-errore { color: var(--danger-text); background: var(--danger-bg); border-radius: var(--radius); padding: 8px 12px; margin-top: 10px; font-size: 13px; }
+    .task-collegate { border-left: 5px solid var(--accent); }
+    .task-riga { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+    .task-riga .tr-desc { flex: 1 1 260px; font: inherit; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+    .task-riga select { width: auto; flex: none; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .task-riga button { width: auto; flex: none; border: none; background: none; font-size: 20px; color: var(--text-muted); cursor: pointer; }
+    .campo-menzioni { position: relative; flex: 1 1 260px; min-width: 0; }
+    .campo-menzioni .mention-list { top: 100%; bottom: auto; left: 0; right: 0; margin-top: 4px; max-height: 220px; }
+    .campo-menzioni .tr-desc { width: 100%; box-sizing: border-box; }
+    .report-corpo .shout-link { color: var(--accent); font-weight: 600; text-decoration: underline; }
+    .report-corpo .shout-mention { color: var(--accent); font-weight: 600; }
+    .report-schede { display: flex; gap: 6px; margin-top: 28px; border-bottom: 1px solid var(--border); }
+    .report-scheda { width: auto; flex: none; border: none; background: none; font: inherit; font-size: 14px; font-weight: 600; color: var(--text-muted); padding: 8px 14px; border-bottom: 3px solid transparent; margin-bottom: -1px; cursor: pointer; }
+    .report-scheda.attiva { color: var(--accent); border-bottom-color: var(--accent); }
+    .arch-filtri { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 18px 0 14px; }
+    .arch-filtri select, .arch-filtri input { width: auto; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .arch-filtri label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
+    .arch-filtri .btn { width: auto; }
+    @media (max-width: 600px) {
+        .arch-filtri select { flex: 1 1 100%; }
+        .arch-filtri label { flex: 1 1 calc(50% - 4px); }
+        .arch-filtri label input { flex: 1; min-width: 0; }
+        .arch-filtri .btn { flex: 1 1 100%; }
+    }
+    .task-esito { margin-top: 8px; font-size: 13px; color: var(--text-muted); }
+    .section-label { margin: 28px 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+    .report-lista { display: flex; flex-direction: column; gap: 14px; }
+    .report-card { background: var(--surface); border: 1px solid var(--border); border-left: 5px solid var(--border-strong); border-radius: var(--radius-md); padding: 16px 20px; box-shadow: var(--shadow-xs); }
+    .report-card.report-attuale { border-left-color: var(--accent); }
+    .report-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+    .report-head span:last-child { color: var(--text-muted); font-weight: 500; }
+    .report-corpo { font-size: 14.5px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+    .report-etichetta { float: right; margin-left: 10px; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--accent-light); color: var(--accent); }
+    .report-vuoto { text-align: center; padding: 28px 20px; color: var(--text-muted); background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius-md); font-size: 13.5px; }
+</style>
+
+<script>
+window.currentUserId = {{ session.user_id | tojson }};
+document.addEventListener('DOMContentLoaded', () => {
+  // Utility: escape HTML e formattazione data
+  const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const formatData = (s) => {
+    if (!s) return '';
+    const [d, t] = s.split(' ');
+    const [a, m, g] = d.split('-');
+    return `${g}/${m}/${a} ${(t || '').slice(0, 5)}`;
+  };
+
+  // Stato
+  let destinatariCache = null; // cache utenti/gruppi
+  let reportIdAttuale = null;  // id report per task collegate
+
+  // Costruisce una card report
+  const creaCard = (r, extraClasse = '', etichetta = '') => {
+    const card = document.createElement('div');
+    card.className = 'report-card' + (extraClasse ? ' ' + extraClasse : '');
+    const head = document.createElement('div');
+    head.className = 'report-head';
+    const nome = document.createElement('span');
+    nome.textContent = r.autore_nome || r.autore || '';
+    const data = document.createElement('span');
+    data.textContent = formatData(r.creato_il);
+    head.append(nome, data);
+    const corpo = document.createElement('div');
+    corpo.className = 'report-corpo';
+    // Testo sempre trattato come testo; @ e # diventano collegamenti come nelle task e nei messaggi
+    corpo.innerHTML = window.parseMessage(escapeHtml(r.testo || '')).replace(/\n/g, '<br>');
+    if (etichetta) {
+      const et = document.createElement('span');
+      et.className = 'report-etichetta';
+      et.textContent = etichetta;
+      card.append(et);
+    }
+    card.append(head, corpo);
+    return card;
+  };
+
+  // Carica e disegna le liste
+  const carica = async () => {
+    const res = await fetch('/api/report');
+    const dati = await res.json();
+    const ultimi = dati.ultimi || [];
+    const miei = dati.miei || [];
+
+    const boxUltimi = document.getElementById('reportUltimi');
+    const boxMiei = document.getElementById('reportMiei');
+    const vuoto = document.getElementById('reportVuoto');
+    boxUltimi.innerHTML = '';
+    boxMiei.innerHTML = '';
+
+    // Ultimi degli altri
+    if (ultimi.length === 0) {
+      vuoto.style.display = '';
+    } else {
+      vuoto.style.display = 'none';
+      ultimi.forEach(r => boxUltimi.appendChild(creaCard(r)));
+    }
+
+    // I miei: il primo è "attuale" e visibile agli altri
+    miei.forEach((r, i) => {
+      const etichetta = i === 0 ? 'visibile agli altri' : '';
+      boxMiei.appendChild(creaCard(r, i === 0 ? 'report-attuale' : '', etichetta));
+    });
+  };
+
+  // Carica destinatari una sola volta (cache)
+  const caricaDestinatari = async () => {
+    if (destinatariCache) return destinatariCache;
+    const res = await fetch('/api/tasks/destinatari');
+    destinatariCache = await res.json();
+    return destinatariCache;
+  };
+
+  // Aggiunge una riga task
+  const aggiungiRiga = async () => {
+    const dati = await caricaDestinatari();
+    const riga = document.createElement('div');
+    riga.className = 'task-riga';
+
+    // Descrizione
+    const desc = document.createElement('input');
+    desc.type = 'text';
+    desc.className = 'tr-desc';
+    desc.placeholder = "Cosa c'è da fare? (@ collega, # preventivo o cliente)";
+    desc.autocomplete = 'off';
+
+    // Suggerimenti @ e # (stesso meccanismo delle task e dei messaggi)
+    const campo = document.createElement('div');
+    campo.className = 'campo-menzioni';
+    const menzioni = document.createElement('div');
+    menzioni.className = 'mention-list';
+    desc.addEventListener('input', () => window.handleAutocomplete(desc, menzioni));
+    campo.append(desc, menzioni);
+
+    // Tipo
+    const tipo = document.createElement('select');
+    tipo.className = 'tr-tipo';
+    const opPers = document.createElement('option');
+    opPers.value = 'personale';
+    opPers.textContent = 'Per me';
+    const opUtente = document.createElement('option');
+    opUtente.value = 'utente';
+    opUtente.textContent = 'Per un collega';
+    const opGruppo = document.createElement('option');
+    opGruppo.value = 'gruppo';
+    opGruppo.textContent = 'Per un gruppo';
+    tipo.append(opPers, opUtente, opGruppo);
+
+    // Destinatari (utenti diversi da me)
+    const dest = document.createElement('select');
+    dest.className = 'tr-dest';
+    (dati.utenti || []).forEach(u => {
+      if (u.username === window.currentUserId) return;
+      const o = document.createElement('option');
+      o.value = u.username;
+      o.textContent = u.full_name || u.username;
+      dest.appendChild(o);
+    });
+
+    // Gruppi
+    const gruppo = document.createElement('select');
+    gruppo.className = 'tr-gruppo';
+    (dati.gruppi || []).forEach(g => {
+      const o = document.createElement('option');
+      o.value = g.id;
+      o.textContent = `${g.label} (${g.n})`;
+      gruppo.appendChild(o);
+    });
+
+    // Bottone rimuovi riga
+    const rimuovi = document.createElement('button');
+    rimuovi.type = 'button';
+    rimuovi.textContent = '×';
+    rimuovi.addEventListener('click', () => riga.remove());
+
+    // Mostra solo il campo relativo al tipo scelto
+    const aggiornaVisibilita = () => {
+      dest.style.display = tipo.value === 'utente' ? '' : 'none';
+      gruppo.style.display = tipo.value === 'gruppo' ? '' : 'none';
+    };
+    tipo.addEventListener('change', aggiornaVisibilita);
+    aggiornaVisibilita();
+
+    riga.append(campo, tipo, dest, gruppo, rimuovi);
+    document.getElementById('taskRighe').appendChild(riga);
+  };
+
+  // Salva il report
+  document.getElementById('reportSalva').addEventListener('click', async () => {
+    const testo = document.getElementById('reportTesto').value.trim();
+    const errore = document.getElementById('reportErrore');
+    errore.style.display = 'none';
+    errore.textContent = '';
+
+    const res = await fetch('/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ testo })
+    });
+    const dati = await res.json();
+
+    if (!dati.ok) {
+      errore.textContent = dati.error || 'Errore di salvataggio';
+      errore.style.display = '';
+      return;
+    }
+
+    // Ok: svuota, ricarica, chiedi task
+    document.getElementById('reportTesto').value = '';
+    document.getElementById('reportMenzioni').style.display = 'none';
+    await carica();
+    if (archivioAperto) caricaArchivio(true);
+
+    if (confirm('Report salvato. Vuoi creare delle task collegate a questo report?')) {
+      reportIdAttuale = dati.report.id;
+      const pannello = document.getElementById('taskCollegate');
+      const righe = document.getElementById('taskRighe');
+      const esito = document.getElementById('taskEsito');
+      righe.innerHTML = '';
+      esito.textContent = '';
+      pannello.style.display = '';
+      aggiungiRiga();
+    }
+  });
+
+  // Crea le task collegate
+  document.getElementById('taskCrea').addEventListener('click', async () => {
+    const esito = document.getElementById('taskEsito');
+    let create = 0;
+    const errori = [];
+
+    const righe = document.querySelectorAll('#taskRighe .task-riga');
+    for (const riga of righe) {
+      const desc = riga.querySelector('.tr-desc').value.trim();
+      if (!desc) continue; // salta righe vuote
+
+      const tipo = riga.querySelector('.tr-tipo').value;
+      const body = {
+        description: desc,
+        tipo,
+        destinatario: tipo === 'utente' ? riga.querySelector('.tr-dest').value : '',
+        gruppo: tipo === 'gruppo' ? riga.querySelector('.tr-gruppo').value : '',
+        report_id: reportIdAttuale
+      };
+
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const dati = await res.json();
+      if (dati.success) create++;
+      else errori.push(dati.error || 'Errore');
+    }
+
+    esito.textContent = `${create} task create` + (errori.length ? ' — errori: ' + errori.join('; ') : '');
+
+    // Se tutte riuscite, nascondi il pannello
+    if (errori.length === 0) {
+      setTimeout(() => {
+        document.getElementById('taskCollegate').style.display = 'none';
+      }, 1500);
+    }
+  });
+
+  // Annulla il pannello task
+  document.getElementById('taskAnnulla').addEventListener('click', () => {
+    document.getElementById('taskCollegate').style.display = 'none';
+  });
+
+  // Aggiunge una riga al click
+  document.getElementById('taskAggiungi').addEventListener('click', aggiungiRiga);
+
+  // --- Archivio: tutti i report di tutti, a pagine da 20 ---
+  const archFiltroAutore = document.getElementById('archFiltroAutore');
+  const archDal = document.getElementById('archDal');
+  const archAl = document.getElementById('archAl');
+  const archLista = document.getElementById('archLista');
+  const archVuoto = document.getElementById('archVuoto');
+  const archAltri = document.getElementById('archAltri');
+  const archErrore = document.getElementById('archErrore');
+  let archOffset = 0;
+  let archAutoriCaricati = false;
+  let archRichiesta = 0; // le risposte di ricerche superate si ignorano
+
+  const caricaArchivio = async (reset) => {
+    const mia = ++archRichiesta;
+    archAltri.disabled = true;
+    if (reset) archOffset = 0;
+
+    const params = new URLSearchParams();
+    if (archFiltroAutore.value) params.append('autore', archFiltroAutore.value);
+    if (archDal.value) params.append('dal', archDal.value);
+    if (archAl.value) params.append('al', archAl.value);
+    params.append('offset', archOffset);
+    params.append('limit', 20);
+
+    try {
+      const res = await fetch(`/api/report/archivio?${params.toString()}`);
+      const data = await res.json();
+      if (mia !== archRichiesta) return;
+
+      if (!data.ok) {
+        archErrore.textContent = data.error || 'Errore nel caricamento.';
+        archErrore.style.display = '';
+        return;
+      }
+      archErrore.style.display = 'none';
+
+      if (data.autori && !archAutoriCaricati) {
+        data.autori.forEach(a => {
+          const opt = document.createElement('option');
+          opt.value = a.autore;
+          opt.textContent = a.autore_nome || a.autore;
+          archFiltroAutore.appendChild(opt);
+        });
+        archAutoriCaricati = true;
+      }
+
+      if (reset) archLista.innerHTML = '';
+      data.reports.forEach(r => archLista.appendChild(creaCard(r)));
+      archOffset += data.reports.length;
+      archAltri.style.display = data.altri ? '' : 'none';
+      archVuoto.style.display = archLista.children.length === 0 ? '' : 'none';
+    } catch (e) {
+      if (mia !== archRichiesta) return;
+      archErrore.textContent = 'Errore di rete.';
+      archErrore.style.display = '';
+    } finally {
+      if (mia === archRichiesta) archAltri.disabled = false;
+    }
+  };
+
+  document.getElementById('archCerca').addEventListener('click', () => caricaArchivio(true));
+  archAltri.addEventListener('click', () => caricaArchivio(false));
+  archFiltroAutore.addEventListener('change', () => caricaArchivio(true));
+  archDal.addEventListener('change', () => caricaArchivio(true));
+  archAl.addEventListener('change', () => caricaArchivio(true));
+
+  // Schede Recenti / Archivio (l'archivio si carica la prima volta che si apre)
+  let archivioAperto = false;
+  document.querySelectorAll('.report-scheda').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const scheda = btn.dataset.scheda;
+      document.querySelectorAll('.report-scheda').forEach(b => {
+        b.classList.toggle('attiva', b === btn);
+        b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+      });
+      document.getElementById('schedaRecenti').style.display = scheda === 'recenti' ? '' : 'none';
+      document.getElementById('schedaArchivio').style.display = scheda === 'archivio' ? '' : 'none';
+      if (scheda === 'archivio' && !archivioAperto) {
+        archivioAperto = true;
+        caricaArchivio(true);
+      }
+    });
+  });
+
+  // Avvio
+  carica();
+});
+</script>
+{% endblock %}

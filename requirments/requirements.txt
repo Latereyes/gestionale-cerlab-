@@ -6,3 +6,15 @@ itsdangerous==2.2.0
 Jinja2==3.1.6
 MarkupSafe==3.0.2
 Werkzeug==3.1.3
+
+# Librerie importate dal gestionale (gestionale.py, models.py, utils.py, routes/, notifiche_client.py)
+SQLAlchemy==2.0.51
+waitress==3.0.2
+pandas==3.0.3
+openpyxl==3.1.5
+python-dateutil==2.9.0.post0
+packaging==26.2
+pillow==12.2.0
+pystray==0.19.5
+# PDF con WeasyPrint: facoltativo (senza, il gestionale usa il metodo alternativo); richiede GTK, vedi leggimi.txt
+weasyprint
