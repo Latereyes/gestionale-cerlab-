@@ -10,11 +10,15 @@
         <div class="tasks-head-top">
             <div>
                 <h2>Task del team</h2>
-                <p>Segnalazioni e attività. Usa @ per assegnare un collega e # per richiamare un preventivo.</p>
+                <p>Segnalazioni e attività. Usa @ per menzionare un collega e # per richiamare un preventivo.</p>
             </div>
             <button id="toggleCreateBtn" class="btn primary new-task-btn" onclick="window.toggleCreateArea()" title="Nuovo Task">
                 <i class="fas fa-plus" id="plusIcon"></i> <span>Nuovo task</span>
             </button>
+        </div>
+        <div class="tasks-tabs" id="taskTabs">
+            <button type="button" class="tab-pill" data-tab="personali"><i class="fas fa-user"></i> Personali <span class="tab-count"></span></button>
+            <button type="button" class="tab-pill" data-tab="gruppo"><i class="fas fa-users"></i> Di gruppo <span class="tab-count"></span></button>
         </div>
         <div class="tasks-filters" id="taskFilters">
             <button type="button" class="filter-pill active" data-filter="all">Tutti <span id="count-all">0</span></button>
@@ -29,9 +33,18 @@
             <span><i class="fas fa-magic"></i> NUOVA AZIONE</span>
             <span onclick="window.toggleCreateArea()" style="cursor:pointer;"><i class="fas fa-times"></i></span>
         </div>
+        <div class="task-tipo">
+            <span class="task-tipo-label">Per chi è?</span>
+            <label><input type="radio" name="taskTipo" value="personale" checked> Per me</label>
+            <label><input type="radio" name="taskTipo" value="utente"> Per un collega</label>
+            <label><input type="radio" name="taskTipo" value="gruppo"> Per un gruppo</label>
+            <span id="rowDestinatario" style="display: none;"><select id="taskDestinatario" aria-label="Collega"></select></span>
+            <span id="rowGruppo" style="display: none;"><select id="taskGruppo" aria-label="Gruppo"></select></span>
+        </div>
+        <div id="taskCreateError" class="task-create-error" style="display: none;"></div>
         <div class="inline-comment-box" style="background: white; border-radius: 12px; padding: 10px;">
              <div id="inlineMentionSuggestions" class="mention-list" style="bottom: 100%; top: auto;"></div>
-             <textarea id="taskInputInline" placeholder="Descrivi il problema... Usa @ per assegnare" 
+             <textarea id="taskInputInline" placeholder="Descrivi l'attività... Usa @ per menzionare un collega" 
                        style="width: 100%; border: none; outline: none; resize: none; font-size: 15px; min-height: 60px; font-family: inherit;"
                        oninput="window.handleAutocomplete(this, document.getElementById('inlineMentionSuggestions'))"></textarea>
              <button onclick="window.saveInlineTask()" class="btn-send-inline" style="font-size: 22px; margin-left: 10px;">
@@ -83,6 +96,17 @@
     .new-task-btn i { transition: transform 0.25s; }
     #toggleCreateBtn.active { background: var(--danger); box-shadow: none; }
     #toggleCreateBtn.active i { transform: rotate(45deg); }
+    .tasks-tabs { display: flex; gap: 4px; margin-top: 18px; border-bottom: 1px solid var(--border); }
+    .tab-pill { font: inherit; display: inline-flex; align-items: center; gap: 7px; padding: 9px 16px; border: none; border-bottom: 3px solid transparent; background: none; color: var(--text-muted); font-size: 14px; font-weight: 600; cursor: pointer; margin-bottom: -1px; }
+    .tab-pill:hover { color: var(--text); }
+    .tab-pill.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-count:not(:empty) { background: var(--accent-light); color: var(--accent); border-radius: 999px; padding: 0 7px; font-size: 11px; }
+    .task-tipo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 10px; font-size: 13.5px; }
+    .task-tipo-label { font-weight: 600; color: var(--text); }
+    .task-tipo label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+    .task-tipo select { font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .task-create-error { color: var(--danger-text); background: var(--danger-bg); border-radius: var(--radius); padding: 8px 12px; margin-bottom: 10px; font-size: 13px; }
+    .task-dest { font-size: 11px; font-weight: 600; color: var(--text-muted); background: var(--surface-2); border-radius: 999px; padding: 2px 9px; }
     .tasks-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
     .filter-pill { font: inherit; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
     .filter-pill span { background: var(--surface-2); border-radius: 999px; padding: 0 7px; font-size: 11px; }
@@ -147,6 +171,157 @@
 </style>
 
 <script>
+// Schede "Personali" / "Di gruppo" e scelta del destinatario di una nuova task
+function initTaskTabs() {
+    // 1) Gestione schede (tabs)
+    window.currentTab = 'personali';
+
+    // Lettura iniziale da localStorage
+    try {
+        const saved = localStorage.getItem('tasks_tab');
+        if (saved === 'personali' || saved === 'gruppo') {
+            window.currentTab = saved;
+        }
+    } catch (e) {
+        // ignora errori di accesso a localStorage
+    }
+
+    window.setTaskTab = function (tab) {
+        window.currentTab = tab;
+
+        // Aggiorna la classe active solo sul bottone corretto
+        document.querySelectorAll('#taskTabs .tab-pill').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+
+        // Salva la scelta
+        try {
+            localStorage.setItem('tasks_tab', tab);
+        } catch (e) {
+            // ignora errori di salvataggio
+        }
+
+        // Applica il filtro
+        window.applyTaskFilter();
+    };
+
+    // Collega i click dei bottoni
+    document.querySelectorAll('#taskTabs .tab-pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            window.setTaskTab(btn.dataset.tab);
+        });
+    });
+
+    // Applica lo stato iniziale (attiva il bottone giusto e filtra)
+    window.setTaskTab(window.currentTab);
+
+    // 2) Verifica se una card appartiene alla scheda corrente
+    window.taskInTab = function (card) {
+        return card.dataset.categoria === window.currentTab;
+    };
+
+    // 3) Aggiorna i contatori sulle schede
+    window.updateTabCounts = function (tasks) {
+        document.querySelectorAll('#taskTabs .tab-pill').forEach(btn => {
+            const tab = btn.dataset.tab;
+            const count = tasks.filter(t =>
+                t.categoria === tab &&
+                t.status !== 'resolved' &&
+                t.status !== 'failed'
+            ).length;
+
+            const span = btn.querySelector('.tab-count');
+            if (span) {
+                span.textContent = count > 0 ? String(count) : '';
+            }
+        });
+    };
+
+    // 4) Carica destinatari e gruppi
+    window.loadDestinatari = async function () {
+        try {
+            const res = await fetch('/api/tasks/destinatari');
+            const data = await res.json();
+
+            const selDest = document.getElementById('taskDestinatario');
+            const selGruppo = document.getElementById('taskGruppo');
+
+            if (!selDest || !selGruppo) return;
+
+            // Svuota i select
+            selDest.innerHTML = '';
+            selGruppo.innerHTML = '';
+
+            // Opzioni per gli utenti (escludendo l'utente corrente)
+            (data.utenti || []).forEach(u => {
+                if (u.username === window.currentUserId) return;
+                const opt = document.createElement('option');
+                opt.value = u.username;
+                opt.textContent = u.full_name || u.username;
+                selDest.appendChild(opt);
+            });
+
+            // Opzioni per i gruppi
+            (data.gruppi || []).forEach(g => {
+                const opt = document.createElement('option');
+                opt.value = g.id;
+                opt.textContent = `${g.label} (${g.n})`;
+                selGruppo.appendChild(opt);
+            });
+        } catch (e) {
+            console.error('Errore nel caricamento destinatari/gruppi', e);
+        }
+    };
+
+    // 5) Mostra/nascondi righe in base al tipo di task
+    window.updateTipoForm = function () {
+        const radios = document.querySelectorAll('input[name="taskTipo"]');
+        let tipo = 'personale';
+        radios.forEach(r => {
+            if (r.checked) tipo = r.value;
+        });
+
+        const rowDest = document.getElementById('rowDestinatario');
+        const rowGruppo = document.getElementById('rowGruppo');
+
+        if (rowDest) rowDest.style.display = tipo === 'utente' ? '' : 'none';
+        if (rowGruppo) rowGruppo.style.display = tipo === 'gruppo' ? '' : 'none';
+    };
+
+    // Collega l'evento change ai radio
+    document.querySelectorAll('input[name="taskTipo"]').forEach(r => {
+        r.addEventListener('change', window.updateTipoForm);
+    });
+
+    // Chiamata iniziale per impostare la visibilità corretta
+    window.updateTipoForm();
+
+    // 6) Costruisce l'oggetto dati per la nuova task
+    window.datiNuovaTask = function (descrizione) {
+        const radios = document.querySelectorAll('input[name="taskTipo"]');
+        let tipo = 'personale';
+        radios.forEach(r => {
+            if (r.checked) tipo = r.value;
+        });
+
+        const selDest = document.getElementById('taskDestinatario');
+        const selGruppo = document.getElementById('taskGruppo');
+
+        const destinatario = tipo === 'utente' && selDest ? selDest.value : '';
+        const gruppo = tipo === 'gruppo' && selGruppo ? selGruppo.value : '';
+
+        return {
+            description: descrizione,
+            tipo: tipo,
+            destinatario: destinatario,
+            gruppo: gruppo
+        };
+    };
+
+    // Carica i destinatari all'avvio
+    window.loadDestinatari();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const container = document.getElementById('tasksContainer');
     const archiveContainer = document.getElementById('archivedTasksContainer');
@@ -190,16 +365,18 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const now = new Date();
-        let archivedCount = 0;
         const statusLabel = { open: 'Aperto', support: 'Serve supporto', resolved: 'Risolto', failed: 'Non risolto' };
+        // A chi e' rivolta la task (testo semplice, senza HTML)
+        const escapeHtml = (v) => String(v || '').replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+        const destLabel = (t) => {
+            if (t.tipo === 'personale') return 'Per me';
+            if (t.tipo === 'gruppo') return escapeHtml(t.gruppo === 'tutti' ? 'Per tutti' : `Gruppo ${t.gruppo}`);
+            if (t.tipo === 'utente') return escapeHtml(`Per ${(t.assigned_to || [])[0] || ''}`);
+            return '';
+        };
         const initials = (name) => (name || '?').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-        const counts = { all: tasks.length, open: 0, support: 0, done: 0 };
-        tasks.forEach(t => {
-            if (t.status === 'support') counts.support++;
-            else if (t.status === 'resolved' || t.status === 'failed') counts.done++;
-            else counts.open++;
-        });
-        Object.entries(counts).forEach(([k, v]) => { const el = document.getElementById(`count-${k}`); if (el) el.textContent = v; });
+        tasks.forEach(t => { t.categoria = t.categoria || 'personali'; });
+        window.updateTabCounts(tasks);
 
         const oneWeekAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
 
@@ -214,7 +391,7 @@ document.addEventListener('DOMContentLoaded', () => {
             card.className = `task-card status-${t.status}`;
             card.id = t.id;
             card.dataset.status = t.status;
-            if (target === archiveContainer) archivedCount++;
+            card.dataset.categoria = t.categoria || 'personali';
             
             let historyHtml = t.comments.map(c => {
                 let icon = '<i class="fas fa-comment-dots" style="color:#cbd5e1"></i>';
@@ -231,7 +408,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="task-avatar">${initials(t.created_by_name)}</span>
                         <div><strong>${t.created_by_name || 'Utente'}</strong><small>${t.timestamp || ''}</small></div>
                     </div>
-                    <span class="task-status ${t.status}">${statusLabel[t.status] || t.status}</span>
+                    <span style="display: flex; gap: 6px; align-items: center;">
+                        ${destLabel(t) ? `<span class="task-dest">${destLabel(t)}</span>` : ''}
+                        <span class="task-status ${t.status}">${statusLabel[t.status] || t.status}</span>
+                    </span>
                 </div>
                 <div class="task-body">${window.parseMessage(t.description)}</div>
                 
@@ -268,7 +448,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 50);
         });
 
-        document.getElementById('count-archived').textContent = archivedCount ? `(${archivedCount})` : '';
         window.applyTaskFilter();
 
         // Gestione scorrimento all'ancora dopo il caricamento
@@ -311,13 +490,24 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentFilter = 'all';
     window.applyTaskFilter = () => {
         let visible = 0;
+        const counts = { all: 0, open: 0, support: 0, done: 0 };
         container.querySelectorAll('.task-card').forEach(card => {
             const st = card.dataset.status;
             const group = (st === 'resolved' || st === 'failed') ? 'done' : (st === 'support' ? 'support' : 'open');
-            const show = currentFilter === 'all' || currentFilter === group;
+            const inTab = window.taskInTab(card);
+            if (inTab) { counts.all++; counts[group]++; }
+            const show = inTab && (currentFilter === 'all' || currentFilter === group);
             card.style.display = show ? '' : 'none';
             if (show) visible++;
         });
+        let archived = 0;
+        archiveContainer.querySelectorAll('.task-card').forEach(card => {
+            const inTab = window.taskInTab(card);
+            card.style.display = inTab ? '' : 'none';
+            if (inTab) archived++;
+        });
+        Object.entries(counts).forEach(([k, v]) => { const el = document.getElementById(`count-${k}`); if (el) el.textContent = v; });
+        document.getElementById('count-archived').textContent = archived ? `(${archived})` : '';
         document.getElementById('tasksEmpty').style.display = visible ? 'none' : '';
     };
     document.querySelectorAll('#taskFilters .filter-pill').forEach(pill => {
@@ -360,16 +550,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const txt = input.value.trim();
         if(!txt) return;
 
-        // Recupera le menzioni con regex
-        const mentions = txt.match(/@(\w+)/g) || ["@tutti"];
-        
-        await fetch('/api/tasks', { 
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json'}, 
-            body: JSON.stringify({ description: txt, assigned_to: mentions }) 
+        const dati = window.datiNuovaTask(txt);
+        const errBox = document.getElementById('taskCreateError');
+        errBox.style.display = 'none';
+        const res = await fetch('/api/tasks', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(dati)
         });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            errBox.textContent = err.error || 'Task non salvata.';
+            errBox.style.display = '';
+            return;
+        }
 
         window.toggleCreateArea(); // Chiude e pulisce
+        // La nuova task si vede nella sua scheda
+        window.setTaskTab(dati.tipo === 'gruppo' ? 'gruppo' : 'personali');
         window.loadTasks(); // Ricarica la lista
     };
 
@@ -379,6 +577,9 @@ document.addEventListener('DOMContentLoaded', () => {
             window.saveInlineTask();
         }
     });
+
+    window.currentUserId = {{ session.user_id | tojson }};
+    initTaskTabs();
 
     document.getElementById('taskInput').addEventListener('input', () => window.handleAutocomplete(document.getElementById('taskInput'), document.getElementById('taskMentionSuggestions')));
     window.loadTasks();

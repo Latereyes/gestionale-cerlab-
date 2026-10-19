@@ -8061,6 +8061,78 @@ def api_suggestions_links():
 
     return jsonify(suggestions)
 
+# --- Task: personali e di gruppo ---
+# Una task e' "personale" (per se'), "utente" (per un collega) o "gruppo" (per un ruolo o per tutti).
+# I gruppi si ricavano dai ruoli degli utenti; le task vecchie (tipo vuoto) si classificano dalle menzioni.
+GRUPPI_STORICI = {"tutti": None, "venditori": "venditore", "segreteria": "segreteria", "produzione": "produzione"}
+ETICHETTE_RUOLI = {"venditore": "Venditori", "segreteria": "Segreteria", "amministratore": "Amministratori", "ceo": "CEO", "produzione": "Produzione"}
+
+
+def gruppi_task(utenti):
+    # Inizializza la lista con il gruppo "tutti"
+    gruppi = [{"id": "tutti", "label": "Tutti", "n": len(utenti)}]
+    
+    # Conta gli utenti per ogni ruolo presente
+    conteggi = {}
+    for u in utenti:
+        ruolo = u.get("role") or ""
+        if ruolo:
+            conteggi[ruolo] = conteggi.get(ruolo, 0) + 1
+    
+    # Crea le voci per i ruoli, ordinate per etichetta
+    voci = []
+    for ruolo, n in conteggi.items():
+        label = ETICHETTE_RUOLI.get(ruolo, ruolo.capitalize())
+        voci.append({"id": ruolo, "label": label, "n": n})
+    
+    # Ordina per label e aggiungi alla lista principale
+    voci.sort(key=lambda x: x["label"])
+    gruppi.extend(voci)
+    
+    return gruppi
+
+def categoria_task(t, ruoli):
+    tipo = t.get("tipo") or ""
+    
+    # Gestione esplicita dei tipi moderni
+    if tipo == "gruppo":
+        return "gruppo"
+    if tipo in ("personale", "utente"):
+        return "personali"
+    
+    # Gestione task vecchie (tipo vuoto o assente)
+    assigned = t.get("assigned_to") or []
+    for nome in assigned:
+        # Pulisce il prefisso @ e converte in minuscolo
+        nome_pulito = nome.lstrip("@").lower()
+        
+        # Verifica se è un gruppo storico o un ruolo esistente
+        if nome_pulito in GRUPPI_STORICI or nome_pulito in ruoli:
+            return "gruppo"
+            
+    return "personali"
+
+def utenti_del_gruppo(gruppo, utenti):
+    gruppo = (gruppo or "").strip().lower()
+    # Traduce i nomi storici nel ruolo corrispondente
+    if gruppo in GRUPPI_STORICI:
+        ruolo_corrispondente = GRUPPI_STORICI[gruppo]
+    else:
+        ruolo_corrispondente = gruppo
+        
+    # Caso "tutti" o gruppo storico che vale None
+    if gruppo == "tutti" or ruolo_corrispondente is None:
+        return [u["username"] for u in utenti]
+        
+    # Filtra gli utenti per ruolo specifico
+    return [u["username"] for u in utenti if (u.get("role") or "").lower() == ruolo_corrispondente.lower()]
+
+
+def _e_gruppo(nome, ruoli):
+    nome = (nome or "").lstrip("@").lower()
+    return nome in GRUPPI_STORICI or nome in ruoli
+
+
 def load_tasks():
     """Carica i tasks pubblici dalla tabella SQLite 'tasks'."""
     db = _DBSession()
@@ -8117,26 +8189,55 @@ def tasks_page():
 @login_required
 def api_tasks():
     if request.method == "POST":
-        data = request.json
+        data = request.json or {}
         desc = data.get("description", "").strip()
         if not desc:
             return jsonify({"error": "Descrizione mancante"}), 400
 
-        task_id = str(uuid.uuid4())[:8].upper()
+        me = session["user_id"]
+        mittente = session["user_name"]
+        all_users = load_users()
+        user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+        ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
         mentions = re.findall(r"@(\w+)", desc)
+        tipo = (data.get("tipo") or "").strip()
+        gruppo = ""
 
-        # Salva il nuovo task direttamente nel DB
+        if tipo == "personale":
+            assigned = [f"@{me}"]
+        elif tipo == "utente":
+            destinatario = user_resolver.get(str(data.get("destinatario") or "").strip().lower())
+            if not destinatario:
+                return jsonify({"error": "Scegli il collega a cui assegnare la task."}), 400
+            assigned = [f"@{destinatario}"]
+        elif tipo == "gruppo":
+            gruppo = str(data.get("gruppo") or "").strip().lower()
+            if gruppo != "tutti" and gruppo not in ruoli:
+                return jsonify({"error": "Gruppo non valido."}), 400
+            assigned = [f"@{gruppo}"]
+        else:
+            # Richiesta vecchio stile: si assegna con le menzioni nel testo
+            tipo = ""
+            assigned = [f"@{m}" for m in mentions] if mentions else ["@tutti"]
+        for m in mentions:
+            if f"@{m}" not in assigned:
+                assigned.append(f"@{m}")
+
+        task_id = str(uuid.uuid4())[:8].upper()
         db = _DBSession()
         try:
             db.add(_Task(
                 id=task_id,
-                created_by=session["user_id"],
-                created_by_name=session["user_name"],
+                created_by=me,
+                created_by_name=mittente,
                 description=desc,
-                assigned_to=[f"@{m}" for m in mentions] if mentions else ["@tutti"],
+                assigned_to=assigned,
                 status="open",
                 timestamp=datetime.datetime.now().strftime("%d/%m %H:%M"),
-                comments=[]
+                comments=[],
+                tipo=tipo,
+                gruppo=gruppo,
+                report_id=str(data.get("report_id") or "")[:40]
             ))
             db.commit()
         except Exception as e:
@@ -8147,67 +8248,72 @@ def api_tasks():
             db.close()
 
         # --- GESTIONE NOTIFICHE E TAGBOX ---
-        mittente = session["user_name"]
-         # Logica standard per task pubbliche (Tagbox e notifiche a tutti)
         link_task = f"[VEDI TASK #TASK-{task_id}]"
-        
-        # Carichiamo gli utenti per risolvere i nomi reali (case-sensitive)
-        all_users = load_users()
-        user_resolver = {u['username'].lower(): u['username'] for u in all_users}
-        unique_mentions = set(m.lower() for m in mentions)
+        nomi = {a.lstrip("@").lower() for a in assigned}
+        gruppi = sorted(n for n in nomi if _e_gruppo(n, ruoli))
 
         # 1. Post su Tagbox (per i Gruppi)
-        for m_lower in unique_mentions:
-            if m_lower in ['tutti', 'venditori', 'segreteria', 'produzione']:
-                tagbox = load_tagbox()
-                tagbox.insert(0, {
-                    "id": uuid.uuid4().hex[:6],
-                    "user": f"{mittente} [TASK]",
-                    "user_id": session["user_id"],
-                    "text": f"@{m_lower} Nuova task creata: {link_task}",
-                    "timestamp": datetime.datetime.now().strftime("%H:%M"),
-                    "pinned": False
-                })
-                save_tagbox(tagbox[:50])
-                break
+        if gruppi:
+            tagbox = load_tagbox()
+            tagbox.insert(0, {
+                "id": uuid.uuid4().hex[:6],
+                "user": f"{mittente} [TASK]",
+                "user_id": me,
+                "text": f"@{gruppi[0]} Nuova task creata: {link_task}",
+                "timestamp": datetime.datetime.now().strftime("%H:%M"),
+                "pinned": False
+            })
+            save_tagbox(tagbox[:50])
 
-        # 2. Notifiche Campanella (Per tutti i menzionati)
-        notified_ids = {session["user_id"]} # Non notificare se stessi
-        for m_lower in unique_mentions:
-            # Caso Gruppi
-            if m_lower in ['tutti', 'venditori', 'segreteria', 'produzione']:
-                for u in all_users:
-                    u_real_id = u["username"]
-                    if u_real_id not in notified_ids:
-                        add_notification(u_real_id, f"{mittente} ha creato una task per @{m_lower}", link=f"/tasks#{task_id}")
-                        notified_ids.add(u_real_id)
-            
-            # Caso Utente Singolo (Risoluzione case-insensitive dello username)
-            elif m_lower in user_resolver:
-                u_real_id = user_resolver[m_lower]
+        # 2. Notifiche Campanella: chi fa parte dei gruppi indicati e gli utenti menzionati
+        notified_ids = {me}  # Non notificare se stessi
+        for g in gruppi:
+            for u_real_id in utenti_del_gruppo(g, all_users):
+                if u_real_id not in notified_ids:
+                    add_notification(u_real_id, f"{mittente} ha creato una task per @{g}", link=f"/tasks#{task_id}")
+                    notified_ids.add(u_real_id)
+        for n in nomi:
+            if n in user_resolver and not _e_gruppo(n, ruoli):
+                u_real_id = user_resolver[n]
                 if u_real_id not in notified_ids:
                     add_notification(u_real_id, f"{mittente} ti ha assegnato una nuova task", link=f"/tasks#{task_id}")
                     notified_ids.add(u_real_id)
 
-        return jsonify({"success": True})
-    
+        return jsonify({"success": True, "id": task_id})
+
     # GET: Visualizzazione filtrata con unione file
     standard_tasks = load_tasks()
             
     me = session["user_id"]
     my_role = session["user_role"]
-    
-    # Task standard visibili secondo regole attuali
-    visible_standard = [t for t in standard_tasks if 
-        t.get("created_by") == me or 
-        f"@{me}" in t.get("assigned_to", []) or 
-        "@tutti" in t.get("assigned_to", []) or 
-        f"@{my_role}" in t.get("assigned_to", []) or
-        (my_role in ['amministratore', 'ceo'])
-    ]
-    
-    
+    ruoli = {(u.get("role") or "").lower() for u in load_users() if u.get("role")}
+    # nomi di gruppo con cui posso essere chiamato: tutti, il mio ruolo e il vecchio nome al plurale
+    miei_gruppi = {"@tutti", f"@{my_role}"} | {f"@{k}" for k, v in GRUPPI_STORICI.items() if v and v == my_role}
+
+    def _visibile(t):
+        if t.get("tipo") == "personale":
+            return t.get("created_by") == me  # una task personale la vede solo chi l'ha scritta
+        assegnati = set(t.get("assigned_to") or [])
+        return bool(t.get("created_by") == me or f"@{me}" in assegnati or assegnati & miei_gruppi
+                    or my_role in ['amministratore', 'ceo'])
+
+    visible_standard = [t for t in standard_tasks if _visibile(t)]
+    for t in visible_standard:
+        t["categoria"] = categoria_task(t, ruoli)
+
     return jsonify(visible_standard)
+
+
+@app.route("/api/tasks/destinatari")
+@login_required
+def api_tasks_destinatari():
+    """Colleghi e gruppi (ricavati dai ruoli) a cui si puo' assegnare una task."""
+    utenti = load_users()
+    return jsonify({
+        "utenti": sorted(({"username": u["username"], "full_name": u.get("full_name") or u["username"],
+                           "role": u.get("role") or ""} for u in utenti), key=lambda u: u["full_name"].lower()),
+        "gruppi": gruppi_task(utenti),
+    })
 
 
 @app.route("/api/admin-support", methods=["POST"])
@@ -8289,13 +8395,14 @@ def api_update_task():
                     label = "COMPLETATA" if status_change == 'resolved' else "FALLITA"
                     emoji = "✅" if status_change == 'resolved' else "❌"
                     
+                    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
                     for target in assigned_list:
                         m_lower = target.replace("@", "").lower()
-                        if m_lower in ['tutti', 'venditori', 'segreteria', 'produzione']:
-                            for u in all_users:
-                                if (m_lower == 'tutti' or u['role'] == m_lower) and u['username'] not in notified_assigned:
-                                    add_notification(u['username'], f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}")
-                                    notified_assigned.add(u['username'])
+                        if _e_gruppo(m_lower, ruoli):
+                            for u_real_id in utenti_del_gruppo(m_lower, all_users):
+                                if u_real_id not in notified_assigned:
+                                    add_notification(u_real_id, f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}")
+                                    notified_assigned.add(u_real_id)
                                     notification_sent = True
                         elif m_lower in user_resolver:
                             u_real_id = user_resolver[m_lower]
