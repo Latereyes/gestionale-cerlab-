@@ -83,6 +83,45 @@
     .article-cell-wrapper .edit-icon, .article-cell-wrapper .toggle-calc-grid-btn { margin-left: 0; }
     .calculation-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     .calculation-grid .grid-span-2 { grid-column: 1 / -1; }
+
+    /* --- Nuova task: un'opzione per riga, pallini normali, tendina sotto la sua opzione --- */
+    .task-tipo { flex-direction: column; align-items: stretch; gap: 10px; }
+    .task-tipo input[type="radio"] { width: 18px; height: 18px; padding: 0; margin: 0; flex: none; }
+    .task-tipo label { margin: 0; }
+    .task-tipo label:nth-of-type(1) { order: 1; }
+    .task-tipo label:nth-of-type(2) { order: 2; }
+    #rowDestinatario { order: 3; margin-left: 26px; }
+    .task-tipo label:nth-of-type(3) { order: 4; }
+    #rowGruppo { order: 5; margin-left: 26px; }
+    #rowDestinatario select, #rowGruppo select { width: 100%; }
+
+    /* --- Task e Report: spazio a destra e in fondo perché il pulsante ⋮ non copra i campi --- */
+    .tasks-grid .inline-comment-box, #createTaskArea .inline-comment-box { margin-right: 44px; }
+    .tasks-page, .report-page { padding-bottom: 120px; }
+    /* Task collegate al report: la × accanto alla descrizione, le tendine sotto */
+    .task-riga { margin-right: 44px; }
+    .task-riga .tr-desc { order: 1; flex: 1 1 0; min-width: 0; }
+    .task-riga button[type="button"] { order: 2; width: 32px; flex: none; padding: 0; }
+    .task-riga .tr-tipo, .task-riga .tr-dest, .task-riga .tr-gruppo { order: 3; flex: 1 1 100%; width: 100%; }
+
+    /* --- Magazzino: ogni articolo è una scheda, niente scorrimento di lato --- */
+    #mag-table thead, #mag-table colgroup { display: none; }
+    #mag-table { display: block; width: 100%; min-width: 0; }
+    #mag-table tbody { display: block; }
+    #mag-table tr.main-row {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px;
+        padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 10px;
+    }
+    #mag-table td { display: block; padding: 0; border: none; text-align: left; }
+    #mag-table td[data-label]::before {
+        content: attr(data-label); display: block; margin-bottom: 2px;
+        font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+    }
+    /* Descrizione in alto su tutta la riga, senza etichetta */
+    #mag-table td[data-label="Descrizione"] { grid-column: 1 / -1; order: -1; }
+    #mag-table td[data-label="Descrizione"]::before { display: none; }
+    #mag-table td.row-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 4px; }
+    #mag-table tr.pren-row, #mag-table tr.pren-row td { display: block; }
 }
 </style>
 <script>

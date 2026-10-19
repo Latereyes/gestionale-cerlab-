@@ -77,23 +77,23 @@
                 <tbody>
                     {% for a in articoli %}
                     <tr class="main-row" data-search="{{ (a.descrizione ~ ' ' ~ a.codice) | lower }}">
-                        <td class="nowrap">{{ a.codice or '—' }}</td>
-                        <td>
+                        <td class="nowrap" data-label="Codice">{{ a.codice or '—' }}</td>
+                        <td data-label="Descrizione">
                             <div class="cell-main">{{ a.descrizione }}</div>
                             {% if a.note %}<div class="cell-sub" title="{{ a.note }}"><i class="fas fa-sticky-note"></i>{{ a.note | truncate(60) }}</div>{% endif %}
                         </td>
-                        <td>{{ a.unita }}</td>
-                        <td class="right cell-money">{{ money_ui(a.costo) }}</td>
-                        <td class="right">{{ qt(a.giacenza) }}</td>
-                        <td class="right">
+                        <td data-label="UM">{{ a.unita }}</td>
+                        <td class="right cell-money" data-label="Costo">{{ money_ui(a.costo) }}</td>
+                        <td class="right" data-label="Giacenza">{{ qt(a.giacenza) }}</td>
+                        <td class="right" data-label="Prenotati">
                             {% if a.prenotato %}
                             <button type="button" class="link-btn toggle-pren" title="Mostra i preventivi che lo prenotano">{{ qt(a.prenotato) }} <i class="fas fa-chevron-down"></i></button>
                             {% else %}<span class="muted">0</span>{% endif %}
                         </td>
-                        <td class="right">
+                        <td class="right" data-label="Disponibili">
                             <span class="chip {{ 'danger' if a.disponibile <= 0 else ('warning' if a.prenotato else 'success') }}"><strong>{{ qt(a.disponibile) }}</strong></span>
                         </td>
-                        <td class="right cell-money">{{ money_ui(a.valore) }}</td>
+                        <td class="right cell-money" data-label="Valore">{{ money_ui(a.valore) }}</td>
                         <td class="row-actions">
                             <button type="button" class="btn icon-btn btn-storico" data-id="{{ a.id }}" data-nome="{{ a.descrizione }}" data-unita="{{ a.unita }}" data-giacenza="{{ a.giacenza }}" data-costo="{{ a.costo }}" title="Storico movimenti"><i class="fas fa-history"></i></button>
                             {% if puo_modificare %}

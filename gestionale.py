@@ -1022,7 +1022,7 @@ from models import (
     Preventivo as _Preventivo, Ordine as _Ordine, Bolla as _Bolla,
     Cliente as _Cliente,
     Utente as _Utente,
-    Task as _Task, AdminTask as _AdminTask,
+    Task as _Task, AdminTask as _AdminTask, Report as _Report,
     Message as _Message, TagboxEntry as _TagboxEntry,
     Notification as _Notification, ConfigMargini as _ConfigMargini,
     ArticoloMagazzino as _ArticoloMagazzino, MovimentoMagazzino as _MovimentoMagazzino,
@@ -1030,6 +1030,7 @@ from models import (
     init_db as _init_db
 )
 _init_db()  # Assicura che tutte le tabelle V3 esistano
+import catalogo_auto as _catalogo_auto
 
 # Chiavi che hanno una colonna dedicata (o una tabella collegata): tutto il resto finisce in 'extra'
 _CAMPI_PREVENTIVO = set(_Preventivo.__table__.columns.keys()) | {"ordini_fornitore", "bolle"}
@@ -1305,6 +1306,7 @@ def save_quote(quote_id, data):
         raise
     finally:
         db.close()
+    aggiorna_catalogo_in_background(data)
 
 
 
@@ -4941,10 +4943,11 @@ def immagine_campionario(filename):
 
 
 # === CATALOGO (BOZZA, SOLA CONSULTAZIONE) ===
-# Catalogo interno ricavato dai preventivi passati: articoli con ultimo listino, sconti a cascata,
+# Catalogo interno ricavato dai preventivi: articoli con ultimo listino, sconti a cascata,
 # prezzi di vendita e margini, piu' gli sconti per marca. Il file non fa parte del programma
-# (contiene dati dei preventivi): va copiato a mano in DATA_DIR/catalogo/catalogo.db.
-# La pagina lo apre in sola lettura; per aggiornarlo basta sostituire il file.
+# (contiene dati dei preventivi) e sta in DATA_DIR/catalogo/catalogo.db: la bozza iniziale si copia
+# a mano, poi ogni preventivo standard salvato lo aggiorna da solo (catalogo_auto.py).
+# Se il file non c'e' viene creato vuoto al primo salvataggio. La pagina lo apre in sola lettura.
 
 CATALOGO_DIR = DATA_DIR / "catalogo"
 CATALOGO_DB = CATALOGO_DIR / "catalogo.db"
@@ -4959,6 +4962,27 @@ CATALOGO_CATEGORIE = {
 _CATALOGO_COLONNE = ("id", "nome", "marca", "categoria", "unita", "listino_ultimo", "data_listino_ultimo",
                      "sconti_ultimi", "costo_netto_ultimo", "n_preventivi", "n_vendite", "prezzo_vendita_mediano",
                      "prezzo_vendita_min", "prezzo_vendita_max", "margine_mediano_pct", "stato_bozza", "dubbio")
+
+
+def aggiorna_catalogo_in_background(p):
+    """Porta nel catalogo le righe del preventivo appena salvato, senza rallentare il salvataggio.
+    Un errore qui non deve mai bloccare il preventivo: viene solo scritto nel log."""
+    if not p or (p.get("tipo_preventivo") or "standard") != "standard":
+        return
+    copia = json.loads(json.dumps(p, default=str))
+
+    def _lavora():
+        try:
+            db = _DBSession()
+            try:
+                costi = {a.id: a.costo for a in db.query(_ArticoloMagazzino).all() if a.costo}
+            finally:
+                db.close()
+            _catalogo_auto.aggiorna_da_preventivo(CATALOGO_DB, copia, costi)
+        except Exception as e:
+            print(f"[catalogo] Aggiornamento da '{copia.get('numero')}' non riuscito: {e}")
+
+    threading.Thread(target=_lavora, daemon=True).start()
 
 
 def _catalogo_connessione():
@@ -8037,6 +8061,78 @@ def api_suggestions_links():
 
     return jsonify(suggestions)
 
+# --- Task: personali e di gruppo ---
+# Una task e' "personale" (per se'), "utente" (per un collega) o "gruppo" (per un ruolo o per tutti).
+# I gruppi si ricavano dai ruoli degli utenti; le task vecchie (tipo vuoto) si classificano dalle menzioni.
+GRUPPI_STORICI = {"tutti": None, "venditori": "venditore", "segreteria": "segreteria", "produzione": "produzione"}
+ETICHETTE_RUOLI = {"venditore": "Venditori", "segreteria": "Segreteria", "amministratore": "Amministratori", "ceo": "CEO", "produzione": "Produzione"}
+
+
+def gruppi_task(utenti):
+    # Inizializza la lista con il gruppo "tutti"
+    gruppi = [{"id": "tutti", "label": "Tutti", "n": len(utenti)}]
+    
+    # Conta gli utenti per ogni ruolo presente
+    conteggi = {}
+    for u in utenti:
+        ruolo = u.get("role") or ""
+        if ruolo:
+            conteggi[ruolo] = conteggi.get(ruolo, 0) + 1
+    
+    # Crea le voci per i ruoli, ordinate per etichetta
+    voci = []
+    for ruolo, n in conteggi.items():
+        label = ETICHETTE_RUOLI.get(ruolo, ruolo.capitalize())
+        voci.append({"id": ruolo, "label": label, "n": n})
+    
+    # Ordina per label e aggiungi alla lista principale
+    voci.sort(key=lambda x: x["label"])
+    gruppi.extend(voci)
+    
+    return gruppi
+
+def categoria_task(t, ruoli):
+    tipo = t.get("tipo") or ""
+    
+    # Gestione esplicita dei tipi moderni
+    if tipo == "gruppo":
+        return "gruppo"
+    if tipo in ("personale", "utente"):
+        return "personali"
+    
+    # Gestione task vecchie (tipo vuoto o assente)
+    assigned = t.get("assigned_to") or []
+    for nome in assigned:
+        # Pulisce il prefisso @ e converte in minuscolo
+        nome_pulito = nome.lstrip("@").lower()
+        
+        # Verifica se è un gruppo storico o un ruolo esistente
+        if nome_pulito in GRUPPI_STORICI or nome_pulito in ruoli:
+            return "gruppo"
+            
+    return "personali"
+
+def utenti_del_gruppo(gruppo, utenti):
+    gruppo = (gruppo or "").strip().lower()
+    # Traduce i nomi storici nel ruolo corrispondente
+    if gruppo in GRUPPI_STORICI:
+        ruolo_corrispondente = GRUPPI_STORICI[gruppo]
+    else:
+        ruolo_corrispondente = gruppo
+        
+    # Caso "tutti" o gruppo storico che vale None
+    if gruppo == "tutti" or ruolo_corrispondente is None:
+        return [u["username"] for u in utenti]
+        
+    # Filtra gli utenti per ruolo specifico
+    return [u["username"] for u in utenti if (u.get("role") or "").lower() == ruolo_corrispondente.lower()]
+
+
+def _e_gruppo(nome, ruoli):
+    nome = (nome or "").lstrip("@").lower()
+    return nome in GRUPPI_STORICI or nome in ruoli
+
+
 def load_tasks():
     """Carica i tasks pubblici dalla tabella SQLite 'tasks'."""
     db = _DBSession()
@@ -8086,33 +8182,64 @@ def save_tasks(tasks):
 @app.route("/tasks")
 @login_required
 def tasks_page():
-    return render_template("tasks.html", title="Task & Report Team")
+    return render_template("tasks.html", title="Task & Report Team", etichette_ruoli=ETICHETTE_RUOLI)
 
 
 @app.route("/api/tasks", methods=["GET", "POST"])
 @login_required
 def api_tasks():
     if request.method == "POST":
-        data = request.json
+        data = request.json or {}
         desc = data.get("description", "").strip()
         if not desc:
             return jsonify({"error": "Descrizione mancante"}), 400
 
-        task_id = str(uuid.uuid4())[:8].upper()
+        me = session["user_id"]
+        mittente = session["user_name"]
+        all_users = load_users()
+        user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+        ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
         mentions = re.findall(r"@(\w+)", desc)
+        tipo = (data.get("tipo") or "").strip()
+        gruppo = ""
 
-        # Salva il nuovo task direttamente nel DB
+        if tipo == "personale":
+            assigned = [f"@{me}"]
+        elif tipo == "utente":
+            destinatario = user_resolver.get(str(data.get("destinatario") or "").strip().lower())
+            if not destinatario:
+                return jsonify({"error": "Scegli il collega a cui assegnare la task."}), 400
+            assigned = [f"@{destinatario}"]
+        elif tipo == "gruppo":
+            gruppo = str(data.get("gruppo") or "").strip().lower()
+            if gruppo != "tutti" and gruppo not in ruoli:
+                return jsonify({"error": "Gruppo non valido."}), 400
+            assigned = [f"@{gruppo}"]
+        else:
+            # Richiesta vecchio stile: si assegna con le menzioni nel testo
+            tipo = ""
+            assigned = [f"@{m}" for m in mentions] if mentions else ["@tutti"]
+        # Nelle task personali le @menzioni restano solo testo: nessun assegnatario in piu'
+        if tipo != "personale":
+            for m in mentions:
+                if f"@{m}" not in assigned:
+                    assigned.append(f"@{m}")
+
+        task_id = str(uuid.uuid4())[:8].upper()
         db = _DBSession()
         try:
             db.add(_Task(
                 id=task_id,
-                created_by=session["user_id"],
-                created_by_name=session["user_name"],
+                created_by=me,
+                created_by_name=mittente,
                 description=desc,
-                assigned_to=[f"@{m}" for m in mentions] if mentions else ["@tutti"],
+                assigned_to=assigned,
                 status="open",
                 timestamp=datetime.datetime.now().strftime("%d/%m %H:%M"),
-                comments=[]
+                comments=[],
+                tipo=tipo,
+                gruppo=gruppo,
+                report_id=str(data.get("report_id") or "")[:40]
             ))
             db.commit()
         except Exception as e:
@@ -8123,67 +8250,148 @@ def api_tasks():
             db.close()
 
         # --- GESTIONE NOTIFICHE E TAGBOX ---
-        mittente = session["user_name"]
-         # Logica standard per task pubbliche (Tagbox e notifiche a tutti)
         link_task = f"[VEDI TASK #TASK-{task_id}]"
-        
-        # Carichiamo gli utenti per risolvere i nomi reali (case-sensitive)
-        all_users = load_users()
-        user_resolver = {u['username'].lower(): u['username'] for u in all_users}
-        unique_mentions = set(m.lower() for m in mentions)
+        nomi = {a.lstrip("@").lower() for a in assigned}
+        gruppi = sorted(n for n in nomi if _e_gruppo(n, ruoli))
 
         # 1. Post su Tagbox (per i Gruppi)
-        for m_lower in unique_mentions:
-            if m_lower in ['tutti', 'venditori', 'segreteria', 'produzione']:
-                tagbox = load_tagbox()
-                tagbox.insert(0, {
-                    "id": uuid.uuid4().hex[:6],
-                    "user": f"{mittente} [TASK]",
-                    "user_id": session["user_id"],
-                    "text": f"@{m_lower} Nuova task creata: {link_task}",
-                    "timestamp": datetime.datetime.now().strftime("%H:%M"),
-                    "pinned": False
-                })
-                save_tagbox(tagbox[:50])
-                break
+        if gruppi:
+            tagbox = load_tagbox()
+            tagbox.insert(0, {
+                "id": uuid.uuid4().hex[:6],
+                "user": f"{mittente} [TASK]",
+                "user_id": me,
+                "text": f"@{gruppi[0]} Nuova task creata: {link_task}",
+                "timestamp": datetime.datetime.now().strftime("%H:%M"),
+                "pinned": False
+            })
+            save_tagbox(tagbox[:50])
 
-        # 2. Notifiche Campanella (Per tutti i menzionati)
-        notified_ids = {session["user_id"]} # Non notificare se stessi
-        for m_lower in unique_mentions:
-            # Caso Gruppi
-            if m_lower in ['tutti', 'venditori', 'segreteria', 'produzione']:
-                for u in all_users:
-                    u_real_id = u["username"]
-                    if u_real_id not in notified_ids:
-                        add_notification(u_real_id, f"{mittente} ha creato una task per @{m_lower}", link=f"/tasks#{task_id}")
-                        notified_ids.add(u_real_id)
-            
-            # Caso Utente Singolo (Risoluzione case-insensitive dello username)
-            elif m_lower in user_resolver:
-                u_real_id = user_resolver[m_lower]
+        # 2. Notifiche Campanella: chi fa parte dei gruppi indicati e gli utenti menzionati
+        notified_ids = {me}  # Non notificare se stessi
+        for g in gruppi:
+            for u_real_id in utenti_del_gruppo(g, all_users):
+                if u_real_id not in notified_ids:
+                    add_notification(u_real_id, f"{mittente} ha creato una task per @{g}", link=f"/tasks#{task_id}")
+                    notified_ids.add(u_real_id)
+        for n in nomi:
+            if n in user_resolver and not _e_gruppo(n, ruoli):
+                u_real_id = user_resolver[n]
                 if u_real_id not in notified_ids:
                     add_notification(u_real_id, f"{mittente} ti ha assegnato una nuova task", link=f"/tasks#{task_id}")
                     notified_ids.add(u_real_id)
 
-        return jsonify({"success": True})
-    
+        return jsonify({"success": True, "id": task_id})
+
     # GET: Visualizzazione filtrata con unione file
     standard_tasks = load_tasks()
             
     me = session["user_id"]
     my_role = session["user_role"]
-    
-    # Task standard visibili secondo regole attuali
-    visible_standard = [t for t in standard_tasks if 
-        t.get("created_by") == me or 
-        f"@{me}" in t.get("assigned_to", []) or 
-        "@tutti" in t.get("assigned_to", []) or 
-        f"@{my_role}" in t.get("assigned_to", []) or
-        (my_role in ['amministratore', 'ceo'])
-    ]
-    
-    
+    ruoli = {(u.get("role") or "").lower() for u in load_users() if u.get("role")}
+    # nomi di gruppo con cui posso essere chiamato: tutti, il mio ruolo e il vecchio nome al plurale
+    miei_gruppi = {"@tutti", f"@{my_role}"} | {f"@{k}" for k, v in GRUPPI_STORICI.items() if v and v == my_role}
+
+    def _visibile(t):
+        if t.get("tipo") == "personale":
+            return t.get("created_by") == me  # una task personale la vede solo chi l'ha scritta
+        assegnati = set(t.get("assigned_to") or [])
+        return bool(t.get("created_by") == me or f"@{me}" in assegnati or assegnati & miei_gruppi
+                    or my_role in ['amministratore', 'ceo'])
+
+    visible_standard = [t for t in standard_tasks if _visibile(t)]
+    for t in visible_standard:
+        t["categoria"] = categoria_task(t, ruoli)
+
     return jsonify(visible_standard)
+
+
+@app.route("/api/tasks/destinatari")
+@login_required
+def api_tasks_destinatari():
+    """Colleghi e gruppi (ricavati dai ruoli) a cui si puo' assegnare una task."""
+    utenti = load_users()
+    return jsonify({
+        "utenti": sorted(({"username": u["username"], "full_name": u.get("full_name") or u["username"],
+                           "role": u.get("role") or ""} for u in utenti), key=lambda u: u["full_name"].lower()),
+        "gruppi": gruppi_task(utenti),
+    })
+
+
+# --- Report: ognuno scrive il suo; agli altri si mostra l'ultimo di ciascuno ---
+
+def ultimi_report_per_autore(reports):
+    # Mappa per tenere solo il report più recente per ogni autore
+    migliori = {}
+    for r in reports:
+        aut = r.get("autore")
+        if aut not in migliori or r.get("creato_il", "") > migliori[aut].get("creato_il", ""):
+            migliori[aut] = r
+    # Ordina dal più recente al più vecchio
+    return sorted(migliori.values(), key=lambda x: x.get("creato_il", ""), reverse=True)
+
+
+@app.route("/report")
+@login_required
+def report_page():
+    # Pagina HTML dei report
+    return render_template("report.html", title="Report")
+
+
+@app.route("/api/report", methods=["GET"])
+@login_required
+def api_report_lista():
+    db = _DBSession()
+    try:
+        tutti = db.query(_Report).all()
+        tutti_dicts = [r.to_dict() for r in tutti]
+        # Escludi i report dell'utente collegato dalla lista "ultimi"
+        altri = [r for r in tutti_dicts if r.get("autore") != session["user_id"]]
+        # I tuoi report, ordinati dal più recente, max 20
+        miei = [r for r in tutti_dicts if r.get("autore") == session["user_id"]]
+        miei = sorted(miei, key=lambda x: x.get("creato_il", ""), reverse=True)[:20]
+        return jsonify({"ok": True, "ultimi": ultimi_report_per_autore(altri), "miei": miei})
+    except Exception as e:
+        print(f"[api_report_lista] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel caricamento."}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/report", methods=["POST"])
+@login_required
+def api_report_salva():
+    dati = request.get_json(silent=True) or {}
+    testo = (dati.get("testo") or "").strip()
+    if not testo:
+        return jsonify({"ok": False, "error": "Scrivi il testo del report."}), 400
+    if len(testo) > 10000:
+        return jsonify({"ok": False, "error": "Il report e' troppo lungo."}), 400
+
+    db = _DBSession()
+    try:
+        nuovo_id = "REP-" + uuid.uuid4().hex[:8].upper()
+        adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rep = _Report(
+            id=nuovo_id,
+            autore=session["user_id"],
+            autore_nome=session["user_name"],
+            ruolo=session.get("user_role", ""),
+            testo=testo,
+            creato_il=adesso
+        )
+        db.add(rep)
+        db.commit()
+        salvato = rep.to_dict()
+    except Exception as e:
+        db.rollback()
+        print(f"[api_report_salva] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+
+    # Nessuna notifica: i report si leggono dalla pagina Report
+    return jsonify({"ok": True, "report": salvato})
 
 
 @app.route("/api/admin-support", methods=["POST"])
@@ -8265,13 +8473,14 @@ def api_update_task():
                     label = "COMPLETATA" if status_change == 'resolved' else "FALLITA"
                     emoji = "✅" if status_change == 'resolved' else "❌"
                     
+                    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
                     for target in assigned_list:
                         m_lower = target.replace("@", "").lower()
-                        if m_lower in ['tutti', 'venditori', 'segreteria', 'produzione']:
-                            for u in all_users:
-                                if (m_lower == 'tutti' or u['role'] == m_lower) and u['username'] not in notified_assigned:
-                                    add_notification(u['username'], f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}")
-                                    notified_assigned.add(u['username'])
+                        if _e_gruppo(m_lower, ruoli):
+                            for u_real_id in utenti_del_gruppo(m_lower, all_users):
+                                if u_real_id not in notified_assigned:
+                                    add_notification(u_real_id, f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}")
+                                    notified_assigned.add(u_real_id)
                                     notification_sent = True
                         elif m_lower in user_resolver:
                             u_real_id = user_resolver[m_lower]
@@ -8296,7 +8505,8 @@ def api_update_task():
                     if t.get("created_by") and t["created_by"] not in notified:
                         add_notification(t["created_by"], f"{session['user_name']} ha commentato la task #{task_id}", link=f"/tasks#{task_id}")
                         notified.add(t["created_by"])
-                    c_mentions = re.findall(r"@(\w+)", comment_text)
+                    # in una task personale le menzioni non notificano: il collega non la vedrebbe
+                    c_mentions = re.findall(r"@(\w+)", comment_text) if t.get("tipo") != "personale" else []
                     for cm_lower in set(m.lower() for m in c_mentions):
                         if cm_lower in user_resolver:
                             u_real_id = user_resolver[cm_lower]

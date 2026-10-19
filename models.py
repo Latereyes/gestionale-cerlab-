@@ -300,6 +300,10 @@ class Task(Base):
     is_private_admin = Column(Boolean, default=False)
     timestamp = Column(String)
     comments = Column(JSON, default=list)
+    # personale (per se') | utente (per un collega) | gruppo (per un ruolo o per tutti); vuoto nelle task vecchie
+    tipo = Column(String, default="")
+    gruppo = Column(String, default="")
+    report_id = Column(String, default="")   # report da cui e' nata la task, se c'e'
 
     def __repr__(self):
         return f"<Task(id='{self.id}', status='{self.status}')>"
@@ -314,7 +318,32 @@ class Task(Base):
             "status": self.status,
             "is_private_admin": self.is_private_admin or False,
             "timestamp": self.timestamp,
-            "comments": self.comments or []
+            "comments": self.comments or [],
+            "tipo": self.tipo or "",
+            "gruppo": self.gruppo or "",
+            "report_id": self.report_id or ""
+        }
+
+
+class Report(Base):
+    """Report degli utenti (es. fine giornata). Agli altri si mostra l'ultimo di ciascuno."""
+    __tablename__ = "reports"
+
+    id = Column(String, primary_key=True)
+    autore = Column(String, index=True)       # username
+    autore_nome = Column(String)
+    ruolo = Column(String)
+    testo = Column(Text)
+    creato_il = Column(String)                # "YYYY-MM-DD HH:MM:SS"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "autore": self.autore or "",
+            "autore_nome": self.autore_nome or "",
+            "ruolo": self.ruolo or "",
+            "testo": self.testo or "",
+            "creato_il": self.creato_il or "",
         }
 
 
@@ -616,6 +645,7 @@ def _apply_schema_migrations():
         "ordini":     [("extra", "TEXT DEFAULT '{}'")],
         "bolle":      [("extra", "TEXT DEFAULT '{}'")],
         "magazzino_movimenti": [("costo_unitario", "REAL"), ("costo_precedente", "REAL")],
+        "tasks": [("tipo", "TEXT DEFAULT ''"), ("gruppo", "TEXT DEFAULT ''"), ("report_id", "TEXT DEFAULT ''")],
     }
 
     for table, columns in migrations.items():
