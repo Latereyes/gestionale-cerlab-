@@ -83,6 +83,17 @@
     .article-cell-wrapper .edit-icon, .article-cell-wrapper .toggle-calc-grid-btn { margin-left: 0; }
     .calculation-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     .calculation-grid .grid-span-2 { grid-column: 1 / -1; }
+
+    /* --- Nuova task: un'opzione per riga, pallini normali, tendina sotto la sua opzione --- */
+    .task-tipo { flex-direction: column; align-items: stretch; gap: 10px; }
+    .task-tipo input[type="radio"] { width: 18px; height: 18px; padding: 0; margin: 0; flex: none; }
+    .task-tipo label { margin: 0; }
+    .task-tipo label:nth-of-type(1) { order: 1; }
+    .task-tipo label:nth-of-type(2) { order: 2; }
+    #rowDestinatario { order: 3; margin-left: 26px; }
+    .task-tipo label:nth-of-type(3) { order: 4; }
+    #rowGruppo { order: 5; margin-left: 26px; }
+    #rowDestinatario select, #rowGruppo select { width: 100%; }
 }
 </style>
 <script>
