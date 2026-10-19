@@ -1030,6 +1030,7 @@ from models import (
     init_db as _init_db
 )
 _init_db()  # Assicura che tutte le tabelle V3 esistano
+import catalogo_auto as _catalogo_auto
 
 # Chiavi che hanno una colonna dedicata (o una tabella collegata): tutto il resto finisce in 'extra'
 _CAMPI_PREVENTIVO = set(_Preventivo.__table__.columns.keys()) | {"ordini_fornitore", "bolle"}
@@ -1305,6 +1306,7 @@ def save_quote(quote_id, data):
         raise
     finally:
         db.close()
+    aggiorna_catalogo_in_background(data)
 
 
 
@@ -4941,10 +4943,11 @@ def immagine_campionario(filename):
 
 
 # === CATALOGO (BOZZA, SOLA CONSULTAZIONE) ===
-# Catalogo interno ricavato dai preventivi passati: articoli con ultimo listino, sconti a cascata,
+# Catalogo interno ricavato dai preventivi: articoli con ultimo listino, sconti a cascata,
 # prezzi di vendita e margini, piu' gli sconti per marca. Il file non fa parte del programma
-# (contiene dati dei preventivi): va copiato a mano in DATA_DIR/catalogo/catalogo.db.
-# La pagina lo apre in sola lettura; per aggiornarlo basta sostituire il file.
+# (contiene dati dei preventivi) e sta in DATA_DIR/catalogo/catalogo.db: la bozza iniziale si copia
+# a mano, poi ogni preventivo standard salvato lo aggiorna da solo (catalogo_auto.py).
+# Se il file non c'e' viene creato vuoto al primo salvataggio. La pagina lo apre in sola lettura.
 
 CATALOGO_DIR = DATA_DIR / "catalogo"
 CATALOGO_DB = CATALOGO_DIR / "catalogo.db"
@@ -4959,6 +4962,27 @@ CATALOGO_CATEGORIE = {
 _CATALOGO_COLONNE = ("id", "nome", "marca", "categoria", "unita", "listino_ultimo", "data_listino_ultimo",
                      "sconti_ultimi", "costo_netto_ultimo", "n_preventivi", "n_vendite", "prezzo_vendita_mediano",
                      "prezzo_vendita_min", "prezzo_vendita_max", "margine_mediano_pct", "stato_bozza", "dubbio")
+
+
+def aggiorna_catalogo_in_background(p):
+    """Porta nel catalogo le righe del preventivo appena salvato, senza rallentare il salvataggio.
+    Un errore qui non deve mai bloccare il preventivo: viene solo scritto nel log."""
+    if not p or (p.get("tipo_preventivo") or "standard") != "standard":
+        return
+    copia = json.loads(json.dumps(p, default=str))
+
+    def _lavora():
+        try:
+            db = _DBSession()
+            try:
+                costi = {a.id: a.costo for a in db.query(_ArticoloMagazzino).all() if a.costo}
+            finally:
+                db.close()
+            _catalogo_auto.aggiorna_da_preventivo(CATALOGO_DB, copia, costi)
+        except Exception as e:
+            print(f"[catalogo] Aggiornamento da '{copia.get('numero')}' non riuscito: {e}")
+
+    threading.Thread(target=_lavora, daemon=True).start()
 
 
 def _catalogo_connessione():
