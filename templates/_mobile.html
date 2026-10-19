@@ -94,6 +94,15 @@
     .task-tipo label:nth-of-type(3) { order: 4; }
     #rowGruppo { order: 5; margin-left: 26px; }
     #rowDestinatario select, #rowGruppo select { width: 100%; }
+
+    /* --- Task e Report: spazio a destra e in fondo perché il pulsante ⋮ non copra i campi --- */
+    .tasks-grid .inline-comment-box, #createTaskArea .inline-comment-box { margin-right: 44px; }
+    .tasks-page, .report-page { padding-bottom: 120px; }
+    /* Task collegate al report: la × accanto alla descrizione, le tendine sotto */
+    .task-riga { margin-right: 44px; }
+    .task-riga .tr-desc { order: 1; flex: 1 1 0; min-width: 0; }
+    .task-riga button[type="button"] { order: 2; width: 32px; flex: none; padding: 0; }
+    .task-riga .tr-tipo, .task-riga .tr-dest, .task-riga .tr-gruppo { order: 3; flex: 1 1 100%; width: 100%; }
 }
 </style>
 <script>
