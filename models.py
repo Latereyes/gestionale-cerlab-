@@ -325,6 +325,28 @@ class Task(Base):
         }
 
 
+class Report(Base):
+    """Report degli utenti (es. fine giornata). Agli altri si mostra l'ultimo di ciascuno."""
+    __tablename__ = "reports"
+
+    id = Column(String, primary_key=True)
+    autore = Column(String, index=True)       # username
+    autore_nome = Column(String)
+    ruolo = Column(String)
+    testo = Column(Text)
+    creato_il = Column(String)                # "YYYY-MM-DD HH:MM:SS"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "autore": self.autore or "",
+            "autore_nome": self.autore_nome or "",
+            "ruolo": self.ruolo or "",
+            "testo": self.testo or "",
+            "creato_il": self.creato_il or "",
+        }
+
+
 class AdminTask(Base):
     """Sostituisce data/admin_tasks.json"""
     __tablename__ = "admin_tasks"

@@ -12,6 +12,7 @@
                 <h2>Task del team</h2>
                 <p>Segnalazioni e attività. Usa @ per menzionare un collega e # per richiamare un preventivo.</p>
             </div>
+            <a href="{{ url_for('report_page') }}" class="btn btn-outline" style="margin-left: auto;"><i class="fas fa-clipboard-list"></i> Report</a>
             <button id="toggleCreateBtn" class="btn primary new-task-btn" onclick="window.toggleCreateArea()" title="Nuovo Task">
                 <i class="fas fa-plus" id="plusIcon"></i> <span>Nuovo task</span>
             </button>
@@ -368,9 +369,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusLabel = { open: 'Aperto', support: 'Serve supporto', resolved: 'Risolto', failed: 'Non risolto' };
         // A chi e' rivolta la task (testo semplice, senza HTML)
         const escapeHtml = (v) => String(v || '').replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+        const etichetteRuoli = {{ etichette_ruoli | tojson }};
         const destLabel = (t) => {
             if (t.tipo === 'personale') return 'Per me';
-            if (t.tipo === 'gruppo') return escapeHtml(t.gruppo === 'tutti' ? 'Per tutti' : `Gruppo ${t.gruppo}`);
+            if (t.tipo === 'gruppo') return escapeHtml(t.gruppo === 'tutti' ? 'Per tutti' : (etichetteRuoli[t.gruppo] || `Gruppo ${t.gruppo}`));
             if (t.tipo === 'utente') return escapeHtml(`Per ${(t.assigned_to || [])[0] || ''}`);
             return '';
         };
@@ -409,6 +411,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div><strong>${t.created_by_name || 'Utente'}</strong><small>${t.timestamp || ''}</small></div>
                     </div>
                     <span style="display: flex; gap: 6px; align-items: center;">
+                        ${t.report_id ? `<a class="task-dest" href="/report" title="Nata da un report"><i class="fas fa-clipboard-list"></i> Report</a>` : ''}
                         ${destLabel(t) ? `<span class="task-dest">${destLabel(t)}</span>` : ''}
                         <span class="task-status ${t.status}">${statusLabel[t.status] || t.status}</span>
                     </span>

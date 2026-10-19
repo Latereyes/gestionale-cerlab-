@@ -1022,7 +1022,7 @@ from models import (
     Preventivo as _Preventivo, Ordine as _Ordine, Bolla as _Bolla,
     Cliente as _Cliente,
     Utente as _Utente,
-    Task as _Task, AdminTask as _AdminTask,
+    Task as _Task, AdminTask as _AdminTask, Report as _Report,
     Message as _Message, TagboxEntry as _TagboxEntry,
     Notification as _Notification, ConfigMargini as _ConfigMargini,
     ArticoloMagazzino as _ArticoloMagazzino, MovimentoMagazzino as _MovimentoMagazzino,
@@ -8182,7 +8182,7 @@ def save_tasks(tasks):
 @app.route("/tasks")
 @login_required
 def tasks_page():
-    return render_template("tasks.html", title="Task & Report Team")
+    return render_template("tasks.html", title="Task & Report Team", etichette_ruoli=ETICHETTE_RUOLI)
 
 
 @app.route("/api/tasks", methods=["GET", "POST"])
@@ -8314,6 +8314,85 @@ def api_tasks_destinatari():
                            "role": u.get("role") or ""} for u in utenti), key=lambda u: u["full_name"].lower()),
         "gruppi": gruppi_task(utenti),
     })
+
+
+# --- Report: ognuno scrive il suo; agli altri si mostra l'ultimo di ciascuno ---
+
+def ultimi_report_per_autore(reports):
+    # Mappa per tenere solo il report più recente per ogni autore
+    migliori = {}
+    for r in reports:
+        aut = r.get("autore")
+        if aut not in migliori or r.get("creato_il", "") > migliori[aut].get("creato_il", ""):
+            migliori[aut] = r
+    # Ordina dal più recente al più vecchio
+    return sorted(migliori.values(), key=lambda x: x.get("creato_il", ""), reverse=True)
+
+
+@app.route("/report")
+@login_required
+def report_page():
+    # Pagina HTML dei report
+    return render_template("report.html", title="Report")
+
+
+@app.route("/api/report", methods=["GET"])
+@login_required
+def api_report_lista():
+    db = _DBSession()
+    try:
+        tutti = db.query(_Report).all()
+        tutti_dicts = [r.to_dict() for r in tutti]
+        # Escludi i report dell'utente collegato dalla lista "ultimi"
+        altri = [r for r in tutti_dicts if r.get("autore") != session["user_id"]]
+        # I tuoi report, ordinati dal più recente, max 20
+        miei = [r for r in tutti_dicts if r.get("autore") == session["user_id"]]
+        miei = sorted(miei, key=lambda x: x.get("creato_il", ""), reverse=True)[:20]
+        return jsonify({"ok": True, "ultimi": ultimi_report_per_autore(altri), "miei": miei})
+    except Exception as e:
+        print(f"[api_report_lista] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel caricamento."}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/report", methods=["POST"])
+@login_required
+def api_report_salva():
+    dati = request.get_json(silent=True) or {}
+    testo = (dati.get("testo") or "").strip()
+    if not testo:
+        return jsonify({"ok": False, "error": "Scrivi il testo del report."}), 400
+    if len(testo) > 10000:
+        return jsonify({"ok": False, "error": "Il report e' troppo lungo."}), 400
+
+    db = _DBSession()
+    try:
+        nuovo_id = "REP-" + uuid.uuid4().hex[:8].upper()
+        adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rep = _Report(
+            id=nuovo_id,
+            autore=session["user_id"],
+            autore_nome=session["user_name"],
+            ruolo=session.get("user_role", ""),
+            testo=testo,
+            creato_il=adesso
+        )
+        db.add(rep)
+        db.commit()
+        salvato = rep.to_dict()
+    except Exception as e:
+        db.rollback()
+        print(f"[api_report_salva] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+
+    # Avvisa tutti gli altri utenti
+    for u in load_users():
+        if u["username"] != session["user_id"]:
+            add_notification(u["username"], f"{session['user_name']} ha scritto un nuovo report", link="/report")
+    return jsonify({"ok": True, "report": salvato})
 
 
 @app.route("/api/admin-support", methods=["POST"])
