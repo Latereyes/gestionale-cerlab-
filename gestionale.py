@@ -8219,9 +8219,11 @@ def api_tasks():
             # Richiesta vecchio stile: si assegna con le menzioni nel testo
             tipo = ""
             assigned = [f"@{m}" for m in mentions] if mentions else ["@tutti"]
-        for m in mentions:
-            if f"@{m}" not in assigned:
-                assigned.append(f"@{m}")
+        # Nelle task personali le @menzioni restano solo testo: nessun assegnatario in piu'
+        if tipo != "personale":
+            for m in mentions:
+                if f"@{m}" not in assigned:
+                    assigned.append(f"@{m}")
 
         task_id = str(uuid.uuid4())[:8].upper()
         db = _DBSession()
@@ -8506,7 +8508,8 @@ def api_update_task():
                     if t.get("created_by") and t["created_by"] not in notified:
                         add_notification(t["created_by"], f"{session['user_name']} ha commentato la task #{task_id}", link=f"/tasks#{task_id}")
                         notified.add(t["created_by"])
-                    c_mentions = re.findall(r"@(\w+)", comment_text)
+                    # in una task personale le menzioni non notificano: il collega non la vedrebbe
+                    c_mentions = re.findall(r"@(\w+)", comment_text) if t.get("tipo") != "personale" else []
                     for cm_lower in set(m.lower() for m in c_mentions):
                         if cm_lower in user_resolver:
                             u_real_id = user_resolver[cm_lower]
