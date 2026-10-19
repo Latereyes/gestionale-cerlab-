@@ -8390,10 +8390,7 @@ def api_report_salva():
     finally:
         db.close()
 
-    # Avvisa tutti gli altri utenti
-    for u in load_users():
-        if u["username"] != session["user_id"]:
-            add_notification(u["username"], f"{session['user_name']} ha scritto un nuovo report", link="/report")
+    # Nessuna notifica: i report si leggono dalla pagina Report
     return jsonify({"ok": True, "report": salvato})
 
 
