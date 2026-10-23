@@ -2508,7 +2508,8 @@ def allert_page():
         d = leggi_data_etc(t.get("etc"))
         if not d or d >= today or t.get("status") not in ("open", "support"):
             continue
-        if not (task_visibile(t, me, my_role) and task_mi_riguarda(t, me, my_role)):
+        # admin e CEO vedono tutte le scadute del team; gli altri solo quelle che li riguardano
+        if not (task_visibile(t, me, my_role) and (task_mi_riguarda(t, me, my_role) or my_role in ('amministratore', 'ceo'))):
             continue
         desc = re.sub(r"\s+", " ", t.get("description") or "").strip()
         alerts.append({
@@ -8348,10 +8349,13 @@ def controlla_task_scadute(forza=False):
             if not da_avvisare:
                 return
             all_users = load_users()
+            capi = {u["username"] for u in all_users if u.get("role") in ("amministratore", "ceo")}
             for t in da_avvisare:
                 td = t.to_dict()
                 data_it = datetime.datetime.strptime(t.etc, "%Y-%m-%d").strftime("%d/%m/%Y")
-                for u in destinatari_task(td, all_users):
+                # admin e CEO sono avvisati di tutte le task del team (non delle personali altrui)
+                avvisati = destinatari_task(td, all_users) | (capi if td.get("tipo") != "personale" else set())
+                for u in avvisati:
                     add_notification(u, f"⏰ Task #{t.id} oltre la data prevista ({data_it})",
                                      link=f"/tasks#{t.id}", tipo="scadenza")
                 t.etc_avvisata = t.etc
