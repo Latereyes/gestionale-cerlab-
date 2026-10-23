@@ -91,6 +91,15 @@
     .task-fab {
     background: #6366f1; /* Colore Indigo delle Task */
 }
+/* Campi con badge (@ collega, # preventivo/cliente) */
+.cb-editor { outline: none; overflow-y: auto; cursor: text; word-break: break-word; display: block; }
+.cb-editor.cb-multi { white-space: pre-wrap; }
+.cb-editor.cb-riga { white-space: nowrap; overflow-x: auto; overflow-y: hidden; display: flex; align-items: center; }
+.cb-editor:empty::before { content: attr(data-placeholder); color: var(--text-subtle); pointer-events: none; }
+.chat-input.cb-editor { max-height: 120px; }
+.cb-badge { white-space: nowrap; cursor: default; user-select: all; }
+.cb-badge.shout-link { text-decoration: none; background: var(--accent-light); border-radius: 4px; padding: 0 4px; }
+
 /* Centro notifiche */
 .notify-panel { width: 380px; height: 520px; max-height: calc(100vh - 110px); }
 .nt-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 14px 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
@@ -942,7 +951,7 @@
         <p class="muted" style="font-size: 12px; margin-bottom: 10px;">Stai creando una nota collegata a questo preventivo.</p>
         <div style="position: relative;">
             <div id="quickTaskMentions" class="mention-list" style="bottom: 100%; top: auto;"></div>
-            <textarea id="quickTaskInput" placeholder="Cosa c'è da fare? Usa @ per assegnare..." 
+            <textarea id="quickTaskInput" class="con-badge" placeholder="Cosa c'è da fare? Usa @ per assegnare..." 
                       style="min-height: 100px; padding: 12px;"></textarea>
         </div>
         <label style="display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13.5px; font-weight: 600;">
@@ -1120,8 +1129,8 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
         // Formato Cliente: basta il Nome (es. #CLT-XYZ[Mario Rossi] -> Mario Rossi)
         tagValue = `#${cleanId}[${subjectName}]`;
     } else {
-        // Formato Preventivo: ID (Nome) (es. #ID[#ID (Mario Rossi)] -> #ID (Mario Rossi))
-        tagValue = `[#${cleanId} (${subjectName})]`;
+        // Formato Preventivo: #ID[Nome] (nel messaggio diventa il link al preventivo col nome del cliente)
+        tagValue = `#${cleanId}[${subjectName}]`;
     }
     
     // Inseriamo il tag nel campo di testo
@@ -1612,7 +1621,7 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
         <input type="file" id="chatFileInput" style="display:none;">
         <div class="chat-compose">
             <button type="button" class="chat-attach-btn" onclick="document.getElementById('chatFileInput').click()" title="Allega file o foto"><i class="fas fa-paperclip"></i></button>
-            <textarea class="chat-input" id="chatInput" rows="1" placeholder="Scrivi un messaggio..."></textarea>
+            <textarea class="chat-input con-badge" id="chatInput" rows="1" placeholder="Scrivi un messaggio..."></textarea>
             <button type="button" class="btn primary chat-send-btn" id="sendMsgBtn" title="Invia (Invio)" disabled><i class="fas fa-paper-plane"></i></button>
         </div>
         <div class="chat-hint">Invio invia · Maiusc+Invio va a capo · @ collega · # preventivo</div>
@@ -1824,6 +1833,12 @@ window.parseMessage = function(text) {
             const val = inputEl.value;
             // Puliamo la label e creiamo il tag nel formato #ID[Nome]
             const tagToInsert = code.startsWith('#') ? `${code}[${cleanLabel}]` : code;
+            if (inputEl._badgeEditor) {
+                // campo con badge: al posto del codice compare subito il badge
+                inputEl._badgeEditor._inserisciTag(tagToInsert);
+                listEl.style.display = 'none';
+                return;
+            }
             
             const newVal = val.substring(0, triggerIdx) + tagToInsert + ' ' + val.substring(inputEl.selectionStart);
             inputEl.value = newVal;
@@ -1837,9 +1852,9 @@ window.parseMessage = function(text) {
     }
 
     window.handleAutocomplete = async function(inputEl, listEl) {
-        const val = inputEl.value;
-        const cursorIdx = inputEl.selectionStart;
-        const textBeforeCursor = val.substring(0, cursorIdx);
+        // nei campi con badge conta solo il testo scritto prima del cursore (i badge non sono testo)
+        const textBeforeCursor = inputEl._badgeEditor ? inputEl._badgeEditor._testoPrimaDelCursore()
+                                                      : inputEl.value.substring(0, inputEl.selectionStart);
         const lastAt = textBeforeCursor.lastIndexOf('@');
         const lastHash = textBeforeCursor.lastIndexOf('#');
         const lastTriggerIdx = Math.max(lastAt, lastHash);
@@ -1922,6 +1937,165 @@ window.parseMessage = function(text) {
         listEl.style.display = hasResults ? 'block' : 'none';
     };
 
+
+    // --- 3. CAMPI CON BADGE ---
+    // Nei campi dove si usano @ e # il testo resta lo stesso (es. "#CLT-XYZ[Mario Rossi]", "@mario"),
+    // ma mentre si scrive si vede gia' il badge come nel messaggio finito. Il campo originale resta
+    // nascosto e .value restituisce sempre il testo con i codici, quindi il resto del codice non cambia.
+    const RE_TAG = /#([A-Z0-9-]+)(?:\s*\[([^\]]+)\])?|@(\w+)/g;
+
+    function nodoBadge(raw) {
+        const b = document.createElement('span');
+        b.contentEditable = 'false';
+        b.dataset.raw = raw;
+        const m = raw.match(/^#([A-Z0-9-]+)(?:\s*\[([^\]]+)\])?$/);
+        b.className = 'cb-badge ' + (m ? 'shout-link' : 'shout-mention');
+        b.textContent = m ? (m[2] || '#' + m[1]) : raw;
+        b.title = raw;
+        return b;
+    }
+
+    function serializzaBadge(nodo) {
+        let out = '';
+        nodo.childNodes.forEach((n, i) => {
+            if (n.nodeType === 3) out += n.nodeValue;
+            else if (n.dataset && n.dataset.raw !== undefined) out += n.dataset.raw;
+            else if (n.nodeName === 'BR') { if (i < nodo.childNodes.length - 1) out += '\n'; }
+            else {
+                const dentro = serializzaBadge(n);
+                if ((n.nodeName === 'DIV' || n.nodeName === 'P') && out && !out.endsWith('\n')) out += '\n';
+                out += dentro;
+            }
+        });
+        return out.replace(/\u00a0/g, ' ');
+    }
+
+    function disegnaBadge(ed, testo) {
+        ed.innerHTML = '';
+        let ultimo = 0;
+        const aggiungiTesto = (t) => {
+            t.split('\n').forEach((pezzo, i) => {
+                if (i) ed.appendChild(document.createElement('br'));
+                if (pezzo) ed.appendChild(document.createTextNode(pezzo));
+            });
+        };
+        testo.replace(RE_TAG, (tag, id, label, nome, pos) => {
+            // come nel messaggio finito: il # vale solo a inizio testo o dopo uno spazio
+            if (id && pos > 0 && !/\s/.test(testo[pos - 1])) return tag;
+            aggiungiTesto(testo.slice(ultimo, pos));
+            ed.appendChild(nodoBadge(tag));
+            ultimo = pos + tag.length;
+            return tag;
+        });
+        aggiungiTesto(testo.slice(ultimo));
+        if (testo.endsWith('\n')) ed.appendChild(document.createElement('br'));
+    }
+
+    function cursoreAllaFine(ed) {
+        const r = document.createRange();
+        r.selectNodeContents(ed);
+        r.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+    }
+
+    window.attivaBadge = function (el) {
+        if (!el || el._badgeEditor || !el.isConnected) return;
+        const multiriga = el.tagName === 'TEXTAREA';
+        const cs = getComputedStyle(el);
+        const ed = document.createElement('div');
+        ed.contentEditable = 'true';
+        ed.className = (el.className ? el.className + ' ' : '') + 'cb-editor' + (multiriga ? ' cb-multi' : ' cb-riga');
+        ed.dataset.placeholder = el.placeholder || '';
+        ed.setAttribute('role', 'textbox');
+        if (multiriga) ed.setAttribute('aria-multiline', 'true');
+        if (el.getAttribute('aria-label')) ed.setAttribute('aria-label', el.getAttribute('aria-label'));
+        ['fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'color', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+         'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderStyle', 'borderColor', 'borderRadius',
+         'backgroundColor', 'boxSizing', 'maxHeight', 'flexGrow', 'flexShrink', 'flexBasis'].forEach(k => { ed.style[k] = cs[k]; });
+        if (!el.style.width && cs.display !== 'none') ed.style.width = '100%';
+        const minH = parseFloat(cs.minHeight) || 0;
+        ed.style.minHeight = (multiriga ? Math.max(minH, parseFloat(cs.lineHeight) || 20) : Math.max(minH, parseFloat(cs.height) || 0)) + 'px';
+        el.style.display = 'none';
+        el.insertAdjacentElement('afterend', ed);
+        el._badgeEditor = ed;
+
+        const iniziale = el.value;
+        Object.defineProperty(el, 'value', {
+            configurable: true,
+            get() { return ed.textContent === '' && !ed.querySelector('.cb-badge') ? '' : serializzaBadge(ed); },
+            set(v) { disegnaBadge(ed, String(v ?? '')); }
+        });
+        Object.defineProperty(el, 'selectionStart', { configurable: true, get() { return el.value.length; } });
+        el.focus = () => { ed.focus(); cursoreAllaFine(ed); };
+        el.setSelectionRange = () => cursoreAllaFine(ed);
+        el.value = iniziale;
+
+        ed._testoPrimaDelCursore = () => {
+            const sel = window.getSelection();
+            if (!sel.rangeCount || !ed.contains(sel.anchorNode) || sel.anchorNode.nodeType !== 3) { ed._trigger = null; return ''; }
+            ed._trigger = { nodo: sel.anchorNode, fine: sel.anchorOffset };
+            return sel.anchorNode.nodeValue.slice(0, sel.anchorOffset);
+        };
+        ed._inserisciTag = (tag) => {
+            const t = ed._trigger;
+            if (!t || !t.nodo.isConnected) { el.value = el.value.replace(/[#@][^\s#@]*$/, '') + tag + ' '; el.focus(); }
+            else {
+                const testo = t.nodo.nodeValue;
+                const inizio = Math.max(testo.lastIndexOf('@', t.fine - 1), testo.lastIndexOf('#', t.fine - 1));
+                const dopo = document.createTextNode('\u00a0' + testo.slice(t.fine));
+                t.nodo.nodeValue = testo.slice(0, inizio);
+                const badge = nodoBadge(tag);
+                t.nodo.after(badge, dopo);
+                ed.focus();
+                const r = document.createRange();
+                r.setStart(dopo, 1); r.collapse(true);
+                const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+            }
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+
+        ed.addEventListener('input', () => {
+            if (ed.textContent === '' && !ed.querySelector('.cb-badge')) ed.innerHTML = '';
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        ed.addEventListener('blur', () => el.dispatchEvent(new Event('change', { bubbles: true })));
+        ed.addEventListener('keydown', (e) => {
+            // i tasti arrivano anche al campo originale, dove sono collegati Invio, Esc, ecc.
+            const opz = { key: e.key, code: e.code, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, bubbles: false, cancelable: true };
+            const kd = new KeyboardEvent('keydown', opz);
+            el.dispatchEvent(kd);
+            let fermato = kd.defaultPrevented;
+            if (!fermato && e.key === 'Enter') {
+                const kp = new KeyboardEvent('keypress', opz);
+                el.dispatchEvent(kp);
+                fermato = kp.defaultPrevented;
+            }
+            if (fermato) { e.preventDefault(); return; }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (multiriga) { document.execCommand('insertLineBreak'); }
+            }
+        });
+        ed.addEventListener('paste', (e) => {
+            e.preventDefault();
+            const testo = (e.clipboardData || window.clipboardData).getData('text/plain') || '';
+            document.execCommand('insertText', false, multiriga ? testo : testo.replace(/\s*\n\s*/g, ' '));
+            if (/[#@]/.test(testo)) { el.value = el.value; cursoreAllaFine(ed); }
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    };
+
+    const SEL_BADGE = 'textarea.con-badge, input.con-badge, textarea[oninput*="handleAutocomplete"], input[oninput*="handleAutocomplete"]';
+    const cercaCampiBadge = (radice) => {
+        if (radice.matches && radice.matches(SEL_BADGE)) window.attivaBadge(radice);
+        if (radice.querySelectorAll) radice.querySelectorAll(SEL_BADGE).forEach(window.attivaBadge);
+    };
+    cercaCampiBadge(document);
+    new MutationObserver(lista => lista.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) cercaCampiBadge(n); })))
+        .observe(document.body, { childList: true, subtree: true });
 
     // ---------- Chat: utilità ----------
     const ME = "{{ session.user_id }}";

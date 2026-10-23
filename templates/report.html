@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 
 {% block page_title %}
-<h1><i class="fas fa-clipboard-list"></i> Report</h1>
+<h1><i class="fas fa-clipboard-list"></i> Task &amp; Report</h1>
 {% endblock %}
 
 {% block body %}
 <main class="report-page">
+    {% set scheda_tr = 'report' %}{% include '_task_report_schede.html' %}
     <section class="rp-composer" id="rpComposer">
         <div class="rp-composer-head">
             <div>
@@ -14,7 +15,6 @@
             </div>
             <div class="rp-head-side">
                 <span id="rpStato" class="rp-stato" style="display: none;"></span>
-                <a href="{{ url_for('tasks_page') }}" class="btn btn-outline"><i class="fas fa-tasks"></i> Task</a>
             </div>
         </div>
 
@@ -246,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
     riga.innerHTML = `
       <button type="button" class="rp-check"></button>
       <div class="rp-campo">
-        <textarea rows="1" placeholder="Scrivi una voce… (@ collega o gruppo, # preventivo o cliente)"></textarea>
+        <textarea class="con-badge" rows="1" placeholder="Scrivi una voce… (@ collega o gruppo, # preventivo o cliente)"></textarea>
         <div class="mention-list"></div>
       </div>
       <button type="button" class="rp-togli" title="Togli voce"><i class="fas fa-times"></i></button>
@@ -283,6 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     if (dopo && dopo.nextSibling) voci.insertBefore(riga, dopo.nextSibling);
     else voci.appendChild(riga);
+    if (window.attivaBadge) window.attivaBadge(ta); // subito, cosi' il focus va gia' sul campo con i badge
     aggiornaVoce(riga);
     requestAnimationFrame(() => autoGrow(ta));
     return riga;

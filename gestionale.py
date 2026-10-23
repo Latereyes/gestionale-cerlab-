@@ -2386,8 +2386,8 @@ def allert_page():
     alerts = []
     today = datetime.date.today()
     today_str = today.strftime('%Y-%m-%d')
-    # I documenti del cliente servono solo quando il preventivo e' stato inviato (non per le bozze)
-    active_statuses = ["Inviato", "Confermato", "In Lavorazione"]
+    # I documenti del cliente servono solo quando il preventivo e' confermato (non per bozze e inviati)
+    active_statuses = ["Confermato", "In Lavorazione"]
     active_client_ids = set()
 
     # 1. Query bulk su DB: carica tutti i preventivi non chiusi/annullati
@@ -8418,7 +8418,7 @@ def save_tasks(tasks):
 @app.route("/tasks")
 @login_required
 def tasks_page():
-    return render_template("tasks.html", title="Task & Report Team", etichette_ruoli=ETICHETTE_RUOLI)
+    return render_template("tasks.html", title="Task & Report", etichette_ruoli=ETICHETTE_RUOLI)
 
 
 @app.route("/api/tasks", methods=["GET", "POST"])
@@ -8591,7 +8591,7 @@ def _testo_da_voci(voci):
 @login_required
 def report_page():
     # Pagina HTML dei report
-    return render_template("report.html", title="Report")
+    return render_template("report.html", title="Task & Report")
 
 
 @app.route("/api/report", methods=["GET"])

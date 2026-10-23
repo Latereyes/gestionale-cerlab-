@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 
 {% block page_title %}
-<h1><i class="fas fa-tasks"></i> Task & Report Team</h1>
+<h1><i class="fas fa-tasks"></i> Task &amp; Report</h1>
 {% endblock %}
 
 {% block body %}
 <main class="tasks-page">
+    {% set scheda_tr = 'task' %}{% include '_task_report_schede.html' %}
     <section class="tasks-head">
         <div class="tasks-head-top">
             <div>
@@ -13,7 +14,6 @@
                 <p>Le attività del team e le tue personali. Usa @ per un collega e # per un preventivo o un cliente.</p>
             </div>
             <div class="tasks-head-azioni">
-                <a href="{{ url_for('report_page') }}" class="btn btn-outline"><i class="fas fa-clipboard-list"></i> Report</a>
                 <button id="toggleCreateBtn" class="btn primary new-task-btn" onclick="window.toggleCreateArea()" title="Nuova task">
                     <i class="fas fa-plus" id="plusIcon"></i> <span>Nuova task</span>
                 </button>
