@@ -6,34 +6,31 @@
 
 {% block body %}
 <main class="report-page">
-    <section class="report-head-box">
-        <div class="report-head-top">
+    <section class="rp-composer" id="rpComposer">
+        <div class="rp-composer-head">
             <div>
-                <h2>Report del team</h2>
-                <p>Scrivi il tuo report (per esempio a fine giornata). Gli altri vedono il tuo ultimo report finché non ne scrivi uno nuovo.</p>
+                <h2 id="rpTitolo">Il tuo report</h2>
+                <p id="rpSottotitolo">Una voce per riga. Spunta <i class="far fa-square"></i> per trasformarla in una task; se tagghi un <strong>@collega</strong> o un <strong>@gruppo</strong> diventa una task da sola.</p>
             </div>
-            <a href="{{ url_for('tasks_page') }}" class="btn btn-outline"><i class="fas fa-tasks"></i> Task</a>
+            <div class="rp-head-side">
+                <span id="rpStato" class="rp-stato" style="display: none;"></span>
+                <a href="{{ url_for('tasks_page') }}" class="btn btn-outline"><i class="fas fa-tasks"></i> Task</a>
+            </div>
         </div>
-        <div class="campo-menzioni">
-            <textarea id="reportTesto" placeholder="Cosa hai fatto oggi, cosa resta aperto, cosa serve dagli altri... Usa @ per un collega e # per un preventivo o un cliente"
-                      oninput="window.handleAutocomplete(this, document.getElementById('reportMenzioni'))"></textarea>
-            <div id="reportMenzioni" class="mention-list"></div>
-        </div>
-        <div id="reportErrore" class="report-errore" style="display: none;"></div>
-        <div class="report-azioni">
-            <button id="reportSalva" class="btn primary"><i class="fas fa-save"></i> Salva report</button>
-        </div>
-    </section>
 
-    <section id="taskCollegate" class="report-head-box task-collegate" style="display: none;">
-        <h3><i class="fas fa-link"></i> Task collegate al report</h3>
-        <div id="taskRighe"></div>
-        <div class="report-azioni">
-            <button id="taskAggiungi" type="button" class="btn btn-outline"><i class="fas fa-plus"></i> Altra task</button>
-            <button id="taskAnnulla" type="button" class="btn">Chiudi</button>
-            <button id="taskCrea" type="button" class="btn primary">Crea task</button>
+        <div id="rpVoci" class="rp-voci"></div>
+        <button type="button" id="rpAggiungi" class="rp-aggiungi"><i class="fas fa-plus"></i> Aggiungi voce <span class="rp-tasto">Invio</span></button>
+
+        <div id="rpErrore" class="rp-errore" style="display: none;"></div>
+        <div id="rpAvviso" class="rp-avviso" style="display: none;"></div>
+
+        <div class="rp-azioni">
+            <button type="button" id="rpScarta" class="btn rp-link-danger" style="display: none;"><i class="fas fa-trash-alt"></i> Scarta bozza</button>
+            <span class="rp-spazio"></span>
+            <button type="button" id="rpAnnulla" class="btn" style="display: none;">Annulla</button>
+            <button type="button" id="rpBozza" class="btn btn-outline"><i class="far fa-save"></i> Salva bozza</button>
+            <button type="button" id="rpInvia" class="btn primary"><i class="fas fa-paper-plane"></i> Invia report</button>
         </div>
-        <div id="taskEsito" class="task-esito"></div>
     </section>
 
     <div class="report-schede" role="tablist">
@@ -44,10 +41,11 @@
     <div id="schedaRecenti">
         <h3 class="section-label">Ultimi report dei colleghi</h3>
         <div id="reportUltimi" class="report-lista"></div>
-        <div id="reportVuoto" class="report-vuoto" style="display: none;">Nessun collega ha ancora scritto un report.</div>
+        <div id="reportVuoto" class="report-vuoto" style="display: none;">Nessun collega ha ancora inviato un report.</div>
 
         <h3 class="section-label">I miei report</h3>
         <div id="reportMiei" class="report-lista"></div>
+        <div id="reportMieiVuoto" class="report-vuoto" style="display: none;">Non hai ancora inviato report.</div>
     </div>
 
     <div id="schedaArchivio" style="display: none;">
@@ -57,10 +55,10 @@
             <label>Al <input type="date" id="archAl"></label>
             <button id="archCerca" type="button" class="btn btn-outline"><i class="fas fa-search"></i> Cerca</button>
         </div>
-        <div id="archErrore" class="report-errore" style="display: none;"></div>
+        <div id="archErrore" class="rp-errore" style="display: none;"></div>
         <div id="archLista" class="report-lista"></div>
         <div id="archVuoto" class="report-vuoto" style="display: none;">Nessun report trovato.</div>
-        <div class="report-azioni" style="justify-content: center;">
+        <div class="rp-azioni" style="justify-content: center;">
             <button id="archAltri" type="button" class="btn btn-outline" style="display: none;">Carica altri</button>
         </div>
     </div>
@@ -68,25 +66,52 @@
 
 <style>
     .report-page { max-width: 860px; margin: 0 auto; padding: 28px 20px 110px; }
-    .report-head-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 22px 24px; margin-bottom: 24px; }
-    .report-head-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
-    .report-head-box h2 { margin: 0 0 4px; font-size: 22px; font-weight: 700; }
-    .report-head-box h3 { margin: 0 0 12px; font-size: 16px; }
-    .report-head-box p { margin: 0; color: var(--text-muted); font-size: 13.5px; }
-    #reportTesto { width: 100%; min-height: 130px; box-sizing: border-box; font: inherit; font-size: 15px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); resize: vertical; }
-    #reportTesto:focus { outline: none; border-color: var(--accent); }
-    .report-azioni { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-    .report-errore { color: var(--danger-text); background: var(--danger-bg); border-radius: var(--radius); padding: 8px 12px; margin-top: 10px; font-size: 13px; }
-    .task-collegate { border-left: 5px solid var(--accent); }
-    .task-riga { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-    .task-riga .tr-desc { flex: 1 1 260px; font: inherit; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
-    .task-riga select { width: auto; flex: none; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
-    .task-riga button { width: auto; flex: none; border: none; background: none; font-size: 20px; color: var(--text-muted); cursor: pointer; }
-    .campo-menzioni { position: relative; flex: 1 1 260px; min-width: 0; }
-    .campo-menzioni .mention-list { top: 100%; bottom: auto; left: 0; right: 0; margin-top: 4px; max-height: 220px; }
-    .campo-menzioni .tr-desc { width: 100%; box-sizing: border-box; }
-    .report-corpo .shout-link { color: var(--accent); font-weight: 600; text-decoration: underline; }
-    .report-corpo .shout-mention { color: var(--accent); font-weight: 600; }
+
+    /* Composizione del report */
+    .rp-composer { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 22px 24px; margin-bottom: 24px; }
+    .rp-composer.in-modifica { border-color: var(--warning); box-shadow: 0 0 0 3px var(--warning-bg); }
+    .rp-composer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+    .rp-composer-head h2 { margin: 0 0 4px; font-size: 22px; font-weight: 700; }
+    .rp-composer-head p { margin: 0; color: var(--text-muted); font-size: 13.5px; max-width: 560px; }
+    .rp-head-side { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .rp-stato { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); }
+    .rp-stato.bozza { background: var(--warning-bg); color: var(--warning-text); }
+    .rp-stato.modifica { background: var(--warning-bg); color: var(--warning-text); }
+
+    .rp-voci { display: flex; flex-direction: column; gap: 8px; }
+    .rp-voce { display: grid; grid-template-columns: 34px minmax(0, 1fr) 30px; gap: 4px 8px; align-items: start; padding: 8px 8px 8px 6px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); transition: border-color 0.15s, background 0.15s; }
+    .rp-voce:focus-within { border-color: var(--accent); }
+    .rp-voce.is-task { background: var(--accent-light); border-color: hsl(244, 60%, 85%); }
+    .rp-check { width: 30px; height: 30px; margin-top: 2px; border: none; background: none; border-radius: 8px; color: var(--text-subtle); font-size: 19px; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+    .rp-check:hover { color: var(--accent); background: var(--surface-2); }
+    .rp-check i, .rp-togli i { pointer-events: none; }
+    .rp-voce.is-task .rp-check { color: var(--accent); }
+    .rp-check:disabled { cursor: default; opacity: 0.9; }
+    .rp-campo { position: relative; min-width: 0; }
+    .rp-campo textarea { width: 100%; box-sizing: border-box; border: none; outline: none; resize: none; background: transparent; font: inherit; font-size: 15px; line-height: 1.5; padding: 5px 2px; min-height: 34px; overflow: hidden; box-shadow: none; }
+    .rp-campo .mention-list { top: 100%; bottom: auto; left: 0; right: 0; margin-top: 4px; max-height: 220px; }
+    .rp-togli { width: 30px; height: 30px; margin-top: 2px; border: none; background: none; color: var(--text-subtle); font-size: 15px; cursor: pointer; border-radius: 8px; padding: 0; }
+    .rp-togli:hover { color: var(--danger); background: var(--danger-bg); }
+    .rp-meta { grid-column: 2 / 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12.5px; }
+    .rp-meta:empty { display: none; }
+    .rp-chi { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent); background: var(--surface); border: 1px solid hsl(244, 60%, 85%); border-radius: 999px; padding: 3px 10px; }
+    .rp-chi.privata { color: var(--text-muted); border-color: var(--border); }
+    .rp-etc { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+    .rp-etc input { width: auto; font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .rp-etc.manca input { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-bg); }
+    .rp-task-link { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--success-text); background: var(--success-bg); border-radius: 999px; padding: 3px 10px; text-decoration: none; }
+    .rp-aggiungi { margin-top: 10px; border: 1px dashed var(--border-strong); background: none; border-radius: var(--radius-md); width: 100%; padding: 9px; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .rp-aggiungi:hover { color: var(--accent); border-color: var(--accent); }
+    .rp-tasto { font-size: 10.5px; font-weight: 600; color: var(--text-subtle); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; }
+    .rp-azioni { display: flex; align-items: center; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    .rp-azioni .btn { width: auto; }
+    .rp-spazio { flex: 1; }
+    .rp-link-danger { background: none; border-color: transparent; color: var(--danger-text); box-shadow: none; }
+    .rp-link-danger:hover { background: var(--danger-bg); }
+    .rp-errore { color: var(--danger-text); background: var(--danger-bg); border-radius: var(--radius); padding: 8px 12px; margin-top: 12px; font-size: 13px; }
+    .rp-avviso { color: var(--success-text); background: var(--success-bg); border-radius: var(--radius); padding: 8px 12px; margin-top: 12px; font-size: 13px; }
+
+    /* Schede e archivio */
     .report-schede { display: flex; gap: 6px; margin-top: 28px; border-bottom: 1px solid var(--border); }
     .report-scheda { width: auto; flex: none; border: none; background: none; font: inherit; font-size: 14px; font-weight: 600; color: var(--text-muted); padding: 8px 14px; border-bottom: 3px solid transparent; margin-bottom: -1px; cursor: pointer; }
     .report-scheda.attiva { color: var(--accent); border-bottom-color: var(--accent); }
@@ -94,28 +119,49 @@
     .arch-filtri select, .arch-filtri input { width: auto; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
     .arch-filtri label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
     .arch-filtri .btn { width: auto; }
+    .section-label { margin: 28px 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+
+    /* Report mostrati */
+    .report-lista { display: flex; flex-direction: column; gap: 14px; }
+    .report-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px 20px; box-shadow: var(--shadow-xs); }
+    .report-card.report-attuale { border-left: 5px solid var(--accent); }
+    .report-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .report-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-light); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+    .report-chi { flex: 1; min-width: 0; }
+    .report-chi strong { display: block; font-size: 14px; color: var(--text); }
+    .report-chi small { display: block; font-size: 12px; color: var(--text-muted); }
+    .report-etichetta { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--accent-light); color: var(--accent); white-space: nowrap; }
+    .report-card-azioni { display: flex; gap: 4px; }
+    .report-card-azioni button { width: 32px; height: 32px; border: 1px solid var(--border); background: var(--surface); border-radius: 50%; color: var(--text-muted); cursor: pointer; padding: 0; }
+    .report-card-azioni button:hover { color: var(--accent); border-color: var(--accent); }
+    .report-card-azioni button.elimina:hover { color: var(--danger); border-color: var(--danger); }
+    .report-voci { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .report-voci li { display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px; line-height: 1.55; color: var(--text); overflow-wrap: anywhere; }
+    .report-voci li > i { margin-top: 5px; font-size: 11px; color: var(--text-subtle); width: 14px; text-align: center; flex-shrink: 0; }
+    .report-voci li.voce-task > i { color: var(--accent); font-size: 13px; margin-top: 4px; }
+    .report-voci .voce-testo { flex: 1; min-width: 0; }
+    .report-voci .voce-task-link { font-size: 11.5px; font-weight: 600; color: var(--accent); background: var(--accent-light); border-radius: 999px; padding: 1px 8px; margin-left: 6px; text-decoration: none; white-space: nowrap; }
+    .report-corpo { font-size: 14.5px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+    .report-corpo .shout-link, .report-voci .shout-link { color: var(--accent); font-weight: 600; text-decoration: underline; }
+    .report-modificato { margin-top: 8px; font-size: 11.5px; color: var(--text-subtle); }
+    .report-vuoto { text-align: center; padding: 28px 20px; color: var(--text-muted); background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius-md); font-size: 13.5px; }
+
     @media (max-width: 600px) {
+        .rp-composer { padding: 16px 14px; }
+        .rp-azioni .btn { flex: 1 1 auto; justify-content: center; }
+        .rp-spazio { display: none; }
+        .rp-azioni #rpInvia { flex: 1 1 100%; order: 5; }
         .arch-filtri select { flex: 1 1 100%; }
         .arch-filtri label { flex: 1 1 calc(50% - 4px); }
         .arch-filtri label input { flex: 1; min-width: 0; }
         .arch-filtri .btn { flex: 1 1 100%; }
     }
-    .task-esito { margin-top: 8px; font-size: 13px; color: var(--text-muted); }
-    .section-label { margin: 28px 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
-    .report-lista { display: flex; flex-direction: column; gap: 14px; }
-    .report-card { background: var(--surface); border: 1px solid var(--border); border-left: 5px solid var(--border-strong); border-radius: var(--radius-md); padding: 16px 20px; box-shadow: var(--shadow-xs); }
-    .report-card.report-attuale { border-left-color: var(--accent); }
-    .report-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
-    .report-head span:last-child { color: var(--text-muted); font-weight: 500; }
-    .report-corpo { font-size: 14.5px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
-    .report-etichetta { float: right; margin-left: 10px; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--accent-light); color: var(--accent); }
-    .report-vuoto { text-align: center; padding: 28px 20px; color: var(--text-muted); background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius-md); font-size: 13.5px; }
 </style>
 
 <script>
 window.currentUserId = {{ session.user_id | tojson }};
 document.addEventListener('DOMContentLoaded', () => {
-  // Utility: escape HTML e formattazione data
+  const $ = (id) => document.getElementById(id);
   const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const formatData = (s) => {
     if (!s) return '';
@@ -123,240 +169,324 @@ document.addEventListener('DOMContentLoaded', () => {
     const [a, m, g] = d.split('-');
     return `${g}/${m}/${a} ${(t || '').slice(0, 5)}`;
   };
+  const dataIt = (iso) => iso ? iso.split('-').reverse().join('/') : '';
+  const oggiIso = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+  const initials = (name) => (name || '?').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 
-  // Stato
-  let destinatariCache = null; // cache utenti/gruppi
-  let reportIdAttuale = null;  // id report per task collegate
+  // Colleghi e gruppi, per capire a chi va una voce taggata (la regola vera e' sul server)
+  let destinatari = { utenti: [], nomi_gruppo: [], etichette_gruppo: {} };
+  const caricaDestinatari = fetch('/api/tasks/destinatari').then(r => r.json()).then(d => { destinatari = d; }).catch(() => {});
 
-  // Costruisce una card report
-  const creaCard = (r, extraClasse = '', etichetta = '') => {
-    const card = document.createElement('div');
-    card.className = 'report-card' + (extraClasse ? ' ' + extraClasse : '');
-    const head = document.createElement('div');
-    head.className = 'report-head';
-    const nome = document.createElement('span');
-    nome.textContent = r.autore_nome || r.autore || '';
-    const data = document.createElement('span');
-    data.textContent = formatData(r.creato_il);
-    head.append(nome, data);
-    const corpo = document.createElement('div');
-    corpo.className = 'report-corpo';
-    // Testo sempre trattato come testo; @ e # diventano collegamenti come nelle task e nei messaggi
-    corpo.innerHTML = window.parseMessage(escapeHtml(r.testo || '')).replace(/\n/g, '<br>');
-    if (etichetta) {
-      const et = document.createElement('span');
-      et.className = 'report-etichetta';
-      et.textContent = etichetta;
-      card.append(et);
+  const assegnazione = (testo) => {
+    const nomi = [];
+    let gruppo = false;
+    (testo.match(/@(\w+)/g) || []).forEach(tag => {
+      const n = tag.slice(1).toLowerCase();
+      if ((destinatari.nomi_gruppo || []).includes(n)) {
+        gruppo = true;
+        const et = (destinatari.etichette_gruppo || {})[n] || n;
+        if (!nomi.includes(et)) nomi.push(et);
+        return;
+      }
+      const u = (destinatari.utenti || []).find(x => x.username.toLowerCase() === n);
+      if (u && u.username !== window.currentUserId && !nomi.includes(u.full_name)) nomi.push(u.full_name || u.username);
+    });
+    return { nomi, gruppo };
+  };
+
+  // --- Stato del composer ---
+  let modo = 'nuovo';        // nuovo | modifica
+  let bozzaId = null;        // bozza salvata dell'utente
+  let modificaId = null;     // report inviato in modifica
+  let ultimoSalvato = '';    // per sapere se ci sono modifiche non salvate
+  let ultimoModificabile = null;
+  let mieiReport = [];
+
+  const voci = $('rpVoci');
+
+  const autoGrow = (ta) => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+
+  const aggiornaVoce = (riga) => {
+    const ta = riga.querySelector('textarea');
+    const taskId = riga.dataset.taskId || '';
+    const { nomi, gruppo } = assegnazione(ta.value);
+    const auto = nomi.length > 0;
+    const spuntata = riga.dataset.task === '1';
+    const isTask = !!taskId || spuntata || auto;
+    riga.classList.toggle('is-task', isTask);
+    const check = riga.querySelector('.rp-check');
+    const icona = isTask ? '<i class="fas fa-check-square"></i>' : '<i class="far fa-square"></i>';
+    if (check.innerHTML !== icona) check.innerHTML = icona;
+    check.disabled = !!taskId || auto;
+    check.title = taskId ? 'Questa voce è già una task' : (auto ? 'Diventa una task perché hai taggato qualcuno' : (spuntata ? 'Togli la spunta: resta una voce' : 'Fai diventare questa voce una task'));
+
+    const meta = riga.querySelector('.rp-meta');
+    if (taskId) {
+      meta.innerHTML = `<a class="rp-task-link" href="/tasks#${escapeHtml(taskId)}"><i class="fas fa-check-circle"></i> Task #${escapeHtml(taskId)} creata</a>`;
+      return;
     }
-    card.append(head, corpo);
+    if (!isTask) { meta.innerHTML = ''; return; }
+    const chi = auto
+      ? `<span class="rp-chi"><i class="fas ${gruppo ? 'fa-users' : 'fa-user'}"></i> Task per ${escapeHtml(nomi.join(', '))}</span>`
+      : `<span class="rp-chi privata"><i class="fas fa-lock"></i> Le mie task (solo per te)</span>`;
+    let etc = meta.querySelector('input[type=date]');
+    const valore = etc ? etc.value : (riga.dataset.etc || '');
+    meta.innerHTML = `${chi}<label class="rp-etc"><i class="far fa-calendar-alt"></i> Entro il <input type="date" min="${oggiIso()}" required aria-label="Data prevista di completamento"></label>`;
+    etc = meta.querySelector('input[type=date]');
+    etc.value = valore;
+    etc.addEventListener('change', () => { riga.dataset.etc = etc.value; etc.closest('.rp-etc').classList.remove('manca'); });
+  };
+
+  const nuovaVoce = (dati = {}, dopo = null) => {
+    const riga = document.createElement('div');
+    riga.className = 'rp-voce';
+    riga.dataset.task = dati.task && !dati.task_id ? '1' : '';
+    riga.dataset.taskId = dati.task_id || '';
+    riga.dataset.etc = dati.etc || '';
+    riga.innerHTML = `
+      <button type="button" class="rp-check"></button>
+      <div class="rp-campo">
+        <textarea rows="1" placeholder="Scrivi una voce… (@ collega o gruppo, # preventivo o cliente)"></textarea>
+        <div class="mention-list"></div>
+      </div>
+      <button type="button" class="rp-togli" title="Togli voce"><i class="fas fa-times"></i></button>
+      <div class="rp-meta"></div>`;
+    const ta = riga.querySelector('textarea');
+    const lista = riga.querySelector('.mention-list');
+    ta.value = dati.testo || '';
+    ta.addEventListener('input', () => { autoGrow(ta); aggiornaVoce(riga); window.handleAutocomplete(ta, lista); });
+    ta.addEventListener('change', () => aggiornaVoce(riga));
+    ta.addEventListener('keydown', (e) => {
+      // Invio = nuova voce (se non si sta scegliendo un suggerimento); Maiusc+Invio va a capo
+      if (e.key === 'Enter' && !e.shiftKey && lista.style.display !== 'block') {
+        e.preventDefault();
+        nuovaVoce({}, riga).querySelector('textarea').focus();
+      } else if (e.key === 'Backspace' && ta.value === '' && voci.children.length > 1 && !riga.dataset.taskId) {
+        e.preventDefault();
+        const prima = riga.previousElementSibling || riga.nextElementSibling;
+        riga.remove();
+        const t = prima.querySelector('textarea');
+        t.focus(); t.setSelectionRange(t.value.length, t.value.length);
+      }
+    });
+    riga.querySelector('.rp-check').addEventListener('click', () => {
+      riga.dataset.task = riga.dataset.task === '1' ? '' : '1';
+      aggiornaVoce(riga);
+      const etc = riga.querySelector('.rp-etc input');
+      if (etc && !etc.value) etc.focus();
+    });
+    const togli = riga.querySelector('.rp-togli');
+    if (dati.task_id) { togli.style.visibility = 'hidden'; togli.disabled = true; }
+    togli.addEventListener('click', () => {
+      riga.remove();
+      if (!voci.children.length) nuovaVoce();
+    });
+    if (dopo && dopo.nextSibling) voci.insertBefore(riga, dopo.nextSibling);
+    else voci.appendChild(riga);
+    aggiornaVoce(riga);
+    requestAnimationFrame(() => autoGrow(ta));
+    return riga;
+  };
+
+  const leggiVoci = () => [...voci.querySelectorAll('.rp-voce')].map(r => {
+    const etc = r.querySelector('.rp-etc input');
+    return { testo: r.querySelector('textarea').value.trim(), task: r.classList.contains('is-task'),
+             etc: etc ? etc.value : (r.dataset.etc || ''), task_id: r.dataset.taskId || '' };
+  }).filter(v => v.testo);
+
+  const impronta = () => JSON.stringify(leggiVoci());
+
+  const riempi = (righe) => {
+    voci.innerHTML = '';
+    (righe && righe.length ? righe : [{}]).forEach(v => nuovaVoce(v));
+    ultimoSalvato = impronta();
+  };
+
+  const mostraErrore = (msg) => { $('rpErrore').textContent = msg; $('rpErrore').style.display = msg ? '' : 'none'; };
+  const mostraAvviso = (msg) => {
+    $('rpAvviso').textContent = msg; $('rpAvviso').style.display = msg ? '' : 'none';
+    if (msg) setTimeout(() => { if ($('rpAvviso').textContent === msg) $('rpAvviso').style.display = 'none'; }, 6000);
+  };
+  const stato = (testo, classe) => { const s = $('rpStato'); s.textContent = testo; s.className = 'rp-stato ' + (classe || ''); s.style.display = testo ? '' : 'none'; };
+
+  const impostaModo = (nuovo, report) => {
+    modo = nuovo;
+    const composer = $('rpComposer');
+    composer.classList.toggle('in-modifica', modo === 'modifica');
+    $('rpAnnulla').style.display = modo === 'modifica' ? '' : 'none';
+    $('rpBozza').style.display = modo === 'modifica' ? 'none' : '';
+    $('rpScarta').style.display = modo === 'nuovo' && bozzaId ? '' : 'none';
+    $('rpInvia').innerHTML = modo === 'modifica' ? '<i class="fas fa-check"></i> Salva modifiche' : '<i class="fas fa-paper-plane"></i> Invia report';
+    if (modo === 'modifica') {
+      $('rpTitolo').textContent = 'Modifica report';
+      stato(`Inviato il ${formatData(report.creato_il)}`, 'modifica');
+    } else {
+      $('rpTitolo').textContent = 'Il tuo report';
+    }
+  };
+
+  // Le voci da far diventare task hanno bisogno della data: si evidenziano quelle senza
+  const controllaDate = () => {
+    let prima = null;
+    voci.querySelectorAll('.rp-voce.is-task').forEach(r => {
+      const etc = r.querySelector('.rp-etc input');
+      if (etc && !etc.value && r.querySelector('textarea').value.trim()) {
+        etc.closest('.rp-etc').classList.add('manca');
+        prima = prima || etc;
+      }
+    });
+    if (prima) { prima.focus(); mostraErrore('Scegli sul calendario entro quando va completata ogni voce che diventa task.'); return false; }
+    return true;
+  };
+
+  const invia = async (azione) => {
+    mostraErrore(''); mostraAvviso('');
+    const righe = leggiVoci();
+    if (!righe.length) { mostraErrore('Scrivi almeno una voce.'); return; }
+    if (azione !== 'bozza' && !controllaDate()) return;
+    const bottone = azione === 'bozza' ? $('rpBozza') : $('rpInvia');
+    bottone.disabled = true;
+    try {
+      const res = modo === 'modifica'
+        ? await fetch(`/api/report/${encodeURIComponent(modificaId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ righe }) })
+        : await fetch('/api/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ righe, azione }) });
+      const dati = await res.json();
+      if (!dati.ok) { mostraErrore(dati.error || 'Errore di salvataggio'); return; }
+      const nTask = dati.task_create || 0;
+      const frase = nTask ? ` · ${nTask} ${nTask === 1 ? 'task creata' : 'task create'}` : '';
+      if (azione === 'bozza') {
+        bozzaId = dati.report.id;
+        ultimoSalvato = impronta();
+        const ora = new Date().toTimeString().slice(0, 5);
+        stato(`Bozza salvata alle ${ora} · la vedi solo tu`, 'bozza');
+        impostaModo('nuovo');
+      } else {
+        if (modo === 'modifica') mostraAvviso('Report aggiornato' + frase);
+        else mostraAvviso('Report inviato' + frase);
+        if (dati.avviso) mostraErrore(dati.avviso);
+        bozzaId = null; modificaId = null;
+        stato('');
+        impostaModo('nuovo');
+        riempi([]);
+        await carica();
+        if (archivioAperto) caricaArchivio(true);
+      }
+    } catch (e) {
+      mostraErrore('Errore di rete: riprova.');
+    } finally {
+      bottone.disabled = false;
+    }
+  };
+
+  $('rpBozza').addEventListener('click', () => invia('bozza'));
+  $('rpInvia').addEventListener('click', () => invia('invia'));
+  $('rpAggiungi').addEventListener('click', () => nuovaVoce().querySelector('textarea').focus());
+  $('rpAnnulla').addEventListener('click', () => {
+    if (impronta() !== ultimoSalvato && !confirm('Annullare le modifiche al report?')) return;
+    modificaId = null; stato(''); impostaModo('nuovo'); caricaComposer();
+  });
+  $('rpScarta').addEventListener('click', async () => {
+    if (!bozzaId || !confirm('Scartare la bozza? Le voci scritte si perdono.')) return;
+    await fetch(`/api/report/${encodeURIComponent(bozzaId)}`, { method: 'DELETE' });
+    bozzaId = null; stato(''); impostaModo('nuovo'); riempi([]);
+  });
+  window.addEventListener('beforeunload', (e) => {
+    if (impronta() !== ultimoSalvato && leggiVoci().length) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  // --- Report mostrati ---
+  const vociHtml = (r) => {
+    if (!r.righe || !r.righe.length) {
+      return `<div class="report-corpo">${window.parseMessage(escapeHtml(r.testo || '')).replace(/\n/g, '<br>')}</div>`;
+    }
+    return '<ul class="report-voci">' + r.righe.map(v => {
+      const isTask = !!v.task_id;
+      const link = isTask ? `<a class="voce-task-link" href="/tasks#${escapeHtml(v.task_id)}"><i class="fas fa-tasks"></i> Task</a>` : '';
+      return `<li class="${isTask ? 'voce-task' : ''}"><i class="fas ${isTask ? 'fa-check-square' : 'fa-circle'}"></i><span class="voce-testo">${window.parseMessage(escapeHtml(v.testo)).replace(/\n/g, '<br>')}${link}</span></li>`;
+    }).join('') + '</ul>';
+  };
+
+  const creaCard = (r, opzioni = {}) => {
+    const card = document.createElement('div');
+    card.className = 'report-card' + (opzioni.attuale ? ' report-attuale' : '');
+    const nome = r.autore_nome || r.autore || '';
+    card.innerHTML = `
+      <div class="report-head">
+        <span class="report-avatar">${escapeHtml(initials(nome))}</span>
+        <div class="report-chi"><strong>${escapeHtml(nome)}</strong><small>${escapeHtml(formatData(r.creato_il))}</small></div>
+        ${opzioni.etichetta ? `<span class="report-etichetta">${escapeHtml(opzioni.etichetta)}</span>` : ''}
+        ${opzioni.modificabile ? `<span class="report-card-azioni">
+            <button type="button" class="modifica" title="Modifica"><i class="fas fa-pen"></i></button>
+            <button type="button" class="elimina" title="Elimina"><i class="fas fa-trash-alt"></i></button></span>` : ''}
+      </div>
+      ${vociHtml(r)}
+      ${r.modificato_il ? `<div class="report-modificato"><i class="fas fa-pen"></i> modificato il ${escapeHtml(formatData(r.modificato_il))}</div>` : ''}`;
+    if (opzioni.modificabile) {
+      card.querySelector('.modifica').addEventListener('click', () => apriModifica(r));
+      card.querySelector('.elimina').addEventListener('click', () => elimina(r));
+    }
     return card;
   };
 
-  // Carica e disegna le liste
+  const apriModifica = (r) => {
+    if (impronta() !== ultimoSalvato && leggiVoci().length && !confirm('Hai voci non salvate nel report: lasciarle?')) return;
+    modificaId = r.id;
+    impostaModo('modifica', r);
+    riempi(r.righe && r.righe.length ? r.righe : (r.testo || '').split('\n').map(t => ({ testo: t })));
+    $('rpComposer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const elimina = async (r) => {
+    const conTask = (r.righe || []).some(v => v.task_id);
+    if (!confirm('Eliminare questo report?' + (conTask ? ' Le task già create restano.' : ''))) return;
+    const res = await fetch(`/api/report/${encodeURIComponent(r.id)}`, { method: 'DELETE' });
+    const dati = await res.json().catch(() => ({}));
+    if (!dati.ok) { alert(dati.error || 'Report non eliminato.'); return; }
+    if (modificaId === r.id) { modificaId = null; stato(''); impostaModo('nuovo'); caricaComposer(); }
+    carica();
+    if (archivioAperto) caricaArchivio(true);
+  };
+
+  let datiLista = null;
   const carica = async () => {
     const res = await fetch('/api/report');
-    const dati = await res.json();
-    const ultimi = dati.ultimi || [];
-    const miei = dati.miei || [];
+    datiLista = await res.json();
+    const ultimi = datiLista.ultimi || [];
+    mieiReport = datiLista.miei || [];
+    ultimoModificabile = datiLista.modificabile;
 
-    const boxUltimi = document.getElementById('reportUltimi');
-    const boxMiei = document.getElementById('reportMiei');
-    const vuoto = document.getElementById('reportVuoto');
+    const boxUltimi = $('reportUltimi');
+    const boxMiei = $('reportMiei');
     boxUltimi.innerHTML = '';
     boxMiei.innerHTML = '';
+    $('reportVuoto').style.display = ultimi.length ? 'none' : '';
+    ultimi.forEach(r => boxUltimi.appendChild(creaCard(r)));
+    $('reportMieiVuoto').style.display = mieiReport.length ? 'none' : '';
+    mieiReport.forEach((r, i) => boxMiei.appendChild(creaCard(r, {
+      attuale: i === 0, etichetta: i === 0 ? 'visibile agli altri' : 'archiviato', modificabile: r.id === ultimoModificabile })));
+    return datiLista;
+  };
 
-    // Ultimi degli altri
-    if (ultimi.length === 0) {
-      vuoto.style.display = '';
+  const caricaComposer = () => {
+    const bozza = datiLista && datiLista.bozza;
+    bozzaId = bozza ? bozza.id : null;
+    if (bozza) {
+      riempi(bozza.righe && bozza.righe.length ? bozza.righe : [{ testo: bozza.testo }]);
+      stato(`Bozza del ${formatData(bozza.modificato_il || bozza.creato_il)} · la vedi solo tu`, 'bozza');
     } else {
-      vuoto.style.display = 'none';
-      ultimi.forEach(r => boxUltimi.appendChild(creaCard(r)));
+      riempi([]);
     }
-
-    // I miei: il primo è "attuale" e visibile agli altri
-    miei.forEach((r, i) => {
-      const etichetta = i === 0 ? 'visibile agli altri' : '';
-      boxMiei.appendChild(creaCard(r, i === 0 ? 'report-attuale' : '', etichetta));
-    });
+    impostaModo('nuovo');
   };
 
-  // Carica destinatari una sola volta (cache)
-  const caricaDestinatari = async () => {
-    if (destinatariCache) return destinatariCache;
-    const res = await fetch('/api/tasks/destinatari');
-    destinatariCache = await res.json();
-    return destinatariCache;
-  };
-
-  // Aggiunge una riga task
-  const aggiungiRiga = async () => {
-    const dati = await caricaDestinatari();
-    const riga = document.createElement('div');
-    riga.className = 'task-riga';
-
-    // Descrizione
-    const desc = document.createElement('input');
-    desc.type = 'text';
-    desc.className = 'tr-desc';
-    desc.placeholder = "Cosa c'è da fare? (@ collega, # preventivo o cliente)";
-    desc.autocomplete = 'off';
-
-    // Suggerimenti @ e # (stesso meccanismo delle task e dei messaggi)
-    const campo = document.createElement('div');
-    campo.className = 'campo-menzioni';
-    const menzioni = document.createElement('div');
-    menzioni.className = 'mention-list';
-    desc.addEventListener('input', () => window.handleAutocomplete(desc, menzioni));
-    campo.append(desc, menzioni);
-
-    // Tipo
-    const tipo = document.createElement('select');
-    tipo.className = 'tr-tipo';
-    const opPers = document.createElement('option');
-    opPers.value = 'personale';
-    opPers.textContent = 'Per me';
-    const opUtente = document.createElement('option');
-    opUtente.value = 'utente';
-    opUtente.textContent = 'Per un collega';
-    const opGruppo = document.createElement('option');
-    opGruppo.value = 'gruppo';
-    opGruppo.textContent = 'Per un gruppo';
-    tipo.append(opPers, opUtente, opGruppo);
-
-    // Destinatari (utenti diversi da me)
-    const dest = document.createElement('select');
-    dest.className = 'tr-dest';
-    (dati.utenti || []).forEach(u => {
-      if (u.username === window.currentUserId) return;
-      const o = document.createElement('option');
-      o.value = u.username;
-      o.textContent = u.full_name || u.username;
-      dest.appendChild(o);
-    });
-
-    // Gruppi
-    const gruppo = document.createElement('select');
-    gruppo.className = 'tr-gruppo';
-    (dati.gruppi || []).forEach(g => {
-      const o = document.createElement('option');
-      o.value = g.id;
-      o.textContent = `${g.label} (${g.n})`;
-      gruppo.appendChild(o);
-    });
-
-    // Bottone rimuovi riga
-    const rimuovi = document.createElement('button');
-    rimuovi.type = 'button';
-    rimuovi.textContent = '×';
-    rimuovi.addEventListener('click', () => riga.remove());
-
-    // Mostra solo il campo relativo al tipo scelto
-    const aggiornaVisibilita = () => {
-      dest.style.display = tipo.value === 'utente' ? '' : 'none';
-      gruppo.style.display = tipo.value === 'gruppo' ? '' : 'none';
-    };
-    tipo.addEventListener('change', aggiornaVisibilita);
-    aggiornaVisibilita();
-
-    riga.append(campo, tipo, dest, gruppo, rimuovi);
-    document.getElementById('taskRighe').appendChild(riga);
-  };
-
-  // Salva il report
-  document.getElementById('reportSalva').addEventListener('click', async () => {
-    const testo = document.getElementById('reportTesto').value.trim();
-    const errore = document.getElementById('reportErrore');
-    errore.style.display = 'none';
-    errore.textContent = '';
-
-    const res = await fetch('/api/report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ testo })
-    });
-    const dati = await res.json();
-
-    if (!dati.ok) {
-      errore.textContent = dati.error || 'Errore di salvataggio';
-      errore.style.display = '';
-      return;
-    }
-
-    // Ok: svuota, ricarica, chiedi task
-    document.getElementById('reportTesto').value = '';
-    document.getElementById('reportMenzioni').style.display = 'none';
-    await carica();
-    if (archivioAperto) caricaArchivio(true);
-
-    if (confirm('Report salvato. Vuoi creare delle task collegate a questo report?')) {
-      reportIdAttuale = dati.report.id;
-      const pannello = document.getElementById('taskCollegate');
-      const righe = document.getElementById('taskRighe');
-      const esito = document.getElementById('taskEsito');
-      righe.innerHTML = '';
-      esito.textContent = '';
-      pannello.style.display = '';
-      aggiungiRiga();
-    }
-  });
-
-  // Crea le task collegate
-  document.getElementById('taskCrea').addEventListener('click', async () => {
-    const esito = document.getElementById('taskEsito');
-    let create = 0;
-    const errori = [];
-
-    const righe = document.querySelectorAll('#taskRighe .task-riga');
-    for (const riga of righe) {
-      const desc = riga.querySelector('.tr-desc').value.trim();
-      if (!desc) continue; // salta righe vuote
-
-      const tipo = riga.querySelector('.tr-tipo').value;
-      const body = {
-        description: desc,
-        tipo,
-        destinatario: tipo === 'utente' ? riga.querySelector('.tr-dest').value : '',
-        gruppo: tipo === 'gruppo' ? riga.querySelector('.tr-gruppo').value : '',
-        report_id: reportIdAttuale
-      };
-
-      const res = await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const dati = await res.json();
-      if (dati.success) create++;
-      else errori.push(dati.error || 'Errore');
-    }
-
-    esito.textContent = `${create} task create` + (errori.length ? ' — errori: ' + errori.join('; ') : '');
-
-    // Se tutte riuscite, nascondi il pannello
-    if (errori.length === 0) {
-      setTimeout(() => {
-        document.getElementById('taskCollegate').style.display = 'none';
-      }, 1500);
-    }
-  });
-
-  // Annulla il pannello task
-  document.getElementById('taskAnnulla').addEventListener('click', () => {
-    document.getElementById('taskCollegate').style.display = 'none';
-  });
-
-  // Aggiunge una riga al click
-  document.getElementById('taskAggiungi').addEventListener('click', aggiungiRiga);
-
-  // --- Archivio: tutti i report di tutti, a pagine da 20 ---
-  const archFiltroAutore = document.getElementById('archFiltroAutore');
-  const archDal = document.getElementById('archDal');
-  const archAl = document.getElementById('archAl');
-  const archLista = document.getElementById('archLista');
-  const archVuoto = document.getElementById('archVuoto');
-  const archAltri = document.getElementById('archAltri');
-  const archErrore = document.getElementById('archErrore');
+  // --- Archivio: tutti i report inviati, a pagine da 20 ---
+  const archFiltroAutore = $('archFiltroAutore');
+  const archDal = $('archDal');
+  const archAl = $('archAl');
+  const archLista = $('archLista');
+  const archVuoto = $('archVuoto');
+  const archAltri = $('archAltri');
+  const archErrore = $('archErrore');
   let archOffset = 0;
   let archAutoriCaricati = false;
   let archRichiesta = 0; // le risposte di ricerche superate si ignorano
@@ -409,7 +539,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  document.getElementById('archCerca').addEventListener('click', () => caricaArchivio(true));
+  $('archCerca').addEventListener('click', () => caricaArchivio(true));
   archAltri.addEventListener('click', () => caricaArchivio(false));
   archFiltroAutore.addEventListener('change', () => caricaArchivio(true));
   archDal.addEventListener('change', () => caricaArchivio(true));
@@ -424,8 +554,8 @@ document.addEventListener('DOMContentLoaded', () => {
         b.classList.toggle('attiva', b === btn);
         b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
       });
-      document.getElementById('schedaRecenti').style.display = scheda === 'recenti' ? '' : 'none';
-      document.getElementById('schedaArchivio').style.display = scheda === 'archivio' ? '' : 'none';
+      $('schedaRecenti').style.display = scheda === 'recenti' ? '' : 'none';
+      $('schedaArchivio').style.display = scheda === 'archivio' ? '' : 'none';
       if (scheda === 'archivio' && !archivioAperto) {
         archivioAperto = true;
         caricaArchivio(true);
@@ -433,8 +563,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Avvio
-  carica();
+  // Avvio: prima i colleghi (per riconoscere i tag), poi bozza e liste
+  riempi([]);
+  Promise.all([caricaDestinatari, carica()]).then(() => {
+    caricaComposer();
+    voci.querySelectorAll('.rp-voce').forEach(aggiornaVoce);
+  });
 });
 </script>
 {% endblock %}

@@ -9,9 +9,10 @@
 
 {% set tipi = [
     ('PAGAMENTO', 'Pagamenti scaduti', 'fas fa-hand-holding-usd', 'danger', 'incassi programmati non ricevuti'),
+    ('TASK', 'Task scadute', 'fas fa-hourglass-end', 'danger', 'oltre la data prevista (ETC)'),
     ('MERCE', 'Merce in ritardo', 'fas fa-truck-loading', 'info', 'oltre 5 giorni dalla data prevista'),
     ('ORDINE', 'Ordini senza data', 'fas fa-calendar-times', 'warning', 'data di arrivo non inserita'),
-    ('DOCUMENTI', 'Documenti mancanti', 'fas fa-id-card', 'neutral', 'clienti con preventivi attivi'),
+    ('DOCUMENTI', 'Documenti mancanti', 'fas fa-id-card', 'neutral', 'clienti con preventivi inviati'),
 ] %}
 
 <div class="editor-container">
@@ -44,7 +45,7 @@
         {% if alerts %}
         <div class="alert-list">
             {% for a in alerts %}
-            {% set tono = {'PAGAMENTO': 'danger', 'MERCE': 'info', 'ORDINE': 'warning', 'DOCUMENTI': 'neutral'}[a.tipo] | default('neutral') %}
+            {% set tono = {'PAGAMENTO': 'danger', 'TASK': 'danger', 'MERCE': 'info', 'ORDINE': 'warning', 'DOCUMENTI': 'neutral'}[a.tipo] | default('neutral') %}
             <div class="alert-row tone-{{ tono }}" data-type="{{ a.tipo }}">
                 <div class="alert-icon"><i class="{{ a.icona }}"></i></div>
                 <div class="alert-main">
@@ -59,6 +60,7 @@
                     {% if a.tipo == 'PAGAMENTO' %}<i class="fas fa-cash-register"></i> Vai al saldo
                     {% elif a.tipo == 'MERCE' %}<i class="fas fa-dolly"></i> Vai alla consegna
                     {% elif a.tipo == 'ORDINE' %}<i class="fas fa-box-open"></i> Vai agli ordini
+                    {% elif a.tipo == 'TASK' %}<i class="fas fa-tasks"></i> Apri la task
                     {% else %}<i class="fas fa-folder-open"></i> Apri cartella{% endif %}
                 </a>
             </div>
