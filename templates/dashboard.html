@@ -10,7 +10,7 @@
     </a>
 <a href="{{ url_for('tasks_page') }}" class="fab-btn task-fab" title="Task e Report" style="background: #6610f2;">
         <i class="fas fa-tasks"></i>
-        <span class="fab-label">TASKS</span>
+        <span class="fab-label" style="font-size: 6.5px; line-height: 1.15; text-align: center;">TASK &amp;<br>REPORT</span>
     </a>
 {% endblock %}
 
@@ -132,7 +132,7 @@
         </a>
         <a href="{{ url_for('tasks_page') }}" class="quick-link">
           <span class="quick-icon"><i class="fas fa-tasks"></i></span>
-          <span><strong>Task</strong><small>Attività personali e di gruppo</small></span>
+          <span><strong>Task &amp; Report</strong><small>Attività del team, le tue task e i report</small></span>
           <i class="fas fa-chevron-right quick-arrow"></i>
         </a>
         <a href="{{ url_for('report_page') }}" class="quick-link">

@@ -46,7 +46,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "3.3.0"  
+APP_VERSION = "3.3.1"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -2386,7 +2386,8 @@ def allert_page():
     alerts = []
     today = datetime.date.today()
     today_str = today.strftime('%Y-%m-%d')
-    active_statuses = ["Bozza", "Inviato", "In Lavorazione"]
+    # I documenti del cliente servono solo quando il preventivo e' confermato (non per bozze e inviati)
+    active_statuses = ["Confermato", "In Lavorazione"]
     active_client_ids = set()
 
     # 1. Query bulk su DB: carica tutti i preventivi non chiusi/annullati
@@ -2500,8 +2501,30 @@ def allert_page():
                 })
         except: continue
 
-    # Ordine di priorità: pagamenti, merce, ordini, documenti
-    priorita = {"PAGAMENTO": 0, "MERCE": 1, "ORDINE": 2, "DOCUMENTI": 3}
+    # 4. Task oltre la data prevista di completamento (ETC) che riguardano l'utente
+    controlla_task_scadute()
+    me, my_role = session["user_id"], session["user_role"]
+    for t in load_tasks():
+        d = leggi_data_etc(t.get("etc"))
+        if not d or d >= today or t.get("status") not in ("open", "support"):
+            continue
+        # admin e CEO vedono tutte le scadute del team; gli altri solo quelle che li riguardano
+        if not (task_visibile(t, me, my_role) and (task_mi_riguarda(t, me, my_role) or my_role in ('amministratore', 'ceo'))):
+            continue
+        desc = re.sub(r"\s+", " ", t.get("description") or "").strip()
+        alerts.append({
+            "tipo": "TASK",
+            "oggetto_id": f"#{t['id']}",
+            "oggetto_nome": desc[:80] + ("…" if len(desc) > 80 else ""),
+            "dettaglio": f"Data prevista {d.strftime('%d/%m/%Y')} superata da {(today - d).days} giorni"
+                         + (" · task personale" if t.get("tipo") == "personale" else f" · creata da {t.get('created_by_name') or t.get('created_by')}"),
+            "link_risoluzione": url_for('tasks_page') + f"#{t['id']}",
+            "icona": "fas fa-hourglass-end",
+            "colore": "text-danger"
+        })
+
+    # Ordine di priorità: pagamenti, task scadute, merce, ordini, documenti
+    priorita = {"PAGAMENTO": 0, "TASK": 1, "MERCE": 2, "ORDINE": 3, "DOCUMENTI": 4}
     alerts.sort(key=lambda a: priorita.get(a["tipo"], 9))
 
     return render_template("allert.html", title="Centro Notifiche & Alert", alerts=alerts)
@@ -8001,7 +8024,7 @@ def api_tagbox():
         users = load_users()
         for u in users:
             if u["username"] != session["user_id"]:
-                add_notification(u["username"], f"{session['user_name']} ha scritto sulla Tag Board", link="/")
+                add_notification(u["username"], f"{session['user_name']} ha scritto sulla Tag Board", link="/", tipo="menzione")
                 
         return jsonify({"success": True})
     
@@ -8126,6 +8149,226 @@ def _e_gruppo(nome, ruoli):
     return nome in GRUPPI_STORICI or nome in ruoli
 
 
+def leggi_data_etc(valore):
+    """ETC (Estimated Time Complete) dal calendario: 'YYYY-MM-DD' valida, altrimenti None."""
+    try:
+        return datetime.datetime.strptime(str(valore or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def errore_etc(valore):
+    """Messaggio d'errore per una ETC non valida (obbligatoria e non nel passato), None se va bene."""
+    d = leggi_data_etc(valore)
+    if not d:
+        return "Scegli sul calendario la data prevista di completamento (ETC)."
+    if d < datetime.date.today():
+        return "La data prevista di completamento non puo' essere nel passato."
+    return None
+
+
+def assegnazione_da_menzioni(testo, me, all_users, ruoli):
+    """Da una voce di report con @menzioni ricava a chi va la task: (tipo, assegnati, gruppo).
+    Nessun collega o gruppo taggato (o solo se stessi) -> task personale ("Le mie task")."""
+    user_resolver = {u["username"].lower(): u["username"] for u in all_users}
+    assegnati, gruppo = [], ""
+    for m in re.findall(r"@(\w+)", testo or ""):
+        nome = m.lower()
+        if _e_gruppo(nome, ruoli):
+            gruppo = gruppo or nome
+            voce = f"@{nome}"
+        elif nome in user_resolver and user_resolver[nome] != me:
+            voce = f"@{user_resolver[nome]}"
+        else:
+            continue
+        if voce not in assegnati:
+            assegnati.append(voce)
+    if not assegnati:
+        return "personale", [f"@{me}"], ""
+    return ("gruppo" if gruppo else "utente"), assegnati, gruppo
+
+
+def task_visibile(t, me, my_role):
+    """Chi vede una task: le personali solo l'autore; le altre autore, assegnati, gruppi, admin e CEO."""
+    if t.get("tipo") == "personale":
+        return t.get("created_by") == me
+    miei_gruppi = {"@tutti", f"@{my_role}"} | {f"@{k}" for k, v in GRUPPI_STORICI.items() if v and v == my_role}
+    assegnati = set(t.get("assigned_to") or [])
+    return bool(t.get("created_by") == me or f"@{me}" in assegnati or assegnati & miei_gruppi
+                or my_role in ['amministratore', 'ceo'])
+
+
+def task_mi_riguarda(t, me, my_role):
+    """Task creata da me o assegnata a me / a un mio gruppo (per gli alert, anche per admin e CEO)."""
+    miei_gruppi = {"@tutti", f"@{my_role}"} | {f"@{k}" for k, v in GRUPPI_STORICI.items() if v and v == my_role}
+    assegnati = set(t.get("assigned_to") or [])
+    return bool(t.get("created_by") == me or f"@{me}" in assegnati
+                or (t.get("tipo") != "personale" and assegnati & miei_gruppi))
+
+
+def destinatari_task(t, all_users):
+    """Username a cui va avvisata una task: l'autore e gli assegnati (i gruppi si espandono).
+    Una task personale riguarda solo chi l'ha scritta."""
+    if t.get("tipo") == "personale":
+        return {t.get("created_by")} - {None, ""}
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    user_resolver = {u["username"].lower(): u["username"] for u in all_users}
+    chi = {t.get("created_by")} - {None, ""}
+    for a in t.get("assigned_to") or []:
+        nome = a.lstrip("@").lower()
+        if _e_gruppo(nome, ruoli):
+            chi.update(utenti_del_gruppo(nome, all_users))
+        elif nome in user_resolver:
+            chi.add(user_resolver[nome])
+    return chi
+
+
+def crea_task(me, mittente, desc, tipo="", destinatario="", gruppo="", etc="", report_id="", assegnati=None):
+    """Crea una task e manda le notifiche. Restituisce (id, None) oppure (None, messaggio d'errore).
+    Con `assegnati` (task nate dalle voci di un report) l'assegnazione e' gia' decisa."""
+    desc = (desc or "").strip()
+    if not desc:
+        return None, "Descrizione mancante"
+    err = errore_etc(etc)
+    if err:
+        return None, err
+
+    all_users = load_users()
+    user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    mentions = re.findall(r"@(\w+)", desc)
+    tipo = (tipo or "").strip()
+    gruppo = (gruppo or "").strip().lower()
+
+    if assegnati is not None:
+        assigned = list(assegnati)
+    elif tipo == "personale":
+        assigned = [f"@{me}"]
+    elif tipo == "utente":
+        dest = user_resolver.get(str(destinatario or "").strip().lower())
+        if not dest:
+            return None, "Scegli il collega a cui assegnare la task."
+        assigned = [f"@{dest}"]
+    elif tipo == "gruppo":
+        if gruppo != "tutti" and gruppo not in ruoli:
+            return None, "Gruppo non valido."
+        assigned = [f"@{gruppo}"]
+    else:
+        # Richiesta vecchio stile: si assegna con le menzioni nel testo
+        tipo = ""
+        assigned = [f"@{m}" for m in mentions] if mentions else ["@tutti"]
+    # Nelle task personali le @menzioni restano solo testo: nessun assegnatario in piu'
+    if tipo != "personale":
+        for m in mentions:
+            if f"@{m}" not in assigned:
+                assigned.append(f"@{m}")
+
+    task_id = str(uuid.uuid4())[:8].upper()
+    db = _DBSession()
+    try:
+        db.add(_Task(
+            id=task_id,
+            created_by=me,
+            created_by_name=mittente,
+            description=desc,
+            assigned_to=assigned,
+            status="open",
+            timestamp=datetime.datetime.now().strftime("%d/%m %H:%M"),
+            comments=[],
+            tipo=tipo,
+            gruppo=gruppo if tipo == "gruppo" else "",
+            report_id=str(report_id or "")[:40],
+            etc=leggi_data_etc(etc).strftime("%Y-%m-%d"),
+            etc_avvisata=""
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[crea_task] Errore salvataggio DB: {e}")
+        return None, "Errore interno durante il salvataggio del task."
+    finally:
+        db.close()
+
+    if tipo == "personale":
+        return task_id, None  # nessuno da avvisare: la vede solo chi l'ha scritta
+
+    # --- GESTIONE NOTIFICHE E TAGBOX ---
+    link_task = f"[VEDI TASK #TASK-{task_id}]"
+    nomi = {a.lstrip("@").lower() for a in assigned}
+    gruppi = sorted(n for n in nomi if _e_gruppo(n, ruoli))
+
+    # 1. Post su Tagbox (per i Gruppi)
+    if gruppi:
+        tagbox = load_tagbox()
+        tagbox.insert(0, {
+            "id": uuid.uuid4().hex[:6],
+            "user": f"{mittente} [TASK]",
+            "user_id": me,
+            "text": f"@{gruppi[0]} Nuova task creata: {link_task}",
+            "timestamp": datetime.datetime.now().strftime("%H:%M"),
+            "pinned": False
+        })
+        save_tagbox(tagbox[:50])
+
+    # 2. Notifiche Campanella: chi fa parte dei gruppi indicati e gli utenti menzionati
+    notified_ids = {me}  # Non notificare se stessi
+    for g in gruppi:
+        for u_real_id in utenti_del_gruppo(g, all_users):
+            if u_real_id not in notified_ids:
+                add_notification(u_real_id, f"{mittente} ha creato una task per @{g}", link=f"/tasks#{task_id}", tipo="task")
+                notified_ids.add(u_real_id)
+    for n in nomi:
+        if n in user_resolver and not _e_gruppo(n, ruoli):
+            u_real_id = user_resolver[n]
+            if u_real_id not in notified_ids:
+                add_notification(u_real_id, f"{mittente} ti ha assegnato una nuova task", link=f"/tasks#{task_id}", tipo="task")
+                notified_ids.add(u_real_id)
+    return task_id, None
+
+
+# Controllo delle task oltre la ETC: al massimo ogni 5 minuti, un avviso per ogni data superata
+_ultimo_controllo_scadenze = 0.0
+_lock_scadenze = threading.Lock()
+
+
+def controlla_task_scadute(forza=False):
+    global _ultimo_controllo_scadenze
+    if not forza and time.time() - _ultimo_controllo_scadenze < 300:
+        return
+    if not _lock_scadenze.acquire(blocking=False):
+        return
+    try:
+        _ultimo_controllo_scadenze = time.time()
+        oggi = datetime.date.today().strftime("%Y-%m-%d")
+        db = _DBSession()
+        try:
+            scadute = db.query(_Task).filter(
+                _Task.status.in_(["open", "support"]), _Task.etc != None, _Task.etc != "",  # noqa: E711
+                _Task.etc < oggi).all()
+            da_avvisare = [t for t in scadute if (t.etc_avvisata or "") != t.etc]
+            if not da_avvisare:
+                return
+            all_users = load_users()
+            capi = {u["username"] for u in all_users if u.get("role") in ("amministratore", "ceo")}
+            for t in da_avvisare:
+                td = t.to_dict()
+                data_it = datetime.datetime.strptime(t.etc, "%Y-%m-%d").strftime("%d/%m/%Y")
+                # admin e CEO sono avvisati di tutte le task del team (non delle personali altrui)
+                avvisati = destinatari_task(td, all_users) | (capi if td.get("tipo") != "personale" else set())
+                for u in avvisati:
+                    add_notification(u, f"⏰ Task #{t.id} oltre la data prevista ({data_it})",
+                                     link=f"/tasks#{t.id}", tipo="scadenza")
+                t.etc_avvisata = t.etc
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[controlla_task_scadute] Errore: {e}")
+        finally:
+            db.close()
+    finally:
+        _lock_scadenze.release()
+
+
 def load_tasks():
     """Carica i tasks pubblici dalla tabella SQLite 'tasks'."""
     db = _DBSession()
@@ -8175,7 +8418,7 @@ def save_tasks(tasks):
 @app.route("/tasks")
 @login_required
 def tasks_page():
-    return render_template("tasks.html", title="Task & Report Team", etichette_ruoli=ETICHETTE_RUOLI)
+    return render_template("tasks.html", title="Task & Report", etichette_ruoli=ETICHETTE_RUOLI)
 
 
 @app.route("/api/tasks", methods=["GET", "POST"])
@@ -8183,120 +8426,73 @@ def tasks_page():
 def api_tasks():
     if request.method == "POST":
         data = request.json or {}
-        desc = data.get("description", "").strip()
-        if not desc:
-            return jsonify({"error": "Descrizione mancante"}), 400
-
-        me = session["user_id"]
-        mittente = session["user_name"]
-        all_users = load_users()
-        user_resolver = {u['username'].lower(): u['username'] for u in all_users}
-        ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
-        mentions = re.findall(r"@(\w+)", desc)
-        tipo = (data.get("tipo") or "").strip()
-        gruppo = ""
-
-        if tipo == "personale":
-            assigned = [f"@{me}"]
-        elif tipo == "utente":
-            destinatario = user_resolver.get(str(data.get("destinatario") or "").strip().lower())
-            if not destinatario:
-                return jsonify({"error": "Scegli il collega a cui assegnare la task."}), 400
-            assigned = [f"@{destinatario}"]
-        elif tipo == "gruppo":
-            gruppo = str(data.get("gruppo") or "").strip().lower()
-            if gruppo != "tutti" and gruppo not in ruoli:
-                return jsonify({"error": "Gruppo non valido."}), 400
-            assigned = [f"@{gruppo}"]
-        else:
-            # Richiesta vecchio stile: si assegna con le menzioni nel testo
-            tipo = ""
-            assigned = [f"@{m}" for m in mentions] if mentions else ["@tutti"]
-        # Nelle task personali le @menzioni restano solo testo: nessun assegnatario in piu'
-        if tipo != "personale":
-            for m in mentions:
-                if f"@{m}" not in assigned:
-                    assigned.append(f"@{m}")
-
-        task_id = str(uuid.uuid4())[:8].upper()
-        db = _DBSession()
-        try:
-            db.add(_Task(
-                id=task_id,
-                created_by=me,
-                created_by_name=mittente,
-                description=desc,
-                assigned_to=assigned,
-                status="open",
-                timestamp=datetime.datetime.now().strftime("%d/%m %H:%M"),
-                comments=[],
-                tipo=tipo,
-                gruppo=gruppo,
-                report_id=str(data.get("report_id") or "")[:40]
-            ))
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            print(f"[api_tasks] Errore salvataggio DB: {e}")
-            return jsonify({"error": "Errore interno durante il salvataggio del task."}), 500
-        finally:
-            db.close()
-
-        # --- GESTIONE NOTIFICHE E TAGBOX ---
-        link_task = f"[VEDI TASK #TASK-{task_id}]"
-        nomi = {a.lstrip("@").lower() for a in assigned}
-        gruppi = sorted(n for n in nomi if _e_gruppo(n, ruoli))
-
-        # 1. Post su Tagbox (per i Gruppi)
-        if gruppi:
-            tagbox = load_tagbox()
-            tagbox.insert(0, {
-                "id": uuid.uuid4().hex[:6],
-                "user": f"{mittente} [TASK]",
-                "user_id": me,
-                "text": f"@{gruppi[0]} Nuova task creata: {link_task}",
-                "timestamp": datetime.datetime.now().strftime("%H:%M"),
-                "pinned": False
-            })
-            save_tagbox(tagbox[:50])
-
-        # 2. Notifiche Campanella: chi fa parte dei gruppi indicati e gli utenti menzionati
-        notified_ids = {me}  # Non notificare se stessi
-        for g in gruppi:
-            for u_real_id in utenti_del_gruppo(g, all_users):
-                if u_real_id not in notified_ids:
-                    add_notification(u_real_id, f"{mittente} ha creato una task per @{g}", link=f"/tasks#{task_id}")
-                    notified_ids.add(u_real_id)
-        for n in nomi:
-            if n in user_resolver and not _e_gruppo(n, ruoli):
-                u_real_id = user_resolver[n]
-                if u_real_id not in notified_ids:
-                    add_notification(u_real_id, f"{mittente} ti ha assegnato una nuova task", link=f"/tasks#{task_id}")
-                    notified_ids.add(u_real_id)
-
+        task_id, err = crea_task(session["user_id"], session["user_name"], data.get("description", ""),
+                                 tipo=data.get("tipo"), destinatario=data.get("destinatario"),
+                                 gruppo=data.get("gruppo"), etc=data.get("etc"), report_id=data.get("report_id"))
+        if err:
+            return jsonify({"error": err}), 400 if "interno" not in err else 500
         return jsonify({"success": True, "id": task_id})
 
-    # GET: Visualizzazione filtrata con unione file
-    standard_tasks = load_tasks()
-            
+    # GET: task visibili all'utente, divise tra "pubbliche" e "mie" (personali, private)
+    controlla_task_scadute()
     me = session["user_id"]
     my_role = session["user_role"]
-    ruoli = {(u.get("role") or "").lower() for u in load_users() if u.get("role")}
-    # nomi di gruppo con cui posso essere chiamato: tutti, il mio ruolo e il vecchio nome al plurale
-    miei_gruppi = {"@tutti", f"@{my_role}"} | {f"@{k}" for k, v in GRUPPI_STORICI.items() if v and v == my_role}
+    oggi = datetime.date.today()
+    visibili = [t for t in load_tasks() if task_visibile(t, me, my_role)]
+    for t in visibili:
+        t["categoria"] = "mie" if t.get("tipo") == "personale" else "pubbliche"
+        t["per_me"] = task_mi_riguarda(t, me, my_role) and t.get("created_by") != me
+        d = leggi_data_etc(t.get("etc"))
+        aperta = t.get("status") in ("open", "support")
+        t["giorni_ritardo"] = (oggi - d).days if (d and aperta and d < oggi) else 0
+        t["scaduta"] = t["giorni_ritardo"] > 0
+    return jsonify(visibili)
 
-    def _visibile(t):
-        if t.get("tipo") == "personale":
-            return t.get("created_by") == me  # una task personale la vede solo chi l'ha scritta
-        assegnati = set(t.get("assigned_to") or [])
-        return bool(t.get("created_by") == me or f"@{me}" in assegnati or assegnati & miei_gruppi
-                    or my_role in ['amministratore', 'ceo'])
 
-    visible_standard = [t for t in standard_tasks if _visibile(t)]
-    for t in visible_standard:
-        t["categoria"] = categoria_task(t, ruoli)
-
-    return jsonify(visible_standard)
+@app.route("/api/tasks/etc", methods=["POST"])
+@login_required
+def api_task_etc():
+    """Imposta o sposta la data prevista di completamento. Spostarla richiede un commento."""
+    data = request.json or {}
+    task_id = str(data.get("id") or "")
+    nuova = str(data.get("etc") or "").strip()
+    motivo = str(data.get("comment") or "").strip()
+    err = errore_etc(nuova)
+    if err:
+        return jsonify({"error": err}), 400
+    me, my_role = session["user_id"], session["user_role"]
+    db = _DBSession()
+    try:
+        t = db.query(_Task).filter_by(id=task_id).first()
+        if not t or not task_visibile(t.to_dict(), me, my_role):
+            return jsonify({"error": "Task non trovata."}), 404
+        if t.status not in ("open", "support"):
+            return jsonify({"error": "La task e' gia' conclusa."}), 400
+        vecchia = t.etc or ""
+        if vecchia == nuova:
+            return jsonify({"success": True})
+        if vecchia and not motivo:
+            return jsonify({"error": "Scrivi nel commento perche' sposti la data."}), 400
+        fmt = lambda v: leggi_data_etc(v).strftime("%d/%m/%Y") if leggi_data_etc(v) else v
+        testo = (f"Data prevista spostata dal {fmt(vecchia)} al {fmt(nuova)}" if vecchia
+                 else f"Data prevista impostata al {fmt(nuova)}") + (f": {motivo}" if motivo else "")
+        t.comments = list(t.comments or []) + [{
+            "user": session["user_name"], "text": testo,
+            "timestamp": datetime.datetime.now().strftime("%d/%m %H:%M"), "status_change": "etc"}]
+        t.etc = nuova
+        t.etc_avvisata = ""
+        td = t.to_dict()
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[api_task_etc] Errore: {e}")
+        return jsonify({"error": "Errore interno durante il salvataggio."}), 500
+    finally:
+        db.close()
+    for u in destinatari_task(td, load_users()) - {me}:
+        add_notification(u, f"📅 {session['user_name']} ha cambiato la data prevista della task #{task_id}",
+                         link=f"/tasks#{task_id}", tipo="scadenza")
+    return jsonify({"success": True})
 
 
 @app.route("/api/tasks/destinatari")
@@ -8308,10 +8504,18 @@ def api_tasks_destinatari():
         "utenti": sorted(({"username": u["username"], "full_name": u.get("full_name") or u["username"],
                            "role": u.get("role") or ""} for u in utenti), key=lambda u: u["full_name"].lower()),
         "gruppi": gruppi_task(utenti),
+        # nomi con cui si puo' taggare un gruppo (@tutti, @venditori, ... e i ruoli)
+        "nomi_gruppo": sorted(set(GRUPPI_STORICI) | {(u.get("role") or "").lower() for u in utenti if u.get("role")}),
+        "etichette_gruppo": {**ETICHETTE_RUOLI, "tutti": "Tutti", "venditori": "Venditori"},
     })
 
 
-# --- Report: ognuno scrive il suo; agli altri si mostra l'ultimo di ciascuno ---
+# --- Report: ognuno scrive il suo, a voci (righe); agli altri si mostra l'ultimo inviato di ciascuno ---
+# Una voce diventa task se si spunta o se tagga un collega/gruppo. Le bozze le vede solo l'autore.
+# L'ultimo report inviato si puo' modificare o cancellare; i precedenti (archiviati) no.
+
+MAX_VOCI_REPORT = 60
+
 
 def ultimi_report_per_autore(reports):
     # Mappa per tenere solo il report più recente per ogni autore
@@ -8324,26 +8528,89 @@ def ultimi_report_per_autore(reports):
     return sorted(migliori.values(), key=lambda x: x.get("creato_il", ""), reverse=True)
 
 
+def _ultimo_inviato(db, autore):
+    return db.query(_Report).filter(_Report.autore == autore, _Report.stato != "bozza").order_by(
+        _Report.creato_il.desc(), _Report.id.desc()).first()
+
+
+def voci_report(dati, me, vecchie=None):
+    """Pulisce le voci arrivate dal browser. Restituisce (voci, errore).
+    Ogni voce: testo, task (diventa task), etc, task_id (se la task esiste gia').
+    `vecchie`: voci gia' salvate, per riconoscere le task gia' create (non si ricreano)."""
+    grezze = dati.get("righe")
+    if not isinstance(grezze, list):
+        return None, "Voci del report non valide."
+    task_esistenti = {v.get("task_id") for v in (vecchie or []) if v.get("task_id")}
+    all_users = load_users()
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    voci = []
+    for r in grezze[:MAX_VOCI_REPORT]:
+        if not isinstance(r, dict):
+            continue
+        testo = str(r.get("testo") or "").strip()
+        if not testo:
+            continue
+        if len(testo) > 2000:
+            return None, "Una voce del report e' troppo lunga."
+        task_id = str(r.get("task_id") or "")
+        task_id = task_id if task_id in task_esistenti else ""
+        tipo, _, _ = assegnazione_da_menzioni(testo, me, all_users, ruoli)
+        voci.append({"testo": testo, "task": bool(task_id or r.get("task") or tipo != "personale"),
+                     "etc": str(r.get("etc") or "").strip()[:10], "task_id": task_id})
+    return voci, None
+
+
+def crea_task_dalle_voci(voci, report_id):
+    """Crea le task delle voci spuntate o con tag che non ne hanno ancora una. Restituisce (create, errore)."""
+    me, nome = session["user_id"], session["user_name"]
+    for v in voci:
+        if v["task"] and not v["task_id"]:
+            err = errore_etc(v["etc"])
+            if err:
+                return 0, f"Voce \"{v['testo'][:40]}\": {err}"
+    all_users = load_users()
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    create = 0
+    for v in voci:
+        if v["task"] and not v["task_id"]:
+            tipo, assegnati, gruppo = assegnazione_da_menzioni(v["testo"], me, all_users, ruoli)
+            tid, err = crea_task(me, nome, v["testo"], tipo=tipo, gruppo=gruppo, etc=v["etc"],
+                                 report_id=report_id, assegnati=assegnati)
+            if err:
+                return create, err
+            v["task_id"] = tid
+            create += 1
+    return create, None
+
+
+def _testo_da_voci(voci):
+    return "\n".join(f"• {v['testo']}" for v in voci)
+
+
 @app.route("/report")
 @login_required
 def report_page():
     # Pagina HTML dei report
-    return render_template("report.html", title="Report")
+    return render_template("report.html", title="Task & Report")
 
 
 @app.route("/api/report", methods=["GET"])
 @login_required
 def api_report_lista():
+    me = session["user_id"]
     db = _DBSession()
     try:
-        tutti = db.query(_Report).all()
-        tutti_dicts = [r.to_dict() for r in tutti]
+        tutti_dicts = [r.to_dict() for r in db.query(_Report).all()]
+        inviati = [r for r in tutti_dicts if r.get("stato") != "bozza"]
         # Escludi i report dell'utente collegato dalla lista "ultimi"
-        altri = [r for r in tutti_dicts if r.get("autore") != session["user_id"]]
-        # I tuoi report, ordinati dal più recente, max 20
-        miei = [r for r in tutti_dicts if r.get("autore") == session["user_id"]]
-        miei = sorted(miei, key=lambda x: x.get("creato_il", ""), reverse=True)[:20]
-        return jsonify({"ok": True, "ultimi": ultimi_report_per_autore(altri), "miei": miei})
+        altri = [r for r in inviati if r.get("autore") != me]
+        # I tuoi report inviati, dal più recente, max 20; il primo si puo' ancora modificare
+        miei = sorted((r for r in inviati if r.get("autore") == me), key=lambda x: x.get("creato_il", ""), reverse=True)[:20]
+        bozze = sorted((r for r in tutti_dicts if r.get("stato") == "bozza" and r.get("autore") == me),
+                       key=lambda x: x.get("modificato_il") or x.get("creato_il", ""), reverse=True)
+        return jsonify({"ok": True, "ultimi": ultimi_report_per_autore(altri), "miei": miei,
+                        "bozza": bozze[0] if bozze else None,
+                        "modificabile": miei[0]["id"] if miei else None})
     except Exception as e:
         print(f"[api_report_lista] Errore: {e}")
         return jsonify({"ok": False, "error": "Errore nel caricamento."}), 500
@@ -8354,28 +8621,43 @@ def api_report_lista():
 @app.route("/api/report", methods=["POST"])
 @login_required
 def api_report_salva():
+    """Salva la bozza (azione "bozza", una per utente) o invia il report (azione "invia")."""
     dati = request.get_json(silent=True) or {}
-    testo = (dati.get("testo") or "").strip()
-    if not testo:
-        return jsonify({"ok": False, "error": "Scrivi il testo del report."}), 400
-    if len(testo) > 10000:
-        return jsonify({"ok": False, "error": "Il report e' troppo lungo."}), 400
+    me = session["user_id"]
+    azione = "bozza" if dati.get("azione") == "bozza" else "invia"
+    if "righe" not in dati and dati.get("testo"):
+        dati["righe"] = [{"testo": t} for t in str(dati["testo"]).splitlines()]  # vecchio formato: una voce per riga
+    voci, err = voci_report(dati, me)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    if not voci:
+        return jsonify({"ok": False, "error": "Scrivi almeno una voce del report."}), 400
+    if azione == "invia":
+        for v in voci:
+            if v["task"]:
+                e = errore_etc(v["etc"])
+                if e:
+                    return jsonify({"ok": False, "error": f"Voce \"{v['testo'][:40]}\": {e}"}), 400
 
+    adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db = _DBSession()
     try:
-        nuovo_id = "REP-" + uuid.uuid4().hex[:8].upper()
-        adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        rep = _Report(
-            id=nuovo_id,
-            autore=session["user_id"],
-            autore_nome=session["user_name"],
-            ruolo=session.get("user_role", ""),
-            testo=testo,
-            creato_il=adesso
-        )
-        db.add(rep)
+        rep = db.query(_Report).filter(_Report.autore == me, _Report.stato == "bozza").order_by(
+            _Report.creato_il.desc()).first()
+        if not rep:
+            rep = _Report(id="REP-" + uuid.uuid4().hex[:8].upper(), autore=me, creato_il=adesso)
+            db.add(rep)
+        rep.autore_nome = session["user_name"]
+        rep.ruolo = session.get("user_role", "")
+        rep.righe = voci
+        rep.testo = _testo_da_voci(voci)
+        rep.modificato_il = adesso
+        rep.stato = "bozza"
+        if azione == "invia":
+            rep.creato_il = adesso  # la data del report e' quella dell'invio
+            rep.modificato_il = ""
         db.commit()
-        salvato = rep.to_dict()
+        rep_id = rep.id
     except Exception as e:
         db.rollback()
         print(f"[api_report_salva] Errore: {e}")
@@ -8383,8 +8665,80 @@ def api_report_salva():
     finally:
         db.close()
 
-    # Nessuna notifica: i report si leggono dalla pagina Report
-    return jsonify({"ok": True, "report": salvato})
+    create = 0
+    if azione == "invia":
+        create, err = crea_task_dalle_voci(voci, rep_id)
+        db = _DBSession()
+        try:
+            rep = db.query(_Report).filter_by(id=rep_id).first()
+            rep.righe = voci  # con gli id delle task create
+            rep.stato = "inviato"
+            db.commit()
+            salvato = rep.to_dict()
+        finally:
+            db.close()
+        if err:
+            return jsonify({"ok": True, "report": salvato, "task_create": create,
+                            "avviso": f"Report inviato, ma una task non e' stata creata: {err}"})
+    else:
+        db = _DBSession()
+        try:
+            salvato = db.query(_Report).filter_by(id=rep_id).first().to_dict()
+        finally:
+            db.close()
+    # Nessuna notifica per il report: si legge dalla pagina Report (le task avvisano chi e' taggato)
+    return jsonify({"ok": True, "report": salvato, "task_create": create})
+
+
+@app.route("/api/report/<report_id>", methods=["PUT", "DELETE"])
+@login_required
+def api_report_modifica(report_id):
+    """Modifica o cancella il proprio ultimo report inviato (non quelli archiviati) o la propria bozza."""
+    me = session["user_id"]
+    db = _DBSession()
+    try:
+        rep = db.query(_Report).filter_by(id=report_id).first()
+        if not rep or rep.autore != me:
+            return jsonify({"ok": False, "error": "Report non trovato."}), 404
+        if rep.stato != "bozza":
+            ultimo = _ultimo_inviato(db, me)
+            if not ultimo or ultimo.id != rep.id:
+                return jsonify({"ok": False, "error": "Si puo' modificare solo l'ultimo report inviato: questo e' archiviato."}), 403
+        if request.method == "DELETE":
+            db.delete(rep)
+            db.commit()
+            return jsonify({"ok": True})
+        vecchie = list(rep.righe or [])
+        stato = rep.stato
+    finally:
+        db.close()
+
+    voci, err = voci_report(request.get_json(silent=True) or {}, me, vecchie)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    if not voci:
+        return jsonify({"ok": False, "error": "Il report deve avere almeno una voce: per toglierlo usa Elimina."}), 400
+    create = 0
+    if stato != "bozza":
+        create, err = crea_task_dalle_voci(voci, report_id)
+        if err and not create:
+            return jsonify({"ok": False, "error": err}), 400
+    db = _DBSession()
+    try:
+        rep = db.query(_Report).filter_by(id=report_id).first()
+        rep.righe = voci
+        rep.testo = _testo_da_voci(voci)
+        rep.modificato_il = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.commit()
+        salvato = rep.to_dict()
+    except Exception as e:
+        db.rollback()
+        print(f"[api_report_modifica] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True, "report": salvato, "task_create": create,
+                    "avviso": f"Una task non e' stata creata: {err}" if err else ""})
 
 
 # Archivio: tutti i report di tutti, dal piu' recente, con filtri e a pagine
@@ -8410,8 +8764,8 @@ def api_report_archivio():
         except (ValueError, TypeError):
             limit = 20
 
-        # Costruzione query base
-        query = db.query(_Report)
+        # Costruzione query base (le bozze le vede solo l'autore, nella pagina Report)
+        query = db.query(_Report).filter(_Report.stato != "bozza")
 
         # Filtro per autore
         if autore:
@@ -8450,7 +8804,7 @@ def api_report_archivio():
 
         # Lista autori solo alla prima pagina
         if offset == 0:
-            autori_query = db.query(_Report.autore, _Report.autore_nome).distinct()
+            autori_query = db.query(_Report.autore, _Report.autore_nome).filter(_Report.stato != "bozza").distinct()
             autori_righe = autori_query.all()
             
             # Ordino per autore_nome senza distinzione maiuscole e rimuovo duplicati
@@ -8529,6 +8883,8 @@ def api_update_task():
     notification_sent = False # <--- Flag per evitare notifiche doppie
     for t in tasks:
         if t["id"] == task_id:
+            if not task_visibile(t, session["user_id"], session["user_role"]):
+                return jsonify({"error": "Task non trovata."}), 404
             t["status"] = new_status
             if new_status in ['resolved', 'failed'] and status_change:
                 t["concluded_at"] = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -8543,7 +8899,7 @@ def api_update_task():
                     for u in all_users:
                         if u['role'] in ['amministratore', 'ceo'] or u['username'] == t.get('created_by'):
                             if u['username'] != session['user_id']:
-                                add_notification(u['username'], f"⚠️ {mittente} richiede SUPPORTO per la task #{t['id']}", link=f"/tasks#{task_id}")
+                                add_notification(u['username'], f"⚠️ {mittente} richiede SUPPORTO per la task #{t['id']}", link=f"/tasks#{task_id}", tipo="supporto")
                                 notification_sent = True
 
                 if status_change in ['resolved', 'failed']:
@@ -8558,13 +8914,13 @@ def api_update_task():
                         if _e_gruppo(m_lower, ruoli):
                             for u_real_id in utenti_del_gruppo(m_lower, all_users):
                                 if u_real_id not in notified_assigned:
-                                    add_notification(u_real_id, f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}")
+                                    add_notification(u_real_id, f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}", tipo=status_change)
                                     notified_assigned.add(u_real_id)
                                     notification_sent = True
                         elif m_lower in user_resolver:
                             u_real_id = user_resolver[m_lower]
                             if u_real_id not in notified_assigned:
-                                add_notification(u_real_id, f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}")
+                                add_notification(u_real_id, f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}", tipo=status_change)
                                 notified_assigned.add(u_real_id)
                                 notification_sent = True
             
@@ -8582,7 +8938,7 @@ def api_update_task():
                     user_resolver = {u['username'].lower(): u['username'] for u in all_users}
                     notified = {session["user_id"]}
                     if t.get("created_by") and t["created_by"] not in notified:
-                        add_notification(t["created_by"], f"{session['user_name']} ha commentato la task #{task_id}", link=f"/tasks#{task_id}")
+                        add_notification(t["created_by"], f"{session['user_name']} ha commentato la task #{task_id}", link=f"/tasks#{task_id}", tipo="commento")
                         notified.add(t["created_by"])
                     # in una task personale le menzioni non notificano: il collega non la vedrebbe
                     c_mentions = re.findall(r"@(\w+)", comment_text) if t.get("tipo") != "personale" else []
@@ -8590,17 +8946,31 @@ def api_update_task():
                         if cm_lower in user_resolver:
                             u_real_id = user_resolver[cm_lower]
                             if u_real_id not in notified:
-                                add_notification(u_real_id, f"{session['user_name']} ti ha menzionato nella task #{task_id}", link=f"/tasks#{task_id}")
+                                add_notification(u_real_id, f"{session['user_name']} ti ha menzionato nella task #{task_id}", link=f"/tasks#{task_id}", tipo="menzione")
                                 notified.add(u_real_id)
             break
     save_tasks(tasks)
     return jsonify({"success": True})
 
+def _ordine_notifica(ts, adesso=None):
+    """Le notifiche hanno l'ora come "gg/mm HH:MM" (senza anno): chiave di ordinamento che regge il cambio d'anno."""
+    adesso = adesso or datetime.datetime.now()
+    try:
+        d = datetime.datetime.strptime(f"{adesso.year}/{ts}", "%Y/%d/%m %H:%M")
+    except (ValueError, TypeError):
+        return datetime.datetime.min
+    if d > adesso + datetime.timedelta(days=1):
+        d = d.replace(year=d.year - 1)
+    return d
+
+
 def load_notifications():
-    """Carica le notifiche dal DB SQLite."""
+    """Carica le notifiche dal DB SQLite, dalla piu' recente."""
     db = _DBSession()
     try:
-        return [n.to_dict() for n in db.query(_Notification).order_by(_Notification.timestamp.desc()).all()]
+        tutte = [n.to_dict() for n in db.query(_Notification).all()]
+        adesso = datetime.datetime.now()
+        return sorted(tutte, key=lambda n: _ordine_notifica(n.get("timestamp"), adesso), reverse=True)
     except Exception:
         return []
     finally:
@@ -8634,8 +9004,9 @@ def save_notifications(notifs):
     finally:
         db.close()
 
-def add_notification(user_id, text, link="/tasks"):
-    """Aggiunge una notifica al DB per un utente specifico."""
+def add_notification(user_id, text, link="/tasks", tipo="info"):
+    """Aggiunge una notifica al DB per un utente specifico.
+    tipo: task, commento, menzione, supporto, resolved, failed, scadenza, versione, info (icona e colore nel pannello)."""
     db = _DBSession()
     try:
         new_id = uuid.uuid4().hex[:6]
@@ -8646,12 +9017,13 @@ def add_notification(user_id, text, link="/tasks"):
             link=link,
             timestamp=datetime.datetime.now().strftime("%d/%m %H:%M"),
             read=False,
-            notif_type="info"
+            notif_type=tipo or "info"
         ))
+        db.flush()
         # Mantieni solo le ultime 100 notifiche per utente
-        all_user_notifs = db.query(_Notification).filter_by(
-            target_user=user_id
-        ).order_by(_Notification.timestamp.desc()).all()
+        adesso = datetime.datetime.now()
+        all_user_notifs = sorted(db.query(_Notification).filter_by(target_user=user_id).all(),
+                                 key=lambda x: _ordine_notifica(x.timestamp, adesso), reverse=True)
         if len(all_user_notifs) > 100:
             for old in all_user_notifs[100:]:
                 db.delete(old)
@@ -8693,31 +9065,65 @@ def verifica_e_annuncia_aggiornamento():
             add_notification(
                 user_id=u["username"], 
                 text=f"ADMIN: È disponibile la nuova v{APP_VERSION}.", 
-                link="/changelog"
+                link="/changelog", tipo="versione"
             )
         
         # 3. Salva l'avvenuto annuncio
         ANNOUNCED_FILE.write_text(APP_VERSION)
 
 
+def tipo_notifica(n):
+    """Tipo di una notifica; per quelle vecchie (tutte "info") si ricava dal testo."""
+    tipo = n.get("type") or "info"
+    if tipo != "info":
+        return tipo
+    testo = (n.get("text") or "").lower()
+    for chiave, t in (("supporto", "supporto"), ("completata", "resolved"), ("fallita", "failed"),
+                      ("menzionato", "menzione"), ("tag board", "menzione"), ("commentato", "commento"),
+                      ("nuova v", "versione"), ("task", "task")):
+        if chiave in testo:
+            return t
+    return "info"
+
+
 @app.route("/api/notifications")
 @login_required
 def get_notifications():
-    all_n = load_notifications()
-    # Filtra per l'utente corrente
-    my_n = [n for n in all_n if (n.get("target_user") or n.get("user_id")) == session["user_id"]]
+    controlla_task_scadute()
+    me = session["user_id"]
+    my_n = [n for n in load_notifications() if (n.get("target_user") or n.get("user_id")) == me]
     unread = sum(1 for n in my_n if not n["read"])
-    return jsonify({"notifications": my_n[:20], "unread_count": unread})
+    oggi = datetime.date.today()
+    adesso = datetime.datetime.now()
+    mostrate = []
+    for n in my_n[:40]:
+        d = _ordine_notifica(n.get("timestamp"), adesso)
+        giorni = (oggi - d.date()).days if d != datetime.datetime.min else 99
+        mostrate.append(dict(n, type=tipo_notifica(n),
+                             giorno="oggi" if giorni <= 0 else ("ieri" if giorni == 1 else "prima"),
+                             ora=d.strftime("%H:%M") if d != datetime.datetime.min else ""))
+    return jsonify({"notifications": mostrate, "unread_count": unread})
 
 @app.route("/api/notifications/read", methods=["POST"])
 @login_required
 def mark_notifications_read():
-    all_n = load_notifications()
-    for n in all_n:
-        if (n.get("target_user") or n.get("user_id")) == session["user_id"]:
-            n["read"] = True
-    save_notifications(all_n)
-    return jsonify({"success": True})    
+    """Segna come letta una notifica ({"id": ...}) oppure, senza id, tutte quelle dell'utente."""
+    nid = str((request.get_json(silent=True) or {}).get("id") or "")
+    db = _DBSession()
+    try:
+        q = db.query(_Notification).filter(_Notification.target_user == session["user_id"],
+                                           _Notification.read == False)  # noqa: E712
+        if nid:
+            q = q.filter(_Notification.id == nid)
+        q.update({_Notification.read: True}, synchronize_session=False)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[notifiche lette] Errore: {e}")
+        return jsonify({"success": False}), 500
+    finally:
+        db.close()
+    return jsonify({"success": True})
 
 
 if __name__ == "__main__":

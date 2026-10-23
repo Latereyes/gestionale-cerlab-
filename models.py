@@ -304,6 +304,8 @@ class Task(Base):
     tipo = Column(String, default="")
     gruppo = Column(String, default="")
     report_id = Column(String, default="")   # report da cui e' nata la task, se c'e'
+    etc = Column(String, default="")         # Estimated Time Complete "YYYY-MM-DD" (obbligatoria per le task nuove)
+    etc_avvisata = Column(String, default="")  # ultima ETC per cui e' gia' partito l'avviso di scadenza
 
     def __repr__(self):
         return f"<Task(id='{self.id}', status='{self.status}')>"
@@ -321,7 +323,8 @@ class Task(Base):
             "comments": self.comments or [],
             "tipo": self.tipo or "",
             "gruppo": self.gruppo or "",
-            "report_id": self.report_id or ""
+            "report_id": self.report_id or "",
+            "etc": self.etc or "",
         }
 
 
@@ -335,6 +338,10 @@ class Report(Base):
     ruolo = Column(String)
     testo = Column(Text)
     creato_il = Column(String)                # "YYYY-MM-DD HH:MM:SS"
+    # Il report e' fatto di voci (righe): [{"testo", "task", "etc", "task_id"}]; vuoto nei report vecchi
+    righe = Column(JSON, default=list)
+    stato = Column(String, default="inviato")  # bozza (la vede solo l'autore) | inviato
+    modificato_il = Column(String, default="")
 
     def to_dict(self):
         return {
@@ -344,6 +351,9 @@ class Report(Base):
             "ruolo": self.ruolo or "",
             "testo": self.testo or "",
             "creato_il": self.creato_il or "",
+            "righe": self.righe or [],
+            "stato": self.stato or "inviato",
+            "modificato_il": self.modificato_il or "",
         }
 
 
@@ -645,7 +655,9 @@ def _apply_schema_migrations():
         "ordini":     [("extra", "TEXT DEFAULT '{}'")],
         "bolle":      [("extra", "TEXT DEFAULT '{}'")],
         "magazzino_movimenti": [("costo_unitario", "REAL"), ("costo_precedente", "REAL")],
-        "tasks": [("tipo", "TEXT DEFAULT ''"), ("gruppo", "TEXT DEFAULT ''"), ("report_id", "TEXT DEFAULT ''")],
+        "tasks": [("tipo", "TEXT DEFAULT ''"), ("gruppo", "TEXT DEFAULT ''"), ("report_id", "TEXT DEFAULT ''"),
+                  ("etc", "TEXT DEFAULT ''"), ("etc_avvisata", "TEXT DEFAULT ''")],
+        "reports": [("righe", "TEXT DEFAULT '[]'"), ("stato", "TEXT DEFAULT 'inviato'"), ("modificato_il", "TEXT DEFAULT ''")],
     }
 
     for table, columns in migrations.items():
