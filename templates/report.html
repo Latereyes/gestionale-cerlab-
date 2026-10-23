@@ -439,8 +439,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const elimina = async (r) => {
     const conTask = (r.righe || []).some(v => v.task_id);
     if (!confirm('Eliminare questo report?' + (conTask ? ' Le task già create restano.' : ''))) return;
-    const res = await fetch(`/api/report/${encodeURIComponent(r.id)}`, { method: 'DELETE' });
-    const dati = await res.json().catch(() => ({}));
+    let dati = {};
+    try {
+      const res = await fetch(`/api/report/${encodeURIComponent(r.id)}`, { method: 'DELETE' });
+      dati = await res.json().catch(() => ({}));
+    } catch (e) { dati = { error: 'Errore di rete: riprova.' }; }
     if (!dati.ok) { alert(dati.error || 'Report non eliminato.'); return; }
     if (modificaId === r.id) { modificaId = null; stato(''); impostaModo('nuovo'); caricaComposer(); }
     carica();

@@ -8469,7 +8469,7 @@ def api_task_etc():
             return jsonify({"success": True})
         if vecchia and not motivo:
             return jsonify({"error": "Scrivi nel commento perche' sposti la data."}), 400
-        fmt = lambda v: datetime.datetime.strptime(v, "%Y-%m-%d").strftime("%d/%m/%Y")
+        fmt = lambda v: leggi_data_etc(v).strftime("%d/%m/%Y") if leggi_data_etc(v) else v
         testo = (f"Data prevista spostata dal {fmt(vecchia)} al {fmt(nuova)}" if vecchia
                  else f"Data prevista impostata al {fmt(nuova)}") + (f": {motivo}" if motivo else "")
         t.comments = list(t.comments or []) + [{

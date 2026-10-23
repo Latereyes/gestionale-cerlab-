@@ -345,8 +345,11 @@ document.addEventListener('DOMContentLoaded', () => {
         err.textContent = '';
         if (!etc) { err.textContent = 'Scegli la data sul calendario.'; return; }
         if (document.getElementById(`etc-form-${id}`).dataset.haEtc && !motivo) { err.textContent = 'Scrivi perché sposti la data.'; return; }
-        const res = await fetch('/api/tasks/etc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, etc, comment: motivo }) });
-        const dati = await res.json().catch(() => ({}));
+        let res, dati;
+        try {
+            res = await fetch('/api/tasks/etc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, etc, comment: motivo }) });
+            dati = await res.json().catch(() => ({}));
+        } catch (e) { err.textContent = 'Errore di rete: riprova.'; return; }
         if (!res.ok) { err.textContent = dati.error || 'Data non salvata.'; return; }
         window.loadTasks();
     };
@@ -573,6 +576,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             window.toggleCreateArea();
             window.loadTasks();
+        } catch (e) {
+            errBox.textContent = 'Errore di rete: la task non è stata salvata, riprova.';
+            errBox.style.display = '';
         } finally {
             btn.disabled = false;
         }
