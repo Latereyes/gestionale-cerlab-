@@ -1,0 +1,195 @@
+{# Ceerlo, l'assistente AI: personaggio in basso a sinistra con fumetto e chat, in tutte le pagine (incluso da base.html).
+   L'avatar si sostituisce mettendo un'immagine in static/ceerlo/ (avatar.gif, avatar.png o avatar.webp). #}
+<div id="ceerlo" class="ceerlo" data-cliente="{{ current_client_id or (request.view_args or {}).get('client_id', '') }}"
+     data-preventivo="{{ current_quote_id or (request.view_args or {}).get('quote_id', '') }}">
+    <div class="ceerlo-fumetto" id="ceerlo-fumetto" hidden>
+        <button type="button" class="ceerlo-chiudi-fumetto" title="Chiudi">&times;</button>
+        <div id="ceerlo-fumetto-testo"></div>
+    </div>
+
+    <div class="ceerlo-pannello" id="ceerlo-pannello" hidden>
+        <div class="ceerlo-testa">
+            <strong>Ceerlo</strong>
+            <span class="ceerlo-stato" id="ceerlo-stato"></span>
+            <button type="button" class="ceerlo-azione" id="ceerlo-nuova" title="Nuova conversazione"><i class="fas fa-broom"></i></button>
+            <button type="button" class="ceerlo-azione" id="ceerlo-chiudi" title="Chiudi"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="ceerlo-messaggi" id="ceerlo-messaggi"></div>
+        <form class="ceerlo-scrivi" id="ceerlo-form" autocomplete="off">
+            <textarea id="ceerlo-input" rows="2" maxlength="2000" placeholder="Chiedi a Ceerlo..."></textarea>
+            <button type="submit" class="btn primary" id="ceerlo-invia" title="Invia"><i class="fas fa-paper-plane"></i></button>
+        </form>
+    </div>
+
+    <button type="button" class="ceerlo-avatar" id="ceerlo-avatar" title="Ceerlo, l'assistente">
+        {% if ceerlo_avatar %}<img src="{{ url_for('static', filename='ceerlo/' + ceerlo_avatar) }}" alt="">{% endif %}
+        <svg viewBox="0 0 64 64" aria-hidden="true">
+            <rect x="10" y="16" width="44" height="36" rx="14" fill="#3b4cca"/>
+            <rect x="16" y="24" width="32" height="18" rx="9" fill="#fff"/>
+            <circle class="ceerlo-occhio" cx="25" cy="33" r="4" fill="#1f2a7a"/>
+            <circle class="ceerlo-occhio" cx="39" cy="33" r="4" fill="#1f2a7a"/>
+            <line x1="32" y1="16" x2="32" y2="8" stroke="#3b4cca" stroke-width="3"/>
+            <circle cx="32" cy="7" r="4" fill="#f59e0b"/>
+        </svg>
+        <span class="ceerlo-pensa" id="ceerlo-pensa" hidden><i></i><i></i><i></i></span>
+    </button>
+</div>
+
+<style>
+.ceerlo { position: fixed; left: 18px; bottom: 18px; z-index: 9998; font-size: 14px; }
+.ceerlo-avatar { width: 64px; height: 64px; border: 0; background: transparent; padding: 0; cursor: pointer; position: relative;
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,.25)); transition: transform .2s; }
+.ceerlo-avatar:hover { transform: translateY(-3px) rotate(-4deg); }
+.ceerlo-avatar img { width: 64px; height: 64px; object-fit: contain; }
+.ceerlo-avatar img + svg { display: none; }
+.ceerlo-avatar svg { width: 64px; height: 64px; }
+.ceerlo-occhio { animation: ceerlo-blink 5s infinite; transform-origin: center; transform-box: fill-box; }
+@keyframes ceerlo-blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
+.ceerlo-pensa { position: absolute; top: -6px; right: -10px; background: #fff; border-radius: 10px; padding: 3px 6px; display: flex; gap: 3px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+.ceerlo-pensa i { width: 6px; height: 6px; border-radius: 50%; background: #3b4cca; animation: ceerlo-dots 1.2s infinite; }
+.ceerlo-pensa i:nth-child(2) { animation-delay: .2s; } .ceerlo-pensa i:nth-child(3) { animation-delay: .4s; }
+@keyframes ceerlo-dots { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+
+.ceerlo-fumetto { position: absolute; left: 10px; bottom: 78px; width: 260px; background: #fffbe6; border: 1px solid #e8d77a;
+    border-radius: 14px; padding: 12px 28px 12px 12px; box-shadow: 0 6px 18px rgba(0,0,0,.18); cursor: pointer; line-height: 1.45; }
+.ceerlo-fumetto::after { content: ""; position: absolute; left: 22px; bottom: -9px; border: 9px solid transparent; border-bottom: 0; border-top-color: #fffbe6; }
+.ceerlo-chiudi-fumetto { position: absolute; top: 4px; right: 6px; border: 0; background: none; font-size: 18px; cursor: pointer; color: #887; }
+
+.ceerlo-pannello { position: absolute; left: 0; bottom: 78px; width: 360px; max-height: min(560px, 70vh); background: #fff;
+    border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.25); display: flex; flex-direction: column; overflow: hidden; }
+.ceerlo-pannello[hidden], .ceerlo-fumetto[hidden], .ceerlo-pensa[hidden] { display: none; }
+.ceerlo-testa { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #3b4cca; color: #fff; }
+.ceerlo-stato { font-size: 11px; opacity: .85; flex: 1; }
+.ceerlo-azione { border: 0; background: none; color: #fff; cursor: pointer; font-size: 14px; }
+.ceerlo-messaggi { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: #f6f7fb; min-height: 160px; }
+.ceerlo-msg { max-width: 85%; padding: 8px 11px; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word; line-height: 1.45; }
+.ceerlo-msg.utente { align-self: flex-end; background: #3b4cca; color: #fff; border-bottom-right-radius: 4px; }
+.ceerlo-msg.da-ceerlo { align-self: flex-start; background: #fff; border: 1px solid #e3e5ef; border-bottom-left-radius: 4px; }
+.ceerlo-msg.info { align-self: center; background: none; color: #777; font-size: 12px; text-align: center; }
+.ceerlo-scrivi { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #eee; }
+.ceerlo-scrivi textarea { flex: 1; resize: none; border-radius: 10px; padding: 8px; font: inherit; }
+
+@media (max-width: 768px) {
+    .ceerlo { left: 10px; bottom: 10px; }
+    .ceerlo-avatar, .ceerlo-avatar svg, .ceerlo-avatar img { width: 50px; height: 50px; }
+    .ceerlo-pannello { position: fixed; left: 8px; right: 8px; bottom: 70px; width: auto; max-height: 75vh; }
+    .ceerlo-fumetto { bottom: 62px; width: min(260px, calc(100vw - 40px)); }
+}
+@media print { .ceerlo { display: none; } }
+</style>
+
+<script>
+(function () {
+    const box = document.getElementById('ceerlo');
+    if (!box) return;
+    const $ = id => document.getElementById(id);
+    const pannello = $('ceerlo-pannello'), fumetto = $('ceerlo-fumetto'), elenco = $('ceerlo-messaggi');
+    const input = $('ceerlo-input'), invia = $('ceerlo-invia'), stato = $('ceerlo-stato'), pensa = $('ceerlo-pensa');
+    const leggi = (k, d) => { try { return JSON.parse(sessionStorage.getItem(k)) ?? d; } catch (e) { return d; } };
+    const scrivi = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+    let storia = leggi('ceerlo-storia', []);
+    let inAttesa = leggi('ceerlo-job', null);
+
+    function mostraMessaggio(ruolo, testo) {
+        const d = document.createElement('div');
+        d.className = 'ceerlo-msg ' + ruolo;
+        d.textContent = testo;
+        elenco.appendChild(d);
+        elenco.scrollTop = elenco.scrollHeight;
+        return d;
+    }
+    function disegna() {
+        elenco.innerHTML = '';
+        if (!storia.length) mostraMessaggio('da-ceerlo', 'Ciao! Sono Ceerlo. Chiedimi di clienti, preventivi o appuntamenti: uso i dati della pagina in cui sei.');
+        storia.forEach(m => mostraMessaggio(m.ruolo === 'utente' ? 'utente' : 'da-ceerlo', m.testo));
+    }
+    function apri() { fumetto.hidden = true; pannello.hidden = false; disegna(); input.focus(); }
+
+    $('ceerlo-avatar').onclick = () => pannello.hidden ? apri() : (pannello.hidden = true);
+    $('ceerlo-chiudi').onclick = () => { pannello.hidden = true; };
+    $('ceerlo-nuova').onclick = () => { storia = []; scrivi('ceerlo-storia', storia); disegna(); };
+    fumetto.querySelector('.ceerlo-chiudi-fumetto').onclick = e => { e.stopPropagation(); fumetto.hidden = true; };
+    fumetto.onclick = () => { if (fumetto.dataset.riassunto) { storia.push({ruolo: 'ceerlo', testo: fumetto.dataset.riassunto}); scrivi('ceerlo-storia', storia); } apri(); };
+    input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('ceerlo-form').requestSubmit(); } });
+
+    function occupato(si, testo) {
+        pensa.hidden = !si; invia.disabled = si; stato.textContent = testo || '';
+    }
+
+    async function aspetta(job) {
+        occupato(true, 'sto pensando...');
+        const attesa = mostraMessaggio('info', '...');
+        while (true) {
+            let d;
+            try { d = await (await fetch('/api/ceerlo/job/' + job)).json(); }
+            catch (e) { await new Promise(r => setTimeout(r, 4000)); continue; }
+            if (!d.ok) { attesa.textContent = d.error; break; }
+            if (d.stato === 'in_coda') {
+                attesa.textContent = d.posizione ? `Ci sono ${d.posizione} richieste prima della tua: attendi un momento.` : 'Tocca a te, sto iniziando...';
+            } else if (d.stato === 'in_lavoro') {
+                attesa.textContent = 'Sto scrivendo la risposta...';
+            } else {
+                attesa.remove();
+                const testo = d.stato === 'fatto' ? (d.risposta || '(nessuna risposta)') : 'Non ci sono riuscito: ' + d.errore;
+                storia.push({ruolo: 'ceerlo', testo});
+                scrivi('ceerlo-storia', storia.slice(-20));
+                mostraMessaggio('da-ceerlo', testo);
+                if (pannello.hidden) { mostraFumetto('Ho la risposta alla tua domanda: cliccami.'); }
+                break;
+            }
+            await new Promise(r => setTimeout(r, 2000));
+        }
+        inAttesa = null; scrivi('ceerlo-job', null);
+        occupato(false);
+    }
+
+    $('ceerlo-form').addEventListener('submit', async e => {
+        e.preventDefault();
+        const testo = input.value.trim();
+        if (!testo || invia.disabled) return;
+        input.value = '';
+        storia.push({ruolo: 'utente', testo});
+        scrivi('ceerlo-storia', storia.slice(-20));
+        mostraMessaggio('utente', testo);
+        try {
+            const r = await fetch('/api/ceerlo/chiedi', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({messaggi: storia.slice(-10), pagina: location.pathname,
+                                      cliente_id: box.dataset.cliente, preventivo: box.dataset.preventivo})});
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error);
+            inAttesa = d.job; scrivi('ceerlo-job', inAttesa);
+            aspetta(d.job);
+        } catch (err) {
+            storia.pop(); scrivi('ceerlo-storia', storia);
+            mostraMessaggio('info', err.message);
+        }
+    });
+
+    function mostraFumetto(testo, riassunto) {
+        $('ceerlo-fumetto-testo').textContent = testo;
+        fumetto.dataset.riassunto = riassunto || '';
+        if (pannello.hidden) fumetto.hidden = false;
+    }
+
+    // Riassunti degli appuntamenti pronti: il fumetto li propone una volta per sessione
+    async function controllaRiassunti() {
+        try {
+            const d = await (await fetch('/api/ceerlo/riassunti')).json();
+            if (!d.ok) return;
+            const visti = leggi('ceerlo-visti', []);
+            const nuovo = d.riassunti.find(r => !visti.includes(r.evento_id));
+            if (!nuovo) return;
+            visti.push(nuovo.evento_id); scrivi('ceerlo-visti', visti);
+            const quando = new Date(nuovo.inizio.length > 10 ? nuovo.inizio : nuovo.inizio + 'T00:00:00');
+            const etichetta = quando.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'short'}) +
+                (nuovo.inizio.length > 10 ? ' alle ' + quando.toLocaleTimeString('it-IT', {hour: '2-digit', minute: '2-digit'}) : '');
+            mostraFumetto(`Ho preparato il riassunto per "${nuovo.titolo}" ${etichetta}. Cliccami per leggerlo.`,
+                `Riassunto per "${nuovo.titolo}" (${etichetta}):\n\n${nuovo.testo}`);
+        } catch (e) {}
+    }
+
+    if (inAttesa) aspetta(inAttesa);
+    setTimeout(controllaRiassunti, 1500);
+    setInterval(controllaRiassunti, 10 * 60 * 1000);
+})();
+</script>

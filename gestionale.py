@@ -95,6 +95,8 @@ ADMIN_TASKS_FILE = DATA_DIR / "admin_tasks.json"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 import integrazioni_google
 integrazioni_google.configura(DATA_DIR)
+import ceerlo
+ceerlo.configura(DATA_DIR)
 CLIENTS_DIR.mkdir(exist_ok=True)
 QUOTES_DIR.mkdir(exist_ok=True)
 ALLEGATI_DIR.mkdir(exist_ok=True)
@@ -7778,6 +7780,7 @@ def run_server():
     if not is_debug_mode or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         threading.Thread(target=sincronizza_stati_tutti_preventivi, daemon=True).start()
         integrazioni_google.avvia_riepilogo_giornaliero(report_inviati_dal, lambda: indirizzi_email("email_report"))
+        ceerlo.avvia_riassunti_automatici(prossimi_eventi, contesto_evento)
     
     print(SERVER_ADDRESS_INFO)
     if is_debug_mode:
@@ -8919,6 +8922,7 @@ def _redirect_uri_google():
 def impostazioni_google():
     return render_template("impostazioni_google.html", title="Email e Google Calendar",
                            stato=integrazioni_google.stato_pubblico(),
+                           ceerlo_cfg=ceerlo.leggi_config(),
                            ricevono_report=[u for u in load_users() if u.get("email_report") and u.get("email")],
                            ricevono_admin=[u for u in load_users() if u.get("email_admin") and u.get("email")],
                            redirect_uri=_redirect_uri_google(),
@@ -9040,7 +9044,11 @@ def api_calendario_eventi():
     if (al - dal).days > 370 or al < dal:
         return jsonify({"ok": False, "error": "Intervallo di date non valido."}), 400
     try:
-        return jsonify({"ok": True, "eventi": integrazioni_google.eventi(dal, al)})
+        eventi = integrazioni_google.eventi(dal, al)
+        pronti = ceerlo.riassunti()
+        for e in eventi:
+            e["riassunto"] = (pronti.get(e["id"]) or {}).get("testo", "")
+        return jsonify({"ok": True, "eventi": eventi, "ceerlo": ceerlo.attivo()})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
@@ -9067,6 +9075,187 @@ def api_calendario_crea():
         return jsonify({"ok": True, "evento": ev})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
+
+
+# --- Ceerlo, l'assistente AI (logica e coda in ceerlo.py; il modello gira con Ollama su un altro PC via Tailscale) ---
+
+@app.context_processor
+def inject_ceerlo():
+    if "user_id" not in session:
+        return {}
+    try:
+        cartella = Path(app.static_folder) / "ceerlo"
+        avatar = next((n for n in ("avatar.gif", "avatar.webp", "avatar.png") if (cartella / n).exists()), "")
+        return dict(ceerlo_attivo=ceerlo.attivo(), ceerlo_avatar=avatar)
+    except Exception:
+        return {}
+
+
+_EVENTI_CACHE = {"quando": 0, "dati": []}
+
+
+def eventi_vicini():
+    """Appuntamenti da 7 giorni fa ai prossimi 30, tenuti 5 minuti per non chiamare Google a ogni domanda."""
+    if time.time() - _EVENTI_CACHE["quando"] > 300:
+        oggi = datetime.date.today()
+        _EVENTI_CACHE["dati"] = integrazioni_google.eventi(oggi - datetime.timedelta(days=7), oggi + datetime.timedelta(days=30))
+        _EVENTI_CACHE["quando"] = time.time()
+    return _EVENTI_CACHE["dati"]
+
+
+def prossimi_eventi(ore):
+    if not integrazioni_google.calendar_collegato():
+        return []
+    adesso = datetime.datetime.now()
+    limite = (adesso + datetime.timedelta(hours=ore)).strftime("%Y-%m-%dT%H:%M")
+    da = adesso.strftime("%Y-%m-%d")  # da inizio giornata: anche gli appuntamenti di oggi gia' iniziati
+    return [e for e in eventi_vicini() if da <= e["inizio"][:16] <= limite]
+
+
+def _contesto_cliente(client_id="", nome=""):
+    """Dati del cliente per Ceerlo: anagrafica essenziale, note interne, preventivi (senza importi), report che lo citano."""
+    db = _DBSession()
+    try:
+        cli = db.query(_Cliente).filter_by(id_cliente=client_id).first() if client_id else None
+        if not cli and nome:
+            cli = db.query(_Cliente).filter(_Cliente.cliente.ilike(nome.strip())).first()
+        if not cli:
+            return f"Cliente: {nome} (non trovato in anagrafica)" if nome else ""
+        nome_cli = cli.cliente or cli.rag_sociale or cli.id_cliente
+        righe = [f"Cliente: {nome_cli}" + (f" ({cli.rag_sociale})" if cli.rag_sociale and cli.rag_sociale != nome_cli else ""),
+                 f"Zona: {' '.join(x for x in (cli.indirizzo, cli.comune, cli.provincia) if x)}".rstrip()]
+        if (cli.note_interne or "").strip():
+            righe.append("Note interne: " + cli.note_interne.strip()[:1500])
+        prev = db.query(_Preventivo).filter_by(id_cliente=cli.id_cliente).order_by(_Preventivo.data.desc()).limit(10).all()
+        if prev:
+            righe.append("Preventivi (piu' recenti prima): " + "; ".join(
+                f"{p.numero} del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})" for p in prev))
+        reports = db.query(_Report).filter(_Report.stato != "bozza", _Report.testo.ilike(f"%{nome_cli}%")).order_by(
+            _Report.creato_il.desc()).limit(5).all()
+        for r in reports:
+            righe.append(f"Report di {r.autore_nome} del {(r.creato_il or '')[:10]}: {(r.testo or '')[:400]}")
+        return "\n".join(righe)
+    finally:
+        db.close()
+
+
+def contesto_ceerlo(pagina="", client_id="", quote_id=""):
+    parti = []
+    if pagina:
+        parti.append(f"L'utente e' nella pagina {pagina} del gestionale.")
+    if quote_id:
+        db = _DBSession()
+        try:
+            p = db.query(_Preventivo).filter_by(numero=quote_id).first()
+            if p:
+                parti.append(f"Preventivo aperto: {p.numero} del {p.data}, stato {p.stato}, venditore {p.venditore}.")
+                client_id = client_id or p.id_cliente or ""
+        finally:
+            db.close()
+    if client_id:
+        parti.append(_contesto_cliente(client_id))
+    try:
+        oggi = datetime.date.today().isoformat()
+        domani = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        vicini = [e for e in eventi_vicini() if e["inizio"][:10] in (oggi, domani)] if integrazioni_google.calendar_collegato() else []
+        if vicini:
+            parti.append("Appuntamenti di oggi e domani:\n" + "\n".join(
+                f"- {e['inizio'][:16].replace('T', ' ')} {e['titolo']}" + (f" (cliente {e['cliente']})" if e["cliente"] else "")
+                for e in vicini))
+    except Exception as e:
+        print(f"[ceerlo] Calendario non letto: {e}")
+    return "\n\n".join(x for x in parti if x)
+
+
+def contesto_evento(ev):
+    testo = (f"Appuntamento: {ev['titolo']} il {ev['inizio'][:16].replace('T', ' ')}"
+             + (f" a {ev['luogo']}" if ev.get("luogo") else "") + (f". Note: {ev['descrizione'][:500]}" if ev.get("descrizione") else ""))
+    return testo + "\n" + _contesto_cliente(ev.get("cliente_id", ""), ev.get("cliente", ""))
+
+
+@app.route("/api/ceerlo/chiedi", methods=["POST"])
+@login_required
+def api_ceerlo_chiedi():
+    if not ceerlo.attivo():
+        return jsonify({"ok": False, "error": "Ceerlo non e' ancora configurato."}), 503
+    d = request.get_json(silent=True) or {}
+    storia = [m for m in (d.get("messaggi") or [])[-10:] if isinstance(m, dict) and str(m.get("testo") or "").strip()]
+    if not storia or storia[-1].get("ruolo") != "utente":
+        return jsonify({"ok": False, "error": "Scrivi una domanda."}), 400
+    contesto = contesto_ceerlo(str(d.get("pagina") or "")[:200], str(d.get("cliente_id") or "")[:50],
+                               str(d.get("preventivo") or "")[:50])
+    messaggi = [{"role": "system", "content": ceerlo.prompt_sistema(session.get("user_name"), session.get("user_role"), contesto)}]
+    messaggi += [{"role": "user" if m.get("ruolo") == "utente" else "assistant", "content": str(m["testo"])[:4000]} for m in storia]
+    try:
+        jid = ceerlo.aggiungi(session["user_id"], messaggi, ceerlo.PRIO_CHAT, "chat")
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 429
+    return jsonify({"ok": True, "job": jid, "posizione": ceerlo._CODA.posizione(jid)})
+
+
+@app.route("/api/ceerlo/job/<jid>")
+@login_required
+def api_ceerlo_job(jid):
+    stato = ceerlo.stato_job(jid, None if session.get("user_role") == "amministratore" else session["user_id"])
+    if not stato:
+        return jsonify({"ok": False, "error": "Richiesta non trovata o scaduta."}), 404
+    return jsonify({"ok": True, **stato})
+
+
+@app.route("/api/ceerlo/riassunto", methods=["POST"])
+@login_required
+def api_ceerlo_riassunto():
+    """Riassunto di un appuntamento chiesto a mano (anche se ce n'e' gia' uno: lo rifa')."""
+    if not ceerlo.attivo():
+        return jsonify({"ok": False, "error": "Ceerlo non e' ancora configurato."}), 503
+    eid = (request.get_json(silent=True) or {}).get("evento_id", "")
+    try:
+        _EVENTI_CACHE["quando"] = 0
+        ev = next((e for e in eventi_vicini() if e["id"] == eid), None)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    if not ev:
+        return jsonify({"ok": False, "error": "Appuntamento non trovato (si possono riassumere quelli dei prossimi 30 giorni)."}), 404
+    jid = ceerlo.chiedi_riassunto(ev, contesto_evento(ev), utente=session["user_id"])
+    return jsonify({"ok": True, "job": jid, "posizione": ceerlo._CODA.posizione(jid)})
+
+
+@app.route("/api/ceerlo/riassunti")
+@login_required
+def api_ceerlo_riassunti():
+    """Riassunti pronti degli appuntamenti da oggi in poi, per il fumetto di Ceerlo."""
+    oggi = datetime.date.today().isoformat()
+    pronti = [{"evento_id": k, **v} for k, v in ceerlo.riassunti().items() if (v.get("inizio") or "") >= oggi]
+    return jsonify({"ok": True, "riassunti": sorted(pronti, key=lambda r: r["inizio"]), "coda": ceerlo.riepilogo_coda()})
+
+
+@app.route("/impostazioni/ceerlo", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_ceerlo():
+    f = request.form
+    valori = {"attivo": bool(f.get("attivo")), "riassunti_auto": bool(f.get("riassunti_auto")),
+              "url": (f.get("url") or "").strip().rstrip("/"), "modello": (f.get("modello") or "").strip()}
+    for k, minimo, massimo in (("contemporanee", 1, 4), ("ore_anticipo", 1, 168), ("num_ctx", 2048, 65536), ("timeout", 30, 1800)):
+        try:
+            valori[k] = max(minimo, min(massimo, int(f.get(k))))
+        except (TypeError, ValueError):
+            pass
+    if valori["url"] and not re.match(r"^https?://", valori["url"]):
+        valori["url"] = "http://" + valori["url"]
+    ceerlo.salva_config(valori)
+    flash("Impostazioni di Ceerlo salvate.", "success")
+    return redirect(url_for("impostazioni_google") + "#ceerlo")
+
+
+@app.route("/impostazioni/ceerlo/prova", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_ceerlo_prova():
+    try:
+        return jsonify({"ok": True, "modelli": ceerlo.modelli_disponibili()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Ollama non raggiungibile: {e}"}), 502
 
 
 @app.route("/api/tasks/update", methods=["POST"])

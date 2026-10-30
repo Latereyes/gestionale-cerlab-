@@ -97,6 +97,7 @@
     const clienti = {};
     document.querySelectorAll('#lista-clienti option').forEach(o => { clienti[o.value] = o.dataset.id; });
     let inizio = new Date(); inizio.setHours(0, 0, 0, 0);
+    let conCeerlo = false;
 
     const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const piu = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -116,6 +117,7 @@
             const r = await fetch(`/api/calendario/eventi?dal=${iso(inizio)}&al=${iso(fine)}`);
             const dati = await r.json();
             if (!dati.ok) throw new Error(dati.error || 'Errore');
+            conCeerlo = !!dati.ceerlo;
             mostra(dati.eventi);
         } catch (e) {
             elenco.innerHTML = `<p class="errore"><i class="fas fa-exclamation-triangle"></i> ${esc(e.message)}</p>`;
@@ -137,7 +139,11 @@
                             ${ev.cliente ? `<div><i class="fas fa-user"></i> ${ev.cliente_id ? `<a href="/cliente/dettaglio/${encodeURIComponent(ev.cliente_id)}">${esc(ev.cliente)}</a>` : esc(ev.cliente)}</div>` : ''}
                             ${ev.preventivo ? `<div><i class="fas fa-file-alt"></i> Preventivo ${esc(ev.preventivo)}</div>` : ''}
                             ${ev.luogo ? `<div><i class="fas fa-map-marker-alt"></i> ${esc(ev.luogo)}</div>` : ''}
-                            ${ev.link ? `<a class="muted" href="${esc(ev.link)}" target="_blank" rel="noopener">Apri in Google Calendar</a>` : ''}
+                            ${ev.riassunto ? `<details class="riassunto"><summary><i class="fas fa-robot"></i> Riassunto di Ceerlo</summary>${esc(ev.riassunto)}</details>` : ''}
+                            <div class="azioni-evento">
+                                ${ev.link ? `<a class="muted" href="${esc(ev.link)}" target="_blank" rel="noopener">Apri in Google Calendar</a>` : ''}
+                                ${conCeerlo ? `<button type="button" class="btn btn-small" data-riassumi="${esc(ev.id)}"><i class="fas fa-robot"></i> ${ev.riassunto ? 'Rifai riassunto' : 'Riassunto'}</button>` : ''}
+                            </div>
                         </div>
                     </div>`).join('')}
             </div>`).join('');
@@ -164,6 +170,32 @@
         }
     });
 
+    // Riassunto chiesto a Ceerlo: va in coda, la pagina aspetta e poi ricarica l'elenco
+    elenco.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-riassumi]');
+        if (!btn) return;
+        btn.disabled = true;
+        try {
+            const r = await fetch('/api/ceerlo/riassunto', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                            body: JSON.stringify({evento_id: btn.dataset.riassumi})});
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error);
+            while (true) {
+                const s = await (await fetch('/api/ceerlo/job/' + d.job)).json();
+                if (!s.ok) throw new Error(s.error);
+                if (s.stato === 'errore') throw new Error(s.errore);
+                if (s.stato === 'fatto') break;
+                btn.innerHTML = s.stato === 'in_coda' && s.posizione ? `<i class="fas fa-hourglass-half"></i> In coda (${s.posizione} prima)` : '<i class="fas fa-spinner fa-spin"></i> Ceerlo scrive...';
+                await new Promise(res => setTimeout(res, 2500));
+            }
+            carica();
+        } catch (err) {
+            alert('Riassunto non riuscito: ' + err.message);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-robot"></i> Riassunto';
+        }
+    });
+
     document.getElementById('prec').onclick = () => { inizio = piu(inizio, -GIORNI); carica(); };
     document.getElementById('succ').onclick = () => { inizio = piu(inizio, GIORNI); carica(); };
     carica();
@@ -185,6 +217,10 @@
 .evento-corpo { line-height: 1.5; font-size: 14px; }
 .evento-corpo i { width: 16px; color: #888; }
 .errore { color: #b3261e; }
+.riassunto { margin: 6px 0; background: #f4f5fd; border-radius: 8px; padding: 6px 10px; white-space: pre-wrap; font-size: 13px; }
+.riassunto summary { cursor: pointer; font-weight: 600; white-space: normal; }
+.azioni-evento { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.btn-small { padding: 3px 10px; font-size: 12px; }
 @media (max-width: 640px) {
     .griglia-form { grid-template-columns: 1fr; }
     .evento { flex-direction: column; gap: 2px; }

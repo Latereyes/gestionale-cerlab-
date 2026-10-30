@@ -1,7 +1,20 @@
 {% extends "base.html" %}
 
 {% block page_title %}
-<h1><i class="fas fa-envelope"></i> Email e Google Calendar</h1>
+<h1><i class="fas fa-plug"></i> Email, Calendar e Ceerlo</h1>
+<script>
+document.getElementById('ceerlo-prova').onclick = async () => {
+    const esito = document.getElementById('ceerlo-esito');
+    esito.textContent = 'Provo...';
+    try {
+        const r = await fetch('{{ url_for("impostazioni_ceerlo_prova") }}', {method: 'POST'});
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error);
+        document.getElementById('ceerlo-modelli').innerHTML = d.modelli.map(m => `<option value="${m.replace(/"/g, '')}">`).join('');
+        esito.textContent = `Collegato. Modelli disponibili: ${d.modelli.join(', ') || 'nessuno'}`;
+    } catch (e) { esito.textContent = e.message; }
+};
+</script>
 {% endblock %}
 
 {% block body %}
@@ -104,6 +117,57 @@
         </div>
     </div>
 
+    <div class="card" id="ceerlo">
+        <div class="card-header">
+            <h3><i class="fas fa-robot"></i> Ceerlo, l'assistente AI</h3>
+            <span class="stato-pill {{ 'ok' if ceerlo_cfg.attivo and ceerlo_cfg.modello else '' }}">{{ 'Attivo' if ceerlo_cfg.attivo and ceerlo_cfg.modello else 'Spento' }}</span>
+        </div>
+        <div class="card-body">
+            <p class="muted">Il modello gira con Ollama su un altro PC dell'azienda, raggiunto via Tailscale. Su quel PC Ollama deve
+                accettare connessioni dalla rete: variabile di sistema <code>OLLAMA_HOST=0.0.0.0</code>, poi riavvia Ollama.
+                Il gestionale mette in coda le richieste di tutti: prima le chat, poi i riassunti chiesti a mano, poi quelli automatici.</p>
+            <form method="post" action="{{ url_for('impostazioni_ceerlo') }}">
+                <div class="form-group">
+                    <label>Indirizzo di Ollama</label>
+                    <input name="url" value="{{ ceerlo_cfg.url }}" placeholder="http://100.x.y.z:11434">
+                </div>
+                <div class="form-group">
+                    <label>Modello</label>
+                    <div style="display:flex; gap:8px;">
+                        <input name="modello" id="ceerlo-modello" list="ceerlo-modelli" value="{{ ceerlo_cfg.modello }}" placeholder="es. qwen3:8b">
+                        <button type="button" class="btn" id="ceerlo-prova" style="white-space:nowrap;"><i class="fas fa-plug"></i> Prova</button>
+                    </div>
+                    <datalist id="ceerlo-modelli"></datalist>
+                    <small class="muted" id="ceerlo-esito"></small>
+                </div>
+                <div class="griglia-2">
+                    <div class="form-group">
+                        <label>Richieste insieme</label>
+                        <input type="number" name="contemporanee" min="1" max="4" value="{{ ceerlo_cfg.contemporanee }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Contesto (token)</label>
+                        <input type="number" name="num_ctx" min="2048" max="65536" step="1024" value="{{ ceerlo_cfg.num_ctx }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Riassunti per le prossime (ore)</label>
+                        <input type="number" name="ore_anticipo" min="1" max="168" value="{{ ceerlo_cfg.ore_anticipo }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Tempo massimo risposta (s)</label>
+                        <input type="number" name="timeout" min="30" max="1800" value="{{ ceerlo_cfg.timeout }}">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="riga-check"><input type="checkbox" name="attivo" value="1" {% if ceerlo_cfg.attivo %}checked{% endif %}> Ceerlo attivo in tutte le pagine</label>
+                    <label class="riga-check"><input type="checkbox" name="riassunti_auto" value="1" {% if ceerlo_cfg.riassunti_auto %}checked{% endif %}> Riassunti automatici degli appuntamenti con un cliente</label>
+                </div>
+                <div class="toolbar" style="justify-content: flex-end;">
+                    <button type="submit" class="btn primary">Salva</button>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 
 <style>
@@ -118,5 +182,20 @@
 .passi { padding-left: 18px; line-height: 1.6; font-size: 13px; }
 .destinatari { padding-left: 18px; line-height: 1.7; }
 code { word-break: break-all; }
+.griglia-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+@media (max-width: 640px) { .griglia-2 { grid-template-columns: 1fr; } }
 </style>
+<script>
+document.getElementById('ceerlo-prova').onclick = async () => {
+    const esito = document.getElementById('ceerlo-esito');
+    esito.textContent = 'Provo...';
+    try {
+        const r = await fetch('{{ url_for("impostazioni_ceerlo_prova") }}', {method: 'POST'});
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error);
+        document.getElementById('ceerlo-modelli').innerHTML = d.modelli.map(m => `<option value="${m.replace(/"/g, '')}">`).join('');
+        esito.textContent = `Collegato. Modelli disponibili: ${d.modelli.join(', ') || 'nessuno'}`;
+    } catch (e) { esito.textContent = e.message; }
+};
+</script>
 {% endblock %}
