@@ -17,13 +17,19 @@
         </div>
         <div class="form-group">
             <label>Ruolo*</label>
+            {% if user.username == session.user_id or user.role == 'amministratore' %}
+            <input type="hidden" name="role" value="{{ user.role }}">
+            <select disabled title="Il ruolo di un amministratore non si cambia da qui">
+            {% else %}
             <select name="role" required>
+            {% endif %}
                 <option value="venditore" {% if user.role == 'venditore' %}selected{% endif %}>Venditore</option>
                 <option value="segreteria" {% if user.role == 'segreteria' %}selected{% endif %}>Segreteria</option>
                 <option value="ceo" {% if user.role == 'ceo' %}selected{% endif %}>CEO</option>
                 <option value="amministratore" {% if user.role == 'amministratore' %}selected{% endif %}>Amministratore</option>
             </select>
         </div>
+        {% include "_campi_email_utente.html" %}
         <div class="toolbar" style="justify-content: flex-end;">
             <a href="{{ url_for('gestisci_utenti') }}" class="btn">Annulla</a>
             <button type="submit" class="btn primary">Salva Modifiche</button>

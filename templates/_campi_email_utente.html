@@ -1,0 +1,16 @@
+{# Email dell'utente e avvisi email automatici (usato da aggiungi e modifica utente) #}
+<div class="form-group">
+    <label>Email</label>
+    <input type="email" name="email" value="{{ user.email if user else '' }}" placeholder="nome@gmail.com">
+</div>
+<div class="form-group">
+    <label style="display:flex; gap:8px; align-items:center; font-weight:normal;">
+        <input type="checkbox" name="email_report" value="1" style="width:auto;" {% if user and user.email_report %}checked{% endif %}>
+        Riceve via email i report inviati e il riepilogo giornaliero
+    </label>
+    <label style="display:flex; gap:8px; align-items:center; font-weight:normal;">
+        <input type="checkbox" name="email_admin" value="1" style="width:auto;" {% if user and user.email_admin %}checked{% endif %}>
+        Riceve via email le richieste del tasto admin
+    </label>
+    <p class="muted" style="font-size: 12px;">Le email non contengono importi ne' dati economici e partono solo quando il PC del gestionale e' acceso.</p>
+</div>

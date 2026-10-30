@@ -24,6 +24,7 @@
                 <option value="amministratore">Amministratore</option>
             </select>
         </div>
+        {% include "_campi_email_utente.html" %}
         <p class="muted" style="font-size: 12px;">La password iniziale verrà impostata automaticamente su `username123`. L'utente dovrà cambiarla al primo accesso.</p>
         <div class="toolbar" style="justify-content: flex-end;">
             <a href="{{ url_for('gestisci_utenti') }}" class="btn">Annulla</a>

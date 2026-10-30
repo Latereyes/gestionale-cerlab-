@@ -13,7 +13,10 @@
         <div class="card-header">
             <h3>Elenco Utenti Registrati</h3>
             {% if session.user_role == 'amministratore' %}
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <a href="{{ url_for('impostazioni_google') }}" class="btn"><i class="fas fa-envelope"></i> Email e Google Calendar</a>
             <a href="{{ url_for('aggiungi_utente') }}" class="btn primary"><i class="fas fa-plus"></i> Aggiungi Nuovo Utente</a>
+            </div>
             {% endif %}
         </div>
         <div class="card-body">
@@ -40,6 +43,7 @@
                                 <div>
                                     <strong>{{ user.username }}</strong><br>
                                     <small class="muted">{{ user.full_name }}</small>
+                                    {% if user.email %}<br><small class="muted" title="{% if user.email_report %}Riceve i report. {% endif %}{% if user.email_admin %}Riceve le richieste admin.{% endif %}"><i class="fas fa-envelope"></i> {{ user.email }}{% if user.email_report %} &middot; report{% endif %}{% if user.email_admin %} &middot; admin{% endif %}</small>{% endif %}
                                 </div>
                             </div>
                         </td>
@@ -60,6 +64,9 @@
                         {% endif %}
     {% else %}
         <span class="muted">(Utente corrente)</span>
+    {% endif %}
+    {% if session.user_role == 'amministratore' and (user.role == 'amministratore' or user.username == session.user_id) %}
+        <a href="{{ url_for('modifica_utente', username=user.username) }}" class="btn icon-btn" title="Modifica nome, sigla ed email"><i class="fas fa-pencil-alt"></i></a>
     {% endif %}
 </td>
                     </tr>

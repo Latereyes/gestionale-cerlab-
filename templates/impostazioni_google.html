@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-envelope"></i> Email e Google Calendar</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+
+    <div class="card">
+        <div class="card-header">
+            <h3><i class="fas fa-paper-plane"></i> Email automatiche</h3>
+            <span class="stato-pill {{ 'ok' if stato.email.attiva else '' }}">{{ 'Attive' if stato.email.attiva else 'Non configurate' }}</span>
+        </div>
+        <div class="card-body">
+            <p class="muted">Le email partono da un account Gmail dell'azienda con una <strong>password per le app</strong>
+                (Account Google &rarr; Sicurezza &rarr; Verifica in due passaggi attiva &rarr;
+                <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">Password per le app</a>).
+                Non contengono importi ne' dati economici e partono solo quando questo PC e' acceso.</p>
+
+            <form method="post" action="{{ url_for('impostazioni_google_email') }}">
+                <div class="form-group">
+                    <label>Account Gmail mittente</label>
+                    <input type="email" name="mittente" value="{{ stato.email.mittente }}" placeholder="negozio@gmail.com">
+                </div>
+                <div class="form-group">
+                    <label>Password per le app {% if stato.email.password_salvata %}<small class="muted">(salvata: lascia vuoto per non cambiarla)</small>{% endif %}</label>
+                    <input type="password" name="password" autocomplete="new-password" placeholder="16 lettere">
+                </div>
+                <div class="form-group">
+                    <label class="riga-check"><input type="checkbox" name="invia_report" value="1" {% if stato.email.invia_report %}checked{% endif %}> Email a ogni report inviato</label>
+                    <label class="riga-check"><input type="checkbox" name="riepilogo" value="1" {% if stato.email.riepilogo %}checked{% endif %}> Riepilogo giornaliero dei report alle
+                        <input type="time" name="ora_riepilogo" value="{{ stato.email.ora_riepilogo }}" style="width:auto;"></label>
+                    {% if stato.email.ultimo_riepilogo %}<small class="muted">Ultimo riepilogo: {{ stato.email.ultimo_riepilogo[:16] }}</small>{% endif %}
+                </div>
+                <div class="toolbar" style="justify-content: flex-end;">
+                    <button type="submit" class="btn primary">Salva</button>
+                </div>
+            </form>
+            <form method="post" action="{{ url_for('impostazioni_google_email_prova') }}" style="margin-top:8px; text-align:right;">
+                <button type="submit" class="btn" {% if not stato.email.attiva %}disabled{% endif %}><i class="fas fa-vial"></i> Manda una email di prova a me</button>
+            </form>
+
+            <h4>Chi riceve le email</h4>
+            <p class="muted">Si sceglie in <a href="{{ url_for('gestisci_utenti') }}">Gestione Utenti</a>, modificando ogni utente.</p>
+            <ul class="destinatari">
+                <li><strong>Report e riepilogo:</strong>
+                    {% for u in ricevono_report %}{{ u.full_name or u.username }} &lt;{{ u.email }}&gt;{% if not loop.last %}, {% endif %}{% else %}<span class="muted">nessuno</span>{% endfor %}</li>
+                <li><strong>Richieste del tasto admin:</strong>
+                    {% for u in ricevono_admin %}{{ u.full_name or u.username }} &lt;{{ u.email }}&gt;{% if not loop.last %}, {% endif %}{% else %}<span class="muted">nessuno</span>{% endfor %}</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3><i class="fas fa-calendar-alt"></i> Google Calendar condiviso</h3>
+            <span class="stato-pill {{ 'ok' if stato.calendar.collegato else '' }}">{{ 'Collegato' if stato.calendar.collegato else 'Non collegato' }}</span>
+        </div>
+        <div class="card-body">
+            <ol class="muted passi">
+                <li>Su <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>, con l'account del negozio, crea un progetto e attiva <strong>Google Calendar API</strong>.</li>
+                <li>In "Schermata consenso OAuth" scegli <strong>Esterno</strong>, poi <strong>Pubblica l'app</strong> (in modalita' test il collegamento scade ogni 7 giorni).</li>
+                <li>In "Credenziali" crea un <strong>ID client OAuth</strong> di tipo <strong>App desktop</strong> e copia qui ID e segreto.</li>
+                <li>L'ID calendario si trova in Google Calendar &rarr; Impostazioni del calendario condiviso &rarr; "Integra calendario".</li>
+                <li>Premi <strong>Collega</strong> da questo PC e accedi con un account che puo' modificare il calendario. Google avvisera' che l'app non e' verificata: scegli "Avanzate" e prosegui.</li>
+            </ol>
+
+            <form method="post" action="{{ url_for('impostazioni_google_calendar') }}">
+                <div class="form-group">
+                    <label>ID client OAuth</label>
+                    <input name="client_id" value="{{ stato.calendar.client_id }}" placeholder="...apps.googleusercontent.com">
+                </div>
+                <div class="form-group">
+                    <label>Segreto client {% if stato.calendar.secret_salvato %}<small class="muted">(salvato: lascia vuoto per non cambiarlo)</small>{% endif %}</label>
+                    <input type="password" name="client_secret" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label>ID calendario condiviso</label>
+                    <input name="calendar_id" value="{{ stato.calendar.calendar_id }}" placeholder="...@group.calendar.google.com">
+                </div>
+                <div class="toolbar" style="justify-content: flex-end;">
+                    <button type="submit" class="btn primary">Salva</button>
+                </div>
+            </form>
+
+            {% if stato.calendar.collegato %}
+            <p>Collegato con <strong>{{ stato.calendar.account or 'account Google' }}</strong> dal {{ stato.calendar.collegato_il }}.</p>
+            {% endif %}
+            <div class="toolbar" style="justify-content: flex-end; gap: 8px;">
+                {% if stato.calendar.collegato %}
+                <form method="post" action="{{ url_for('google_scollega') }}" onsubmit="return confirm('Scollegare Google Calendar?');">
+                    <button type="submit" class="btn">Scollega</button>
+                </form>
+                {% endif %}
+                {% if dal_pc_server %}
+                <a href="{{ url_for('google_collega') }}" class="btn primary"><i class="fab fa-google"></i> {{ 'Ricollega' if stato.calendar.collegato else 'Collega' }}</a>
+                {% else %}
+                <span class="muted">Per collegare apri il gestionale su questo PC: <code>http://127.0.0.1:{{ request.host.split(':')[-1] }}/impostazioni/google</code></span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<style>
+.editor-container { max-width: 760px; margin: 24px auto; padding: 0 16px; }
+.card { margin-bottom: 20px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.form-group { margin-bottom: 14px; }
+.riga-check { display: flex; gap: 8px; align-items: center; font-weight: normal; flex-wrap: wrap; }
+.riga-check input[type=checkbox] { width: auto; }
+.stato-pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #eee; color: #666; white-space: nowrap; }
+.stato-pill.ok { background: #e3f6e8; color: #1b7a3a; }
+.passi { padding-left: 18px; line-height: 1.6; font-size: 13px; }
+.destinatari { padding-left: 18px; line-height: 1.7; }
+code { word-break: break-all; }
+</style>
+{% endblock %}

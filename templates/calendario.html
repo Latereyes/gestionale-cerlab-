@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block page_title %}
+<h1><i class="fas fa-calendar-alt"></i> Calendario</h1>
+{% endblock %}
+
+{% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<div class="editor-container">
+
+    {% if not collegato %}
+    <div class="card">
+        <div class="empty-state">
+            <i class="fas fa-calendar-times"></i>
+            <h4>Google Calendar non ancora collegato</h4>
+            <p>Un amministratore deve collegare il calendario condiviso del negozio da
+                {% if session.user_role == 'amministratore' %}<a href="{{ url_for('impostazioni_google') }}">Email e Google Calendar</a>{% else %}Email e Google Calendar{% endif %}.</p>
+        </div>
+    </div>
+    {% else %}
+
+    <div class="card">
+        <div class="card-header">
+            <h3><i class="fas fa-plus"></i> Nuovo appuntamento</h3>
+        </div>
+        <div class="card-body">
+            <form id="form-appuntamento" class="griglia-form" autocomplete="off">
+                <div class="form-group largo">
+                    <label>Titolo*</label>
+                    <input name="titolo" required maxlength="200" placeholder="Sopralluogo, consegna, incontro in negozio...">
+                </div>
+                <div class="form-group">
+                    <label>Giorno*</label>
+                    <input type="date" name="giorno" required>
+                </div>
+                <div class="form-group">
+                    <label>Ora <small class="muted">(vuoto = tutto il giorno)</small></label>
+                    <input type="time" name="ora">
+                </div>
+                <div class="form-group">
+                    <label>Durata</label>
+                    <select name="durata">
+                        <option value="30">30 minuti</option>
+                        <option value="60" selected>1 ora</option>
+                        <option value="90">1 ora e mezza</option>
+                        <option value="120">2 ore</option>
+                        <option value="180">3 ore</option>
+                        <option value="240">4 ore</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Cliente</label>
+                    <input name="cliente" list="lista-clienti" value="{{ precompila.cliente }}" placeholder="Cerca cliente">
+                    <input type="hidden" name="cliente_id" value="{{ precompila.cliente_id }}">
+                    <datalist id="lista-clienti">
+                        {% for c in clienti %}<option value="{{ c.nome }}" data-id="{{ c.id }}"></option>{% endfor %}
+                    </datalist>
+                </div>
+                <div class="form-group">
+                    <label>Preventivo</label>
+                    <input name="preventivo" value="{{ precompila.preventivo }}" placeholder="Numero, se c'e'">
+                </div>
+                <div class="form-group largo">
+                    <label>Luogo</label>
+                    <input name="luogo" maxlength="300" placeholder="Indirizzo o 'in negozio'">
+                </div>
+                <div class="form-group largo">
+                    <label>Note</label>
+                    <textarea name="descrizione" rows="2" maxlength="4000"></textarea>
+                </div>
+                <input type="hidden" name="task" value="{{ precompila.task }}">
+                <div class="toolbar largo" style="justify-content: flex-end;">
+                    <button type="submit" class="btn primary" id="btn-crea"><i class="fas fa-calendar-plus"></i> Crea appuntamento</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <button class="btn icon-btn" id="prec" title="Settimane precedenti"><i class="fas fa-chevron-left"></i></button>
+            <h3 id="periodo">Prossimi appuntamenti</h3>
+            <button class="btn icon-btn" id="succ" title="Settimane successive"><i class="fas fa-chevron-right"></i></button>
+        </div>
+        <div class="card-body" id="elenco-eventi"><p class="muted">Caricamento...</p></div>
+    </div>
+    {% endif %}
+</div>
+
+{% if collegato %}
+<script>
+(function () {
+    const GIORNI = 14;
+    const elenco = document.getElementById('elenco-eventi');
+    const form = document.getElementById('form-appuntamento');
+    const clienti = {};
+    document.querySelectorAll('#lista-clienti option').forEach(o => { clienti[o.value] = o.dataset.id; });
+    let inizio = new Date(); inizio.setHours(0, 0, 0, 0);
+
+    const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const piu = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+    const esc = t => String(t || '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    const giornoLungo = d => d.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'long'});
+    const ora = s => s.length > 10 ? new Date(s).toLocaleTimeString('it-IT', {hour: '2-digit', minute: '2-digit'}) : '';
+
+    form.giorno.value = iso(new Date());
+    form.cliente.addEventListener('change', () => { form.cliente_id.value = clienti[form.cliente.value] || ''; });
+
+    async function carica() {
+        const fine = piu(inizio, GIORNI - 1);
+        document.getElementById('periodo').textContent =
+            `${inizio.toLocaleDateString('it-IT', {day: 'numeric', month: 'short'})} - ${fine.toLocaleDateString('it-IT', {day: 'numeric', month: 'short', year: 'numeric'})}`;
+        elenco.innerHTML = '<p class="muted">Caricamento...</p>';
+        try {
+            const r = await fetch(`/api/calendario/eventi?dal=${iso(inizio)}&al=${iso(fine)}`);
+            const dati = await r.json();
+            if (!dati.ok) throw new Error(dati.error || 'Errore');
+            mostra(dati.eventi);
+        } catch (e) {
+            elenco.innerHTML = `<p class="errore"><i class="fas fa-exclamation-triangle"></i> ${esc(e.message)}</p>`;
+        }
+    }
+
+    function mostra(eventi) {
+        if (!eventi.length) { elenco.innerHTML = '<p class="muted">Nessun appuntamento in questo periodo.</p>'; return; }
+        const perGiorno = {};
+        eventi.forEach(ev => { (perGiorno[ev.inizio.slice(0, 10)] = perGiorno[ev.inizio.slice(0, 10)] || []).push(ev); });
+        elenco.innerHTML = Object.keys(perGiorno).sort().map(g => `
+            <div class="giorno">
+                <div class="giorno-titolo">${esc(giornoLungo(new Date(g + 'T00:00:00')))}</div>
+                ${perGiorno[g].map(ev => `
+                    <div class="evento">
+                        <div class="evento-ora">${ev.tutto_il_giorno ? 'Tutto il giorno' : esc(ora(ev.inizio) + ' - ' + ora(ev.fine))}</div>
+                        <div class="evento-corpo">
+                            <strong>${esc(ev.titolo)}</strong>
+                            ${ev.cliente ? `<div><i class="fas fa-user"></i> ${ev.cliente_id ? `<a href="/cliente/dettaglio/${encodeURIComponent(ev.cliente_id)}">${esc(ev.cliente)}</a>` : esc(ev.cliente)}</div>` : ''}
+                            ${ev.preventivo ? `<div><i class="fas fa-file-alt"></i> Preventivo ${esc(ev.preventivo)}</div>` : ''}
+                            ${ev.luogo ? `<div><i class="fas fa-map-marker-alt"></i> ${esc(ev.luogo)}</div>` : ''}
+                            ${ev.link ? `<a class="muted" href="${esc(ev.link)}" target="_blank" rel="noopener">Apri in Google Calendar</a>` : ''}
+                        </div>
+                    </div>`).join('')}
+            </div>`).join('');
+    }
+
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = document.getElementById('btn-crea');
+        btn.disabled = true;
+        const dati = Object.fromEntries(new FormData(form).entries());
+        try {
+            const r = await fetch('/api/calendario/eventi', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dati)});
+            const esito = await r.json();
+            if (!esito.ok) throw new Error(esito.error || 'Errore');
+            window.showNotification ? window.showNotification('Appuntamento creato', esito.evento.titolo) : null;
+            ['titolo', 'ora', 'luogo', 'descrizione'].forEach(k => { form[k].value = ''; });
+            inizio = new Date(dati.giorno + 'T00:00:00') < inizio || new Date(dati.giorno + 'T00:00:00') > piu(inizio, GIORNI - 1)
+                ? new Date(dati.giorno + 'T00:00:00') : inizio;
+            carica();
+        } catch (err) {
+            alert('Appuntamento non creato: ' + err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById('prec').onclick = () => { inizio = piu(inizio, -GIORNI); carica(); };
+    document.getElementById('succ').onclick = () => { inizio = piu(inizio, GIORNI); carica(); };
+    carica();
+})();
+</script>
+{% endif %}
+
+<style>
+.editor-container { max-width: 860px; margin: 24px auto; padding: 0 16px; }
+.card { margin-bottom: 20px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.griglia-form { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 14px; }
+.griglia-form .largo { grid-column: 1 / -1; }
+.form-group { margin-bottom: 12px; }
+.giorno { margin-bottom: 16px; }
+.giorno-titolo { font-weight: 600; text-transform: capitalize; border-bottom: 1px solid #e5e5e5; padding-bottom: 4px; margin-bottom: 6px; }
+.evento { display: flex; gap: 14px; padding: 6px 0; }
+.evento-ora { min-width: 110px; color: #666; font-size: 13px; }
+.evento-corpo { line-height: 1.5; font-size: 14px; }
+.evento-corpo i { width: 16px; color: #888; }
+.errore { color: #b3261e; }
+@media (max-width: 640px) {
+    .griglia-form { grid-template-columns: 1fr; }
+    .evento { flex-direction: column; gap: 2px; }
+}
+</style>
+{% endblock %}

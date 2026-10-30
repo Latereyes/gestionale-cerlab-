@@ -1060,6 +1060,12 @@
        <i class="fas fa-swatchbook"></i> Campionari
     </a>
 
+    <a href="{{ url_for('calendario_page') }}" 
+       class="btn {{ 'disabled' if active_page == 'calendario' else '' }}" 
+       title="Calendario appuntamenti (Google Calendar)">
+       <i class="fas fa-calendar-alt"></i> Calendario
+    </a>
+
 </div> 
 {% endmacro %}
 

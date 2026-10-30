@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, json, re, datetime, uuid, copy, base64
 import urllib.request
 from pathlib import Path
-from flask import Flask, request, redirect, url_for, flash, send_from_directory, render_template, session, jsonify
+from flask import Flask, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, jsonify
 from jinja2.runtime import Undefined
 from werkzeug.security import check_password_hash, generate_password_hash 
 from functools import wraps
@@ -93,6 +93,8 @@ ADMIN_TASKS_FILE = DATA_DIR / "admin_tasks.json"
 
 # Creiamo le sottocartelle se non esistono
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+import integrazioni_google
+integrazioni_google.configura(DATA_DIR)
 CLIENTS_DIR.mkdir(exist_ok=True)
 QUOTES_DIR.mkdir(exist_ok=True)
 ALLEGATI_DIR.mkdir(exist_ok=True)
@@ -1075,6 +1077,9 @@ def save_users(users_data):
                 existing.sigla = u.get("sigla", existing.sigla)
                 existing.force_password_reset = u.get("force_password_reset", False)
                 existing.last_seen_version = u.get("last_seen_version", "")
+                existing.email = u.get("email", existing.email or "")
+                existing.email_report = u.get("email_report", existing.email_report or False)
+                existing.email_admin = u.get("email_admin", existing.email_admin or False)
             else:
                 db.add(_Utente(
                     username=username,
@@ -1083,7 +1088,10 @@ def save_users(users_data):
                     role=u.get("role", "venditore"),
                     sigla=u.get("sigla", ""),
                     force_password_reset=u.get("force_password_reset", False),
-                    last_seen_version=u.get("last_seen_version", "")
+                    last_seen_version=u.get("last_seen_version", ""),
+                    email=u.get("email", ""),
+                    email_report=u.get("email_report", False),
+                    email_admin=u.get("email_admin", False)
                 ))
         db.commit()
     except Exception as e:
@@ -4157,7 +4165,8 @@ def aggiungi_utente():
             "full_name": request.form.get("full_name"),
             "role": request.form.get("role"),
             "sigla": request.form.get("sigla", "").upper(),
-            "force_password_reset": True
+            "force_password_reset": True,
+            **dati_email_utente(request.form)
         }
         users.append(new_user)
         save_users(users)
@@ -4165,6 +4174,13 @@ def aggiungi_utente():
         return redirect(url_for("gestisci_utenti"))
 
     return render_template("aggiungi_utente.html", title="Aggiungi Utente")
+def dati_email_utente(form):
+    """Email e avvisi email dal modulo utente (gestione utenze)."""
+    email = (form.get("email") or "").strip()
+    return {"email": email, "email_report": bool(email and form.get("email_report")),
+            "email_admin": bool(email and form.get("email_admin"))}
+
+
 @app.route("/admin/utenti/elimina/<username>")
 @login_required
 def elimina_utente(username):
@@ -4203,7 +4219,9 @@ def modifica_utente(username):
     if request.method == "POST":
         user_to_edit["full_name"] = request.form.get("full_name")
         user_to_edit["sigla"] = request.form.get("sigla", "").upper()
-        user_to_edit["role"] = request.form.get("role")
+        if user_to_edit["role"] != "amministratore":  # un amministratore non si declassa da qui
+            user_to_edit["role"] = request.form.get("role")
+        user_to_edit.update(dati_email_utente(request.form))
         
         save_users(users)
         flash(f"Dati dell'utente '{username}' aggiornati con successo.", "success")
@@ -7759,6 +7777,7 @@ def run_server():
     is_debug_mode = "--debug" in sys.argv
     if not is_debug_mode or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         threading.Thread(target=sincronizza_stati_tutti_preventivi, daemon=True).start()
+        integrazioni_google.avvia_riepilogo_giornaliero(report_inviati_dal, lambda: indirizzi_email("email_report"))
     
     print(SERVER_ADDRESS_INFO)
     if is_debug_mode:
@@ -8677,6 +8696,7 @@ def api_report_salva():
             salvato = rep.to_dict()
         finally:
             db.close()
+        integrazioni_google.email_report(salvato, indirizzi_email("email_report"))
         if err:
             return jsonify({"ok": True, "report": salvato, "task_create": create,
                             "avviso": f"Report inviato, ma una task non e' stata creata: {err}"})
@@ -8868,7 +8888,185 @@ def api_admin_support():
     finally:
         db.close()
 
+    integrazioni_google.email_admin_task(new_support_request, indirizzi_email("email_admin"))
     return jsonify({"success": True})
+
+
+# --- Email automatiche e Google Calendar (logica in integrazioni_google.py) ---
+
+def indirizzi_email(campo):
+    """Email degli utenti che in gestione utenze hanno l'avviso 'campo' (email_report o email_admin)."""
+    return sorted({u["email"] for u in load_users() if u.get(campo) and u.get("email")})
+
+
+def report_inviati_dal(quando):
+    db = _DBSession()
+    try:
+        return [r.to_dict() for r in db.query(_Report).filter(
+            _Report.stato != "bozza", _Report.creato_il > quando).all()]
+    finally:
+        db.close()
+
+
+def _redirect_uri_google():
+    # Google accetta per le app desktop solo l'indirizzo locale: il collegamento si fa dal PC del gestionale
+    return f"http://127.0.0.1:{PORT}{url_for('google_oauth_callback')}"
+
+
+@app.route("/impostazioni/google")
+@login_required
+@role_required("amministratore")
+def impostazioni_google():
+    return render_template("impostazioni_google.html", title="Email e Google Calendar",
+                           stato=integrazioni_google.stato_pubblico(),
+                           ricevono_report=[u for u in load_users() if u.get("email_report") and u.get("email")],
+                           ricevono_admin=[u for u in load_users() if u.get("email_admin") and u.get("email")],
+                           redirect_uri=_redirect_uri_google(),
+                           dal_pc_server=request.remote_addr in ("127.0.0.1", "::1", LAN_IP))
+
+
+@app.route("/impostazioni/google/email", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_google_email():
+    f = request.form
+    valori = {"mittente": (f.get("mittente") or "").strip(),
+              "invia_report": bool(f.get("invia_report")), "riepilogo": bool(f.get("riepilogo"))}
+    ora = (f.get("ora_riepilogo") or "").strip()
+    if re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", ora):
+        valori["ora_riepilogo"] = ora
+    if (f.get("password") or "").strip():
+        valori["password"] = integrazioni_google.proteggi(f["password"].strip())
+    integrazioni_google.aggiorna_sezione("email", valori)
+    flash("Impostazioni email salvate.", "success")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/email/prova", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_google_email_prova():
+    me = next((u for u in load_users() if u["username"] == session["user_id"]), {})
+    if not me.get("email"):
+        flash("Aggiungi prima la tua email in Gestione Utenti: la prova arriva a te.", "error")
+    else:
+        ok, errore = integrazioni_google.email_prova(me["email"])
+        flash(f"Email di prova inviata a {me['email']}." if ok else errore, "success" if ok else "error")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/calendar", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_google_calendar():
+    f = request.form
+    valori = {"client_id": (f.get("client_id") or "").strip(), "calendar_id": (f.get("calendar_id") or "").strip()}
+    if (f.get("client_secret") or "").strip():
+        valori["client_secret"] = integrazioni_google.proteggi(f["client_secret"].strip())
+    integrazioni_google.aggiorna_sezione("calendar", valori)
+    flash("Impostazioni Google Calendar salvate.", "success")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/collega")
+@login_required
+@role_required("amministratore")
+def google_collega():
+    if request.remote_addr not in ("127.0.0.1", "::1", LAN_IP):
+        flash("Il collegamento a Google si fa dal PC del gestionale, aprendo il gestionale su quel PC.", "error")
+        return redirect(url_for("impostazioni_google"))
+    try:
+        return redirect(integrazioni_google.url_collegamento(_redirect_uri_google()))
+    except ValueError as e:
+        flash(str(e), "error")
+        return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/oauth2callback")
+def google_oauth_callback():
+    # Google torna su 127.0.0.1, dove il browser puo' non avere la sessione del gestionale (aperto con l'IP di rete):
+    # niente login qui, la richiesta e' valida solo con lo "state" segreto creato da un amministratore poco prima.
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return "Non consentito.", 403
+    if request.args.get("error"):
+        esito, ok = "Collegamento annullato su Google.", False
+    else:
+        try:
+            account = integrazioni_google.completa_collegamento(request.args.get("code", ""), request.args.get("state", ""))
+            esito, ok = f"Google Calendar collegato con l'account {account or 'Google'}.", True
+        except Exception as e:
+            integrazioni_google.log(f"Collegamento non riuscito: {e}")
+            esito, ok = f"Collegamento non riuscito: {e}", False
+    return render_template_string(
+        "<!doctype html><meta charset='utf-8'><title>Google Calendar</title>"
+        "<body style='font-family:sans-serif;max-width:520px;margin:60px auto;text-align:center'>"
+        "<h2>{{ '✅' if ok else '⚠️' }} {{ esito }}</h2>"
+        "<p><a href='{{ indietro }}'>Torna alle impostazioni del gestionale</a></p></body>",
+        esito=esito, ok=ok, indietro=DISPLAY_URL.rstrip("/") + url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/scollega", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def google_scollega():
+    integrazioni_google.scollega_calendar()
+    flash("Google Calendar scollegato.", "success")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/calendario")
+@login_required
+def calendario_page():
+    db = _DBSession()
+    try:
+        clienti = [{"id": c.id_cliente, "nome": c.cliente or c.rag_sociale or ""}
+                   for c in db.query(_Cliente).all() if (c.cliente or c.rag_sociale)]
+    finally:
+        db.close()
+    clienti.sort(key=lambda c: c["nome"].lower())
+    return render_template("calendario.html", title="Calendario", active_page="calendario",
+                           collegato=integrazioni_google.calendar_collegato(), clienti=clienti,
+                           precompila={k: request.args.get(k, "") for k in ("cliente", "cliente_id", "preventivo", "task")})
+
+
+@app.route("/api/calendario/eventi", methods=["GET"])
+@login_required
+def api_calendario_eventi():
+    try:
+        dal = datetime.date.fromisoformat(request.args.get("dal") or datetime.date.today().isoformat())
+        al = datetime.date.fromisoformat(request.args.get("al") or (dal + datetime.timedelta(days=30)).isoformat())
+    except ValueError:
+        return jsonify({"ok": False, "error": "Date non valide."}), 400
+    if (al - dal).days > 370 or al < dal:
+        return jsonify({"ok": False, "error": "Intervallo di date non valido."}), 400
+    try:
+        return jsonify({"ok": True, "eventi": integrazioni_google.eventi(dal, al)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/calendario/eventi", methods=["POST"])
+@login_required
+def api_calendario_crea():
+    d = request.get_json(silent=True) or {}
+    titolo = (d.get("titolo") or "").strip()
+    if not titolo:
+        return jsonify({"ok": False, "error": "Scrivi il titolo dell'appuntamento."}), 400
+    try:
+        datetime.date.fromisoformat(d.get("giorno") or "")
+        if d.get("ora"):
+            datetime.time.fromisoformat(d["ora"])
+        durata = int(d.get("durata") or 60)
+    except ValueError:
+        return jsonify({"ok": False, "error": "Data, ora o durata non valide."}), 400
+    collegamenti = {k: (d.get(k) or "").strip()[:200] for k in ("cliente", "cliente_id", "preventivo", "task")}
+    try:
+        ev = integrazioni_google.crea_evento(titolo[:200], d["giorno"], d.get("ora") or "", durata,
+                                             (d.get("descrizione") or "")[:4000], (d.get("luogo") or "")[:300],
+                                             collegamenti, creato_da=session.get("user_name") or session["user_id"])
+        return jsonify({"ok": True, "evento": ev})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
 
 
 @app.route("/api/tasks/update", methods=["POST"])

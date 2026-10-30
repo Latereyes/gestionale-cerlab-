@@ -271,6 +271,9 @@ class Utente(Base):
     sigla = Column(String)
     force_password_reset = Column(Boolean, default=False)
     last_seen_version = Column(String)
+    email = Column(String, default="")             # indirizzo per le email automatiche del gestionale
+    email_report = Column(Boolean, default=False)  # riceve i report inviati e il riepilogo giornaliero
+    email_admin = Column(Boolean, default=False)   # riceve le richieste del tasto flottante admin
 
     def __repr__(self):
         return f"<Utente(username='{self.username}', role='{self.role}')>"
@@ -283,7 +286,10 @@ class Utente(Base):
             "role": self.role,
             "sigla": self.sigla,
             "force_password_reset": self.force_password_reset or False,
-            "last_seen_version": self.last_seen_version or ""
+            "last_seen_version": self.last_seen_version or "",
+            "email": self.email or "",
+            "email_report": bool(self.email_report),
+            "email_admin": bool(self.email_admin),
         }
 
 
@@ -658,6 +664,7 @@ def _apply_schema_migrations():
         "tasks": [("tipo", "TEXT DEFAULT ''"), ("gruppo", "TEXT DEFAULT ''"), ("report_id", "TEXT DEFAULT ''"),
                   ("etc", "TEXT DEFAULT ''"), ("etc_avvisata", "TEXT DEFAULT ''")],
         "reports": [("righe", "TEXT DEFAULT '[]'"), ("stato", "TEXT DEFAULT 'inviato'"), ("modificato_il", "TEXT DEFAULT ''")],
+        "utenti": [("email", "TEXT DEFAULT ''"), ("email_report", "INTEGER DEFAULT 0"), ("email_admin", "INTEGER DEFAULT 0")],
     }
 
     for table, columns in migrations.items():
