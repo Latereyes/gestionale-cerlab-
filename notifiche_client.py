@@ -887,6 +887,8 @@ set /a n+=1
 if %n% lss 60 goto attendi
 del "{nuovo}" > nul 2>&1
 :avvia
+rem toglie il "scaricato da Internet" (se Windows lo ha messo) che fa chiedere conferma all'avvio
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath '{str(exe).replace("'", "''")}'" > nul 2>&1
 start "" "{exe}"
 del "%~f0"
 """, encoding="utf-8")

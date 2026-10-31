@@ -7785,6 +7785,7 @@ def run_server():
         integrazioni_google.avvia_riepilogo_giornaliero(report_inviati_dal, lambda: indirizzi_email("email_report"),
                                                         componi=componi_riepilogo)
         ceerlo.avvia_riassunti_automatici(prossimi_eventi, contesto_evento, dopo=_riassunto_pronto)
+        threading.Timer(90, titoli_mancanti).start()  # le task aperte senza titolo lo ricevono da Ceerlo
     
     print(SERVER_ADDRESS_INFO)
     if is_debug_mode:
@@ -8249,6 +8250,67 @@ def destinatari_task(t, all_users):
     return chi
 
 
+def _estratto_task(desc, utenti=None):
+    """Le prime parole della task, leggibili: #CODICE[nome] -> nome, @utente -> nome del collega."""
+    utenti = utenti if utenti is not None else {u["username"].lower(): u.get("full_name") or u["username"] for u in load_users()}
+    t = _senza_codici(desc or "")
+    t = re.sub(r"@(\w+)", lambda m: utenti.get(m.group(1).lower(), m.group(1)), t)
+    t = " ".join(t.split())
+    return t if len(t) <= 55 else t[:52].rsplit(" ", 1)[0] + "..."
+
+
+def nome_task(t, utenti=None):
+    """Come si chiama una task nelle notifiche: il titolo di Ceerlo se c'e', altrimenti l'inizio del testo."""
+    if isinstance(t, str):
+        db = _DBSession()
+        try:
+            r = db.query(_Task).filter_by(id=t).first()
+            t = r.to_dict() if r else {"id": t}
+        finally:
+            db.close()
+    nome = (t.get("titolo") or "").strip() or _estratto_task(t.get("description"), utenti) or f"#{t.get('id')}"
+    return f"«{nome}»"
+
+
+def chiedi_titolo_task(task_id, desc):
+    """Ceerlo scrive il titolo in sottofondo; quando arriva lo salva e lo mette anche nelle notifiche gia' partite."""
+    if not ceerlo.attivo():
+        return
+    def salva(titolo):
+        if not titolo:
+            return
+        db = _DBSession()
+        try:
+            t = db.query(_Task).filter_by(id=task_id).first()
+            if not t:
+                return
+            vecchio = nome_task(t.to_dict())
+            t.titolo = titolo
+            nuovo = nome_task(t.to_dict())
+            for n in db.query(_Notification).filter_by(link=f"/tasks#{task_id}").all():
+                if vecchio in (n.text or ""):
+                    n.text = n.text.replace(vecchio, nuovo)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[titolo task] {e}")
+        finally:
+            db.close()
+    try:
+        ceerlo.chiedi_titolo(desc, salva, chiave=f"titolo:{task_id}")
+    except Exception as e:
+        print(f"[titolo task] Ceerlo non disponibile: {e}")
+
+
+def titoli_mancanti():
+    """All'avvio: le task aperte senza titolo (anche quelle di prima) lo chiedono a Ceerlo, una alla volta in coda."""
+    if not ceerlo.attivo():
+        return
+    for t in load_tasks():
+        if t.get("status") in ("open", "support") and not t.get("titolo"):
+            chiedi_titolo_task(t["id"], t.get("description"))
+
+
 def crea_task(me, mittente, desc, tipo="", destinatario="", gruppo="", etc="", report_id="", assegnati=None):
     """Crea una task e manda le notifiche. Restituisce (id, None) oppure (None, messaggio d'errore).
     Con `assegnati` (task nate dalle voci di un report) l'assegnazione e' gia' decisa."""
@@ -8314,6 +8376,7 @@ def crea_task(me, mittente, desc, tipo="", destinatario="", gruppo="", etc="", r
         return None, "Errore interno durante il salvataggio del task."
     finally:
         db.close()
+    chiedi_titolo_task(task_id, desc)
 
     if tipo == "personale":
         return task_id, None  # nessuno da avvisare: la vede solo chi l'ha scritta
@@ -8337,17 +8400,19 @@ def crea_task(me, mittente, desc, tipo="", destinatario="", gruppo="", etc="", r
         save_tagbox(tagbox[:50])
 
     # 2. Notifiche Campanella: chi fa parte dei gruppi indicati e gli utenti menzionati
+    nome = nome_task({"id": task_id, "description": desc},
+                     {u["username"].lower(): u.get("full_name") or u["username"] for u in all_users})
     notified_ids = {me}  # Non notificare se stessi
     for g in gruppi:
         for u_real_id in utenti_del_gruppo(g, all_users):
             if u_real_id not in notified_ids:
-                add_notification(u_real_id, f"{mittente} ha creato una task per @{g}", link=f"/tasks#{task_id}", tipo="task")
+                add_notification(u_real_id, f"{mittente} ha creato una task per @{g}: {nome}", link=f"/tasks#{task_id}", tipo="task")
                 notified_ids.add(u_real_id)
     for n in nomi:
         if n in user_resolver and not _e_gruppo(n, ruoli):
             u_real_id = user_resolver[n]
             if u_real_id not in notified_ids:
-                add_notification(u_real_id, f"{mittente} ti ha assegnato una nuova task", link=f"/tasks#{task_id}", tipo="task")
+                add_notification(u_real_id, f"{mittente} ti ha assegnato una task: {nome}", link=f"/tasks#{task_id}", tipo="task")
                 notified_ids.add(u_real_id)
     return task_id, None
 
@@ -8382,7 +8447,7 @@ def controlla_task_scadute(forza=False):
                 # admin e CEO sono avvisati di tutte le task del team (non delle personali altrui)
                 avvisati = destinatari_task(td, all_users) | (capi if td.get("tipo") != "personale" else set())
                 for u in avvisati:
-                    add_notification(u, f"⏰ Task #{t.id} oltre la data prevista ({data_it})",
+                    add_notification(u, f"⏰ Oltre la data prevista ({data_it}): {nome_task(td)}",
                                      link=f"/tasks#{t.id}", tipo="scadenza")
                 t.etc_avvisata = t.etc
             db.commit()
@@ -8516,7 +8581,7 @@ def api_task_etc():
     finally:
         db.close()
     for u in destinatari_task(td, load_users()) - {me}:
-        add_notification(u, f"📅 {session['user_name']} ha cambiato la data prevista della task #{task_id}",
+        add_notification(u, f"📅 {session['user_name']} ha cambiato la data prevista di {nome_task(td)}",
                          link=f"/tasks#{task_id}", tipo="scadenza")
     return jsonify({"success": True})
 
@@ -10139,7 +10204,7 @@ def api_update_task():
                     for u in all_users:
                         if u['role'] in ['amministratore', 'ceo'] or u['username'] == t.get('created_by'):
                             if u['username'] != session['user_id']:
-                                add_notification(u['username'], f"⚠️ {mittente} richiede SUPPORTO per la task #{t['id']}", link=f"/tasks#{task_id}", tipo="supporto")
+                                add_notification(u['username'], f"⚠️ {mittente} chiede supporto per {nome_task(t)}", link=f"/tasks#{task_id}", tipo="supporto")
                                 notification_sent = True
 
                 if status_change in ['resolved', 'failed']:
@@ -10154,13 +10219,13 @@ def api_update_task():
                         if _e_gruppo(m_lower, ruoli):
                             for u_real_id in utenti_del_gruppo(m_lower, all_users):
                                 if u_real_id not in notified_assigned:
-                                    add_notification(u_real_id, f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}", tipo=status_change)
+                                    add_notification(u_real_id, f"{emoji} Task {label}: {nome_task(t)}", link=f"/tasks#{task_id}", tipo=status_change)
                                     notified_assigned.add(u_real_id)
                                     notification_sent = True
                         elif m_lower in user_resolver:
                             u_real_id = user_resolver[m_lower]
                             if u_real_id not in notified_assigned:
-                                add_notification(u_real_id, f"{emoji} Task {label}: #{task_id}", link=f"/tasks#{task_id}", tipo=status_change)
+                                add_notification(u_real_id, f"{emoji} Task {label}: {nome_task(t)}", link=f"/tasks#{task_id}", tipo=status_change)
                                 notified_assigned.add(u_real_id)
                                 notification_sent = True
             
@@ -10178,7 +10243,7 @@ def api_update_task():
                     user_resolver = {u['username'].lower(): u['username'] for u in all_users}
                     notified = {session["user_id"]}
                     if t.get("created_by") and t["created_by"] not in notified:
-                        add_notification(t["created_by"], f"{session['user_name']} ha commentato la task #{task_id}", link=f"/tasks#{task_id}", tipo="commento")
+                        add_notification(t["created_by"], f"{session['user_name']} ha commentato {nome_task(t)}", link=f"/tasks#{task_id}", tipo="commento")
                         notified.add(t["created_by"])
                     # in una task personale le menzioni non notificano: il collega non la vedrebbe
                     c_mentions = re.findall(r"@(\w+)", comment_text) if t.get("tipo") != "personale" else []
@@ -10186,7 +10251,7 @@ def api_update_task():
                         if cm_lower in user_resolver:
                             u_real_id = user_resolver[cm_lower]
                             if u_real_id not in notified:
-                                add_notification(u_real_id, f"{session['user_name']} ti ha menzionato nella task #{task_id}", link=f"/tasks#{task_id}", tipo="menzione")
+                                add_notification(u_real_id, f"{session['user_name']} ti ha menzionato in {nome_task(t)}", link=f"/tasks#{task_id}", tipo="menzione")
                                 notified.add(u_real_id)
             break
     save_tasks(tasks)
@@ -10253,7 +10318,7 @@ def add_notification(user_id, text, link="/tasks", tipo="info"):
         db.add(_Notification(
             id=new_id,
             target_user=user_id,
-            text=text,
+            text=_senza_codici(text),  # #CODICE[nome] -> nome: nelle notifiche si leggono i nomi
             link=link,
             timestamp=datetime.datetime.now().strftime("%d/%m %H:%M"),
             read=False,

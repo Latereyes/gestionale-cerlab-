@@ -312,6 +312,7 @@ class Task(Base):
     report_id = Column(String, default="")   # report da cui e' nata la task, se c'e'
     etc = Column(String, default="")         # Estimated Time Complete "YYYY-MM-DD" (obbligatoria per le task nuove)
     etc_avvisata = Column(String, default="")  # ultima ETC per cui e' gia' partito l'avviso di scadenza
+    titolo = Column(String, default="")        # titolo breve scritto da Ceerlo (vuoto se l'AI non c'era)
 
     def __repr__(self):
         return f"<Task(id='{self.id}', status='{self.status}')>"
@@ -331,6 +332,7 @@ class Task(Base):
             "gruppo": self.gruppo or "",
             "report_id": self.report_id or "",
             "etc": self.etc or "",
+            "titolo": self.titolo or "",
         }
 
 
@@ -691,7 +693,7 @@ def _apply_schema_migrations():
         "bolle":      [("extra", "TEXT DEFAULT '{}'")],
         "magazzino_movimenti": [("costo_unitario", "REAL"), ("costo_precedente", "REAL")],
         "tasks": [("tipo", "TEXT DEFAULT ''"), ("gruppo", "TEXT DEFAULT ''"), ("report_id", "TEXT DEFAULT ''"),
-                  ("etc", "TEXT DEFAULT ''"), ("etc_avvisata", "TEXT DEFAULT ''")],
+                  ("etc", "TEXT DEFAULT ''"), ("etc_avvisata", "TEXT DEFAULT ''"), ("titolo", "TEXT DEFAULT ''")],
         "reports": [("righe", "TEXT DEFAULT '[]'"), ("stato", "TEXT DEFAULT 'inviato'"), ("modificato_il", "TEXT DEFAULT ''")],
         "utenti": [("email", "TEXT DEFAULT ''"), ("email_report", "INTEGER DEFAULT 0"), ("email_admin", "INTEGER DEFAULT 0")],
     }

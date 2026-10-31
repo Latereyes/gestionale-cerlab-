@@ -165,6 +165,8 @@
     .task-status.failed { background: var(--danger-bg); color: var(--danger-text); }
     .task-dest { font-size: 11px; font-weight: 600; color: var(--text-muted); background: var(--surface-2); border-radius: 999px; padding: 3px 9px; text-decoration: none; white-space: nowrap; }
     .task-dest.per-me { background: var(--accent-light); color: var(--accent); }
+    .task-titolo { font-size: 16px; font-weight: 700; color: var(--text); margin: 0 2px 4px; }
+    .task-titolo i { color: #6a5cd8; font-size: 12px; margin-right: 4px; }
     .task-body { font-size: 15px; line-height: 1.6; color: var(--text); padding: 0 2px; overflow-wrap: anywhere; }
 
     /* Data prevista (ETC) */
@@ -417,6 +419,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="task-status ${t.status}">${statusLabel[t.status] || escapeHtml(t.status)}</span>
                     </span>
                 </div>
+                ${t.titolo ? `<div class="task-titolo" title="Titolo scritto da Ceerlo"><i class="fas fa-robot"></i>${escapeHtml(t.titolo)}</div>` : ''}
                 <div class="task-body">${window.parseMessage(escapeHtml(t.description))}</div>
                 ${etcHtml(t)}
                 <div class="task-history-area">

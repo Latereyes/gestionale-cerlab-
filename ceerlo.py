@@ -11,6 +11,7 @@ import heapq
 import itertools
 import json
 import threading
+import re
 import time
 import urllib.error
 import urllib.request
@@ -276,6 +277,29 @@ def prompt_riassunto(evento, contesto):
         "come nel contesto, nella forma #CODICE[nome]: nel gestionale diventa un link. Niente importi. "
         "Usa solo i dati del contesto.\n\nCONTESTO:\n" + contesto
     )
+
+
+# --- Titoli brevi (task e notifiche) ---
+
+def pulisci_titolo(testo):
+    """Prima riga, senza virgolette, markdown, #codici e @: al massimo 70 caratteri."""
+    t = next((r for r in (testo or "").splitlines() if r.strip()), "").strip()
+    t = re.sub(r"#([A-Z0-9][A-Z0-9-]{2,})\[([^\]\n]+)\]", r"\2", t)
+    t = re.sub(r"^(titolo\s*:\s*)", "", t, flags=re.I).replace("**", "").replace("@", "")
+    t = t.strip(" \"'«»*#.-")
+    return t[:70].rstrip()
+
+
+def chiedi_titolo(testo, al_termine, chiave=""):
+    """Chiede in sottofondo un titolo di poche parole per una task; al_termine(titolo) quando e' pronto."""
+    messaggi = [{"role": "system", "content": (
+                    "Scrivi SOLO un titolo in italiano di massimo 7 parole che dica a colpo d'occhio di cosa si tratta "
+                    "(azione + oggetto + cliente se c'e'), per esempio: Ordinare piatto doccia per Rossi. "
+                    "Nel testo #CODICE[nome] e' un cliente o un preventivo: scrivi solo il nome. "
+                    "Niente virgolette, niente punto finale, niente spiegazioni.")},
+                {"role": "user", "content": (testo or "")[:1500]}]
+    return aggiungi("titoli", messaggi, PRIO_RICHIESTA, "titolo",
+                    al_termine=lambda risposta: al_termine(pulisci_titolo(risposta)), chiave=chiave)
 
 
 # --- Riassunti degli appuntamenti ---
