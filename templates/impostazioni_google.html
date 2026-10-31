@@ -65,7 +65,8 @@
             <ol class="muted passi">
                 <li>Su <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>, con l'account del negozio, crea un progetto e attiva <strong>Google Calendar API</strong>.</li>
                 <li>In "Schermata consenso OAuth" scegli <strong>Esterno</strong>, poi <strong>Pubblica l'app</strong> (in modalita' test il collegamento scade ogni 7 giorni).</li>
-                <li>In "Credenziali" crea un <strong>ID client OAuth</strong> di tipo <strong>App desktop</strong> e copia qui ID e segreto.</li>
+                <li>In "Credenziali" crea un <strong>ID client OAuth</strong> di tipo <strong>App desktop</strong> e copia qui ID e segreto.
+                    Se hai gia' creato un client di tipo "Applicazione web", aggiungi agli URI di reindirizzamento autorizzati <code>{{ redirect_uri }}</code>.</li>
                 <li>L'ID calendario si trova in Google Calendar &rarr; Impostazioni del calendario condiviso &rarr; "Integra calendario".</li>
                 <li>Premi <strong>Collega</strong> da questo PC e accedi con un account che puo' modificare il calendario. Google avvisera' che l'app non e' verificata: scegli "Avanzate" e prosegui.</li>
             </ol>
