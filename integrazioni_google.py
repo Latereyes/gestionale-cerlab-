@@ -11,6 +11,7 @@ import json
 import re
 import secrets
 import smtplib
+import ssl
 import sys
 import threading
 import time
@@ -183,18 +184,35 @@ def _manda(destinatari, oggetto, testo):
     msg["To"] = ", ".join(dest)
     msg["Subject"] = oggetto
     msg.set_content(togli_importi(testo))
-    try:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as s:
-            s.login(cfg["mittente"], password.replace(" ", ""))
-            s.send_message(msg)
-        log(f"Email inviata a {', '.join(dest)}: {oggetto}")
-        return True, ""
-    except smtplib.SMTPAuthenticationError:
-        log("Email: accesso a Gmail rifiutato (controlla la password per le app)")
-        return False, "Gmail ha rifiutato l'accesso: controlla indirizzo e password per le app."
-    except Exception as e:
-        log(f"Email non inviata ({oggetto}): {e}")
-        return False, f"Invio non riuscito: {e}"
+    utente, chiave = cfg["mittente"].strip(), password.replace(" ", "").strip()
+    errori = []
+    # prima SSL sulla 465; se Gmail chiude la connessione (rete, antivirus, errore temporaneo) riprova con STARTTLS sulla 587
+    for porta in (SMTP_PORT, 587):
+        fase = "connessione"
+        try:
+            contesto = ssl.create_default_context()
+            if porta == 465:
+                s = smtplib.SMTP_SSL(SMTP_HOST, porta, timeout=30, context=contesto)
+            else:
+                s = smtplib.SMTP(SMTP_HOST, porta, timeout=30)
+                s.ehlo()
+                s.starttls(context=contesto)
+                s.ehlo()
+            with s:
+                fase = "accesso"
+                s.login(utente, chiave)
+                fase = "invio"
+                s.send_message(msg)
+            log(f"Email inviata a {', '.join(dest)} (porta {porta}): {oggetto}")
+            return True, ""
+        except smtplib.SMTPAuthenticationError as e:
+            log(f"Email: accesso a Gmail rifiutato ({e.smtp_code})")
+            return False, "Gmail ha rifiutato l'accesso: controlla l'indirizzo e crea una nuova password per le app."
+        except (smtplib.SMTPException, OSError) as e:
+            log(f"Email non inviata ({oggetto}), porta {porta}, fase {fase}: {e!r}")
+            errori.append(f"porta {porta} ({fase}): {e}")
+    return False, ("Invio non riuscito, Gmail ha chiuso la connessione. Se si ripete, crea una nuova password "
+                   "per le app. Dettagli: " + "; ".join(errori))
 
 
 def manda_in_background(destinatari, oggetto, testo):
