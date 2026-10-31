@@ -93,12 +93,24 @@
     let storia = leggi('ceerlo-storia', []);
     let inAttesa = leggi('ceerlo-job', null);
 
+    // Testo di Ceerlo: markdown semplice (titoli, elenchi, grassetto, corsivo), #codici come link e @colleghi come badge.
+    // L'HTML viene neutralizzato prima, quindi il modello non puo' inserire codice nella pagina.
+    function formatta(testo) {
+        let h = String(testo).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+        h = h.split('\n').map(r => r
+            .replace(/^\s*#{1,4}\s+(.+)$/, '<strong>$1</strong>')
+            .replace(/^(\s*)[*-]\s+/, '$1• ')).join('\n');
+        h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+             .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
+        h = h.replace(/(^|[\s*(\[:>])#([A-Z0-9][A-Z0-9-]{2,})(?:\[([^\]\n]+)\])?/g,
+            (m, pre, id, nome) => `${pre}<a class="shout-link" href="/ceerlo/vai/${encodeURIComponent(id)}">${nome || '#' + id}</a>`);
+        return h.replace(/(^|[^\w&])@(\w+)/g, '$1<span class="shout-mention">@$2</span>');
+    }
+
     function mostraMessaggio(ruolo, testo) {
         const d = document.createElement('div');
         d.className = 'ceerlo-msg ' + ruolo;
-        const sicuro = String(testo).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
-        // @ e # diventano badge e link come nelle altre chat
-        if (ruolo !== 'info' && window.parseMessage) d.innerHTML = window.parseMessage(sicuro); else d.textContent = testo;
+        if (ruolo !== 'info') d.innerHTML = formatta(testo); else d.textContent = testo;
         elenco.appendChild(d);
         elenco.scrollTop = elenco.scrollHeight;
         return d;

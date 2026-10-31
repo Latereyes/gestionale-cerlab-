@@ -9122,14 +9122,14 @@ def _contesto_cliente(client_id="", nome=""):
         if not cli:
             return f"Cliente: {nome} (non trovato in anagrafica)" if nome else ""
         nome_cli = cli.cliente or cli.rag_sociale or cli.id_cliente
-        righe = [f"Cliente: {nome_cli}" + (f" ({cli.rag_sociale})" if cli.rag_sociale and cli.rag_sociale != nome_cli else ""),
+        righe = [f"Cliente: #{cli.id_cliente}[{nome_cli}]" + (f" ({cli.rag_sociale})" if cli.rag_sociale and cli.rag_sociale != nome_cli else ""),
                  f"Zona: {' '.join(x for x in (cli.indirizzo, cli.comune, cli.provincia) if x)}".rstrip()]
         if (cli.note_interne or "").strip():
             righe.append("Note interne: " + cli.note_interne.strip()[:1500])
         prev = db.query(_Preventivo).filter_by(id_cliente=cli.id_cliente).order_by(_Preventivo.data.desc()).limit(10).all()
         if prev:
             righe.append("Preventivi (piu' recenti prima): " + "; ".join(
-                f"{p.numero} del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})" for p in prev))
+                f"#{p.numero} del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})" for p in prev))
         reports = db.query(_Report).filter(_Report.stato != "bozza", _Report.testo.ilike(f"%{nome_cli}%")).order_by(
             _Report.creato_il.desc()).limit(5).all()
         for r in reports:
@@ -9148,7 +9148,7 @@ def contesto_ceerlo(pagina="", client_id="", quote_id="", con_appuntamenti=True)
         try:
             p = db.query(_Preventivo).filter_by(numero=quote_id).first()
             if p:
-                parti.append(f"Preventivo aperto: {p.numero} del {p.data}, stato {p.stato}, venditore {p.venditore}.")
+                parti.append(f"Preventivo aperto: #{p.numero} del {p.data}, stato {p.stato}, venditore {p.venditore}.")
                 client_id = client_id or p.id_cliente or ""
         finally:
             db.close()
@@ -9239,7 +9239,7 @@ def contesto_generale(domanda):
         if any(k in q for k in ("preventiv", "offert", "ordin")):
             prev = db.query(_Preventivo).order_by(_Preventivo.data.desc()).limit(15).all()
             parti.append("Ultimi preventivi (senza importi): " + "; ".join(
-                f"{p.numero} del {p.data or '?'} cliente {p.cliente or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})"
+                f"#{p.numero} del {p.data or '?'} cliente {p.cliente or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})"
                 for p in prev))
         # clienti nominati per nome nella domanda, anche senza #
         if len(q) >= 4:
@@ -9312,6 +9312,28 @@ def api_ceerlo_chiedi():
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 429
     return jsonify({"ok": True, "job": jid, "posizione": ceerlo._CODA.posizione(jid)})
+
+
+@app.route("/ceerlo/vai/<codice>")
+@login_required
+def ceerlo_vai(codice):
+    """Link dei #codici nelle risposte di Ceerlo: apre il cliente o il preventivo giusto (anche edile),
+    tollerando prefissi aggiunti dal modello come PREV- o CLIENTE-."""
+    codice = codice.strip().strip("#").upper()
+    candidati = [codice] + [codice[len(pre):] for pre in ("PREV-", "PREVENTIVO-", "CLIENTE-") if codice.startswith(pre)]
+    db = _DBSession()
+    try:
+        for c in candidati:
+            if db.query(_Cliente).filter_by(id_cliente=c).first():
+                return redirect(url_for("dettaglio_cliente", client_id=c))
+            if db.query(_Preventivo).filter_by(numero=c).first():
+                p = load_quote(c) or {}
+                return redirect(url_for("editor_preventivo_edile" if p.get("tipo_preventivo") == "edile" else "editor_preventivo",
+                                        quote_id=c))
+    finally:
+        db.close()
+    flash(f"Ceerlo ha citato {codice}, ma non esiste ne' come cliente ne' come preventivo.", "error")
+    return redirect(request.referrer or url_for("dashboard"))
 
 
 @app.route("/api/ceerlo/job/<jid>")
