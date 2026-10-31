@@ -430,6 +430,7 @@ def _evento_semplice(ev):
         "cliente": privati.get("cliente", ""), "cliente_id": privati.get("cliente_id", ""),
         "preventivo": privati.get("preventivo", ""), "task": privati.get("task", ""),
         "creato_da": privati.get("creato_da", ""),
+        "assegnati": [u for u in (privati.get("assegnati") or "").split(",") if u],
     }
 
 
@@ -454,10 +455,15 @@ def eventi(dal, al):
             return risultato
 
 
+def _riga_assegnati(nomi):
+    return f"Assegnato a: {', '.join(nomi)}" if nomi else ""
+
+
 def crea_evento(titolo, giorno, ora_inizio="", durata_minuti=60, descrizione="", luogo="",
-                collegamenti=None, creato_da=""):
+                collegamenti=None, creato_da="", assegnati=None, nomi_assegnati=None):
     """Crea un appuntamento. Senza ora e' un evento di tutto il giorno.
-    collegamenti: cliente, cliente_id, preventivo, task (restano nell'evento per ritrovarli dal gestionale)."""
+    collegamenti: cliente, cliente_id, preventivo, task (restano nell'evento per ritrovarli dal gestionale).
+    assegnati: username dei colleghi responsabili; nomi_assegnati: i loro nomi, scritti anche nella descrizione."""
     giorno = datetime.date.fromisoformat(giorno)
     if ora_inizio:
         inizio = datetime.datetime.combine(giorno, datetime.time.fromisoformat(ora_inizio))
@@ -469,7 +475,11 @@ def crea_evento(titolo, giorno, ora_inizio="", durata_minuti=60, descrizione="",
     privati = {k: str(v) for k, v in (collegamenti or {}).items() if v}
     if creato_da:
         privati["creato_da"] = creato_da
+    if assegnati:
+        privati["assegnati"] = ",".join(assegnati)
     righe = [descrizione.strip()] if descrizione.strip() else []
+    if assegnati:
+        righe.append(_riga_assegnati(nomi_assegnati or assegnati))
     if privati.get("cliente"):
         righe.append(f"Cliente: {privati['cliente']}")
     if privati.get("preventivo"):
@@ -481,3 +491,24 @@ def crea_evento(titolo, giorno, ora_inizio="", durata_minuti=60, descrizione="",
     ev = _api("POST", f"/calendars/{urllib.parse.quote(_id_calendario(), safe='')}/events", corpo=corpo)
     log(f"Appuntamento creato da {creato_da}: {titolo} {giorno}")
     return _evento_semplice(ev)
+
+
+def assegna_evento(evento_id, assegnati, nomi_assegnati=None):
+    """Cambia i colleghi assegnati a un appuntamento gia' esistente (dati privati + riga nella descrizione).
+    Restituisce (assegnati di prima, evento aggiornato)."""
+    percorso = f"/calendars/{urllib.parse.quote(_id_calendario(), safe='')}/events/{urllib.parse.quote(evento_id, safe='')}"
+    ev = _api("GET", percorso)
+    privati = dict((ev.get("extendedProperties") or {}).get("private") or {})
+    prima = [u for u in (privati.get("assegnati") or "").split(",") if u]
+    if assegnati:
+        privati["assegnati"] = ",".join(assegnati)
+    else:
+        privati.pop("assegnati", None)
+    righe = [r for r in (ev.get("description") or "").split("\n") if not r.startswith("Assegnato a: ")]
+    if assegnati:
+        righe.append(_riga_assegnati(nomi_assegnati or assegnati))
+    corpo = {"description": "\n".join(righe).strip(),
+             "extendedProperties": {**(ev.get("extendedProperties") or {}), "private": privati}}
+    ev = _api("PATCH", percorso, corpo=corpo)
+    log(f"Appuntamento {evento_id} assegnato a: {', '.join(assegnati) or 'nessuno'}")
+    return prima, _evento_semplice(ev)

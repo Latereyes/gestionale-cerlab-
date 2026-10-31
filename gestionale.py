@@ -7780,7 +7780,7 @@ def run_server():
     if not is_debug_mode or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         threading.Thread(target=sincronizza_stati_tutti_preventivi, daemon=True).start()
         integrazioni_google.avvia_riepilogo_giornaliero(report_inviati_dal, lambda: indirizzi_email("email_report"))
-        ceerlo.avvia_riassunti_automatici(prossimi_eventi, contesto_evento)
+        ceerlo.avvia_riassunti_automatici(prossimi_eventi, contesto_evento, dopo=_riassunto_pronto)
     
     print(SERVER_ADDRESS_INFO)
     if is_debug_mode:
@@ -9028,8 +9028,11 @@ def calendario_page():
     finally:
         db.close()
     clienti.sort(key=lambda c: c["nome"].lower())
+    utenti = sorted(({"username": u["username"], "nome": u.get("full_name") or u["username"]} for u in load_users()),
+                    key=lambda u: u["nome"].lower())
     return render_template("calendario.html", title="Calendario", active_page="calendario",
-                           collegato=integrazioni_google.calendar_collegato(), clienti=clienti,
+                           collegato=integrazioni_google.calendar_collegato(), clienti=clienti, utenti=utenti,
+                           io=session.get("user_id"),
                            precompila={k: request.args.get(k, "") for k in ("cliente", "cliente_id", "preventivo", "task")})
 
 
@@ -9046,8 +9049,10 @@ def api_calendario_eventi():
     try:
         eventi = integrazioni_google.eventi(dal, al)
         pronti = ceerlo.riassunti()
+        utenti = {u["username"]: u for u in load_users()}
         for e in eventi:
             e["riassunto"] = (pronti.get(e["id"]) or {}).get("testo", "")
+            _con_nomi_assegnati(e, utenti)
         return jsonify({"ok": True, "eventi": eventi, "ceerlo": ceerlo.attivo()})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
@@ -9068,13 +9073,88 @@ def api_calendario_crea():
     except ValueError:
         return jsonify({"ok": False, "error": "Data, ora o durata non valide."}), 400
     collegamenti = {k: (d.get(k) or "").strip()[:200] for k in ("cliente", "cliente_id", "preventivo", "task")}
+    assegnati = _assegnati_validi(d.get("assegnati"))
     try:
         ev = integrazioni_google.crea_evento(titolo[:200], d["giorno"], d.get("ora") or "", durata,
                                              (d.get("descrizione") or "")[:4000], (d.get("luogo") or "")[:300],
-                                             collegamenti, creato_da=session.get("user_name") or session["user_id"])
-        return jsonify({"ok": True, "evento": ev})
+                                             collegamenti, creato_da=session.get("user_name") or session["user_id"],
+                                             assegnati=assegnati, nomi_assegnati=_nomi_utenti(assegnati))
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
+    _EVENTI_CACHE["quando"] = 0
+    _avvisa_assegnati(ev, assegnati)
+    return jsonify({"ok": True, "evento": _con_nomi_assegnati(ev)})
+
+
+@app.route("/api/calendario/eventi/<evento_id>/assegna", methods=["POST"])
+@login_required
+def api_calendario_assegna(evento_id):
+    """Cambia a chi e' assegnato un appuntamento; avvisa solo chi viene aggiunto."""
+    assegnati = _assegnati_validi((request.get_json(silent=True) or {}).get("assegnati"))
+    try:
+        prima, ev = integrazioni_google.assegna_evento(evento_id, assegnati, _nomi_utenti(assegnati))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    _EVENTI_CACHE["quando"] = 0
+    _avvisa_assegnati(ev, [u for u in assegnati if u not in prima])
+    return jsonify({"ok": True, "evento": _con_nomi_assegnati(ev)})
+
+
+def _assegnati_validi(valore):
+    """Username esistenti, senza doppioni, nell'ordine dato (accetta lista o testo separato da virgole)."""
+    if isinstance(valore, str):
+        valore = valore.split(",")
+    esistenti = {u["username"] for u in load_users()}
+    visti = []
+    for u in valore or []:
+        u = str(u).strip().lstrip("@")
+        if u in esistenti and u not in visti:
+            visti.append(u)
+    return visti[:10]
+
+
+def _nomi_utenti(usernames):
+    utenti = {u["username"]: u for u in load_users()}
+    return [(utenti.get(u) or {}).get("full_name") or u for u in usernames]
+
+
+def _con_nomi_assegnati(ev, utenti=None):
+    utenti = utenti if utenti is not None else {u["username"]: u for u in load_users()}
+    ev["assegnati_info"] = [{"username": u, "nome": (utenti.get(u) or {}).get("full_name") or u,
+                             "sigla": (utenti.get(u) or {}).get("sigla") or u[:2].upper()} for u in ev.get("assegnati") or []]
+    return ev
+
+
+def _quando_evento(ev):
+    try:
+        if ev.get("tutto_il_giorno") or len(ev.get("inizio", "")) < 16:
+            return datetime.date.fromisoformat(ev["inizio"][:10]).strftime("%d/%m")
+        return datetime.datetime.fromisoformat(ev["inizio"][:16]).strftime("%d/%m alle %H:%M")
+    except (KeyError, ValueError):
+        return ev.get("inizio", "")
+
+
+def _avvisa_assegnati(ev, usernames):
+    """Notifica nel gestionale ai colleghi assegnati (non a chi sta facendo l'assegnazione)."""
+    chi = session.get("user_name") or session.get("user_id") or ""
+    for u in usernames:
+        if u == session.get("user_id"):
+            continue
+        try:
+            add_notification(u, f"{chi} ti ha assegnato l'appuntamento \"{ev['titolo']}\" del {_quando_evento(ev)}",
+                             link="/calendario", tipo="task")
+        except Exception as e:
+            print(f"[calendario] Notifica non inviata a {u}: {e}")
+
+
+def _riassunto_pronto(ev, testo):
+    """Dopo un riassunto automatico di Ceerlo: avvisa i colleghi assegnati all'appuntamento."""
+    for u in ev.get("assegnati") or []:
+        try:
+            add_notification(u, f"Ceerlo ha preparato il riassunto per \"{ev['titolo']}\" del {_quando_evento(ev)}",
+                             link="/calendario", tipo="info")
+        except Exception as e:
+            print(f"[ceerlo] Notifica riassunto non inviata a {u}: {e}")
 
 
 # --- Ceerlo, l'assistente AI (logica e coda in ceerlo.py; il modello gira con Ollama su un altro PC via Tailscale) ---
@@ -9161,8 +9241,7 @@ def contesto_ceerlo(pagina="", client_id="", quote_id="", con_appuntamenti=True)
             if con_appuntamenti and integrazioni_google.calendar_collegato() else []
         if vicini:
             parti.append("Appuntamenti di oggi e domani:\n" + "\n".join(
-                f"- {e['inizio'][:16].replace('T', ' ')} {e['titolo']}" + (f" (cliente {e['cliente']})" if e["cliente"] else "")
-                for e in vicini))
+                _riga_evento(e) for e in vicini))
     except Exception as e:
         print(f"[ceerlo] Calendario non letto: {e}")
     return "\n\n".join(x for x in parti if x)
@@ -9182,6 +9261,14 @@ def _contesto_utente(username):
             righe.append(f"- Task #{t['id']} ({t.get('status')}, scadenza {t.get('etc') or '-'}): {(t.get('description') or '')[:200]}")
     except Exception as e:
         print(f"[ceerlo] Task non lette: {e}")
+    try:
+        if integrazioni_google.calendar_collegato():
+            oggi = datetime.date.today().isoformat()
+            suoi = [e for e in eventi_vicini() if e["inizio"][:10] >= oggi and u["username"] in (e.get("assegnati") or [])]
+            if suoi:
+                righe.append("Appuntamenti assegnati:\n" + "\n".join(_riga_evento(e) for e in suoi[:10]))
+    except Exception as e:
+        print(f"[ceerlo] Calendario non letto: {e}")
     db = _DBSession()
     try:
         for r in db.query(_Report).filter(_Report.autore == u["username"], _Report.stato != "bozza").order_by(
@@ -9275,8 +9362,7 @@ def contesto_generale(domanda):
                 fino = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
                 prossimi = [e for e in eventi_vicini() if oggi <= e["inizio"][:10] <= fino]
                 parti.append("Appuntamenti delle prossime due settimane:\n" + ("\n".join(
-                    f"- {e['inizio'][:16].replace('T', ' ')} {e['titolo']}" + (f" (cliente {e['cliente']})" if e["cliente"] else "")
-                    for e in prossimi) or "nessuno"))
+                    _riga_evento(e) for e in prossimi) or "nessuno"))
             else:
                 parti.append("Il calendario Google non e' ancora collegato.")
         except Exception as e:
@@ -9284,9 +9370,16 @@ def contesto_generale(domanda):
     return "\n\n".join(x for x in parti if x)
 
 
+def _riga_evento(e):
+    return (f"- {e['inizio'][:16].replace('T', ' ')} {e['titolo']}" + (f" (cliente {e['cliente']})" if e.get("cliente") else "")
+            + (" assegnato a " + ", ".join("@" + u for u in e["assegnati"]) if e.get("assegnati") else ""))
+
+
 def contesto_evento(ev):
     testo = (f"Appuntamento: {ev['titolo']} il {ev['inizio'][:16].replace('T', ' ')}"
-             + (f" a {ev['luogo']}" if ev.get("luogo") else "") + (f". Note: {ev['descrizione'][:500]}" if ev.get("descrizione") else ""))
+             + (f" a {ev['luogo']}" if ev.get("luogo") else "")
+             + (" (assegnato a " + ", ".join("@" + u for u in ev["assegnati"]) + ")" if ev.get("assegnati") else "")
+             + (f". Note: {ev['descrizione'][:500]}" if ev.get("descrizione") else ""))
     return testo + "\n" + _contesto_cliente(ev.get("cliente_id", ""), ev.get("cliente", ""))
 
 

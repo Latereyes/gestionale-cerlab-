@@ -274,16 +274,18 @@ def salva_riassunto(evento, testo):
     _scrivi_json("riassunti.json", tutti)
 
 
-def chiedi_riassunto(evento, contesto, utente="ceerlo", priorita=PRIO_RICHIESTA):
+def chiedi_riassunto(evento, contesto, utente="ceerlo", priorita=PRIO_RICHIESTA, dopo=None):
     messaggi = [{"role": "system", "content": prompt_sistema("il team", "tutti", "")},
                 {"role": "user", "content": prompt_riassunto(evento, contesto)}]
     return aggiungi(utente, messaggi, priorita, "riassunto",
-                    al_termine=lambda testo: salva_riassunto(evento, testo), chiave=f"riassunto:{evento['id']}")
+                    al_termine=lambda testo: (salva_riassunto(evento, testo), dopo and dopo(evento, testo)),
+                    chiave=f"riassunto:{evento['id']}")
 
 
-def avvia_riassunti_automatici(prossimi_eventi, contesto_evento):
+def avvia_riassunti_automatici(prossimi_eventi, contesto_evento, dopo=None):
     """Ogni 15 minuti mette in coda (a bassa priorita') i riassunti degli appuntamenti in arrivo che non ce l'hanno.
-    prossimi_eventi(ore) -> eventi del calendario; contesto_evento(evento) -> testo di contesto."""
+    prossimi_eventi(ore) -> eventi del calendario; contesto_evento(evento) -> testo di contesto;
+    dopo(evento, testo), facoltativo, viene chiamato quando il riassunto e' pronto (es. avvisare gli assegnati)."""
     def _giro():
         time.sleep(60)
         while True:
@@ -293,7 +295,7 @@ def avvia_riassunti_automatici(prossimi_eventi, contesto_evento):
                     fatti = riassunti()
                     for ev in prossimi_eventi(int(cfg["ore_anticipo"] or 48)):
                         if ev["id"] not in fatti and (ev.get("cliente") or ev.get("cliente_id")):
-                            chiedi_riassunto(ev, contesto_evento(ev), priorita=PRIO_AUTO)
+                            chiedi_riassunto(ev, contesto_evento(ev), priorita=PRIO_AUTO, dopo=dopo)
             except Exception as e:
                 log(f"Riassunti automatici: {e}")
             time.sleep(900)

@@ -62,6 +62,12 @@
                     <input name="preventivo" value="{{ precompila.preventivo }}" placeholder="Numero, se c'e'">
                 </div>
                 <div class="form-group largo">
+                    <label>Assegnato a</label>
+                    <div class="scelta-utenti" id="scelta-nuovo">
+                        {% for u in utenti %}<label class="chip-utente"><input type="checkbox" name="assegnati" value="{{ u.username }}"> {{ u.nome }}</label>{% endfor %}
+                    </div>
+                </div>
+                <div class="form-group largo">
                     <label>Luogo</label>
                     <input name="luogo" maxlength="300" placeholder="Indirizzo o 'in negozio'">
                 </div>
@@ -83,6 +89,7 @@
             <h3 id="periodo">Prossimi appuntamenti</h3>
             <button class="btn icon-btn" id="succ" title="Settimane successive"><i class="fas fa-chevron-right"></i></button>
         </div>
+        <div class="filtro-miei"><label><input type="checkbox" id="solo-miei"> Solo i miei appuntamenti</label></div>
         <div class="card-body" id="elenco-eventi"><p class="muted">Caricamento...</p></div>
     </div>
     {% endif %}
@@ -98,6 +105,15 @@
     document.querySelectorAll('#lista-clienti option').forEach(o => { clienti[o.value] = o.dataset.id; });
     let inizio = new Date(); inizio.setHours(0, 0, 0, 0);
     let conCeerlo = false;
+    let ultimi = [];
+    const IO = {{ io|tojson }};
+    const UTENTI = {{ utenti|tojson }};
+    const soloMiei = document.getElementById('solo-miei');
+    try { soloMiei.checked = localStorage.getItem('calendario_solo_miei') === '1'; } catch (e) {}
+    soloMiei.addEventListener('change', () => {
+        try { localStorage.setItem('calendario_solo_miei', soloMiei.checked ? '1' : '0'); } catch (e) {}
+        mostra(ultimi);
+    });
 
     const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const piu = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -118,14 +134,22 @@
             const dati = await r.json();
             if (!dati.ok) throw new Error(dati.error || 'Errore');
             conCeerlo = !!dati.ceerlo;
-            mostra(dati.eventi);
+            ultimi = dati.eventi;
+            mostra(ultimi);
         } catch (e) {
             elenco.innerHTML = `<p class="errore"><i class="fas fa-exclamation-triangle"></i> ${esc(e.message)}</p>`;
         }
     }
 
+    const chipAssegnati = ev => (ev.assegnati_info || []).map(a =>
+        `<span class="chip-assegnato${a.username === IO ? ' mio' : ''}" title="${esc(a.nome)}">${esc(a.nome)}</span>`).join('');
+
     function mostra(eventi) {
-        if (!eventi.length) { elenco.innerHTML = '<p class="muted">Nessun appuntamento in questo periodo.</p>'; return; }
+        if (soloMiei.checked) eventi = eventi.filter(ev => (ev.assegnati || []).includes(IO));
+        if (!eventi.length) {
+            elenco.innerHTML = `<p class="muted">${soloMiei.checked ? 'Nessun appuntamento assegnato a te in questo periodo.' : 'Nessun appuntamento in questo periodo.'}</p>`;
+            return;
+        }
         const perGiorno = {};
         eventi.forEach(ev => { (perGiorno[ev.inizio.slice(0, 10)] = perGiorno[ev.inizio.slice(0, 10)] || []).push(ev); });
         elenco.innerHTML = Object.keys(perGiorno).sort().map(g => `
@@ -139,8 +163,14 @@
                             ${ev.cliente ? `<div><i class="fas fa-user"></i> ${ev.cliente_id ? `<a href="/cliente/dettaglio/${encodeURIComponent(ev.cliente_id)}">${esc(ev.cliente)}</a>` : esc(ev.cliente)}</div>` : ''}
                             ${ev.preventivo ? `<div><i class="fas fa-file-alt"></i> Preventivo ${esc(ev.preventivo)}</div>` : ''}
                             ${ev.luogo ? `<div><i class="fas fa-map-marker-alt"></i> ${esc(ev.luogo)}</div>` : ''}
+                            <div class="riga-assegnati"><i class="fas fa-user-check"></i> ${chipAssegnati(ev) || '<span class="muted">Non assegnato</span>'}</div>
+                            <div class="modifica-assegnati" data-pannello="${esc(ev.id)}" hidden>
+                                ${UTENTI.map(u => `<label class="chip-utente"><input type="checkbox" value="${esc(u.username)}" ${(ev.assegnati || []).includes(u.username) ? 'checked' : ''}> ${esc(u.nome)}</label>`).join('')}
+                                <button type="button" class="btn btn-small primary" data-salva-assegnati="${esc(ev.id)}">Salva</button>
+                            </div>
                             ${ev.riassunto ? `<details class="riassunto"><summary><i class="fas fa-robot"></i> Riassunto di Ceerlo</summary>${esc(ev.riassunto)}</details>` : ''}
                             <div class="azioni-evento">
+                                <button type="button" class="btn btn-small" data-assegna="${esc(ev.id)}"><i class="fas fa-user-plus"></i> Assegna</button>
                                 ${ev.link ? `<a class="muted" href="${esc(ev.link)}" target="_blank" rel="noopener">Apri in Google Calendar</a>` : ''}
                                 ${conCeerlo ? `<button type="button" class="btn btn-small" data-riassumi="${esc(ev.id)}"><i class="fas fa-robot"></i> ${ev.riassunto ? 'Rifai riassunto' : 'Riassunto'}</button>` : ''}
                             </div>
@@ -153,13 +183,16 @@
         e.preventDefault();
         const btn = document.getElementById('btn-crea');
         btn.disabled = true;
-        const dati = Object.fromEntries(new FormData(form).entries());
+        const fd = new FormData(form);
+        const dati = Object.fromEntries(fd.entries());
+        dati.assegnati = fd.getAll('assegnati');
         try {
             const r = await fetch('/api/calendario/eventi', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dati)});
             const esito = await r.json();
             if (!esito.ok) throw new Error(esito.error || 'Errore');
             window.showNotification ? window.showNotification('Appuntamento creato', esito.evento.titolo) : null;
             ['titolo', 'ora', 'luogo', 'descrizione'].forEach(k => { form[k].value = ''; });
+            form.querySelectorAll('input[name="assegnati"]').forEach(c => { c.checked = false; });
             inizio = new Date(dati.giorno + 'T00:00:00') < inizio || new Date(dati.giorno + 'T00:00:00') > piu(inizio, GIORNI - 1)
                 ? new Date(dati.giorno + 'T00:00:00') : inizio;
             carica();
@@ -171,6 +204,34 @@
     });
 
     // Riassunto chiesto a Ceerlo: va in coda, la pagina aspetta e poi ricarica l'elenco
+    // Assegnazione di un appuntamento esistente: apre le spunte dei colleghi, Salva le manda al gestionale
+    elenco.addEventListener('click', async e => {
+        const apri = e.target.closest('[data-assegna]');
+        if (apri) {
+            const p = elenco.querySelector(`[data-pannello="${CSS.escape(apri.dataset.assegna)}"]`);
+            if (p) p.hidden = !p.hidden;
+            return;
+        }
+        const salva = e.target.closest('[data-salva-assegnati]');
+        if (!salva) return;
+        const id = salva.dataset.salvaAssegnati;
+        const scelti = [...elenco.querySelectorAll(`[data-pannello="${CSS.escape(id)}"] input:checked`)].map(c => c.value);
+        salva.disabled = true;
+        try {
+            const r = await fetch(`/api/calendario/eventi/${encodeURIComponent(id)}/assegna`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({assegnati: scelti})});
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Errore');
+            const i = ultimi.findIndex(x => x.id === id);
+            if (i >= 0) ultimi[i] = {...ultimi[i], assegnati: d.evento.assegnati, assegnati_info: d.evento.assegnati_info,
+                                     descrizione: d.evento.descrizione};
+            mostra(ultimi);
+        } catch (err) {
+            alert('Assegnazione non salvata: ' + err.message);
+            salva.disabled = false;
+        }
+    });
+
     elenco.addEventListener('click', async e => {
         const btn = e.target.closest('[data-riassumi]');
         if (!btn) return;
@@ -221,6 +282,19 @@
 .riassunto summary { cursor: pointer; font-weight: 600; white-space: normal; }
 .azioni-evento { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
 .btn-small { padding: 3px 10px; font-size: 12px; }
+.scelta-utenti, .modifica-assegnati { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.modifica-assegnati { margin: 6px 0; padding: 8px; background: #f7f7f7; border-radius: 8px; }
+.modifica-assegnati[hidden] { display: none; }
+.chip-utente { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #ddd; border-radius: 14px;
+               padding: 3px 10px; font-size: 13px; cursor: pointer; background: #fff; font-weight: normal; }
+.chip-utente:has(input:checked) { border-color: #4a5bd4; background: #eef0fd; }
+.chip-assegnato { display: inline-block; background: #eceff1; border-radius: 10px; padding: 1px 8px; font-size: 12px; margin-right: 4px; }
+.chip-assegnato.mio { background: #dfe6fd; color: #2a3aa8; font-weight: 600; }
+.chip-utente, .filtro-miei label { margin: 0 !important; line-height: 1.4; }
+.chip-utente input, .filtro-miei input { width: auto !important; height: auto !important; min-height: 0 !important;
+                                         margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
+.filtro-miei { padding: 0 24px 8px; font-size: 13px; }
+.filtro-miei label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; }
 @media (max-width: 640px) {
     .griglia-form { grid-template-columns: 1fr; }
     .evento { flex-direction: column; gap: 2px; }
