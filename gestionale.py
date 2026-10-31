@@ -9018,10 +9018,11 @@ def riassunto_serale_ceerlo(d, minuti=MINUTI_ATTESA_CEERLO):
     messaggi = [{"role": "system", "content": ceerlo.prompt_sistema("il CEO e il team", "riepilogo serale", _contesto_riepilogo(d))},
                 {"role": "user", "content": (
                     "Scrivi il riepilogo serale da mandare per email. Tre parti brevi con questi titoli su righe a se': "
-                    "'Oggi' (cosa e' stato fatto e cosa e' rimasto aperto, dai report), 'Domani' (appuntamenti, promemoria, "
+                    "'Report di oggi' (il riassunto dei report: una riga per collega che inizia col suo nome, con cosa ha fatto "
+                    "e cosa e' rimasto aperto; se non ci sono report scrivi 'Nessun report'), 'Domani' (appuntamenti, promemoria, "
                     "incassi previsti, in ordine di orario) e 'Attenzione' (task scadute, appuntamenti senza nessuno assegnato, "
                     "cose da non dimenticare; se non c'e' nulla scrivi 'Niente di urgente'). Sotto ogni titolo righe che "
-                    "iniziano con '- '. In tutto massimo 15 righe. Niente importi o cifre in euro. Per clienti e preventivi "
+                    "iniziano con '- '. In tutto massimo 18 righe. Niente importi o cifre in euro. Per clienti e preventivi "
                     "scrivi il codice come nel contesto, nella forma #CODICE[nome]: nell'email diventa un link. "
                     "Per i colleghi scrivi i nomi, senza @. Usa solo i dati del contesto.")}]
     try:
@@ -9101,6 +9102,12 @@ def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
     t = [oggetto.upper(), ""]
     if ai:
         t += ["IL PUNTO DI CEERLO", ai, ""]
+    t.append(f"REPORT DI OGGI ({len(d['report'])}):")
+    for r in d["report"]:
+        t += ["", f"Report di {r['autore']} ({r['ora']})"] + [f"- {v['testo']}" for v in r["voci"]]
+    if not d["report"]:
+        t.append("Nessun report inviato.")
+    t.append("")
     for g, titolo in ((domani_k, "DOMANI"), (oggi_k, "OGGI")):
         t.append(f"APPUNTAMENTI {titolo}:")
         t += [f"- {a['ora'] or 'tutto il giorno'} {a['titolo']}" + (f" ({a['cliente']})" if a["cliente"] else "")
@@ -9113,11 +9120,6 @@ def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
         t += ["INCASSI PREVISTI DOMANI:"] + [f"- {x['cliente']} (preventivo {x['preventivo']})" for x in d["incassi"]] + [""]
     if d["task"]:
         t += ["TASK SCADUTE O IN SCADENZA:"] + [f"- #{x['id']} {x['testo'][:120]} (entro {x['etc']})" for x in d["task"]] + [""]
-    t.append(f"REPORT DI OGGI ({len(d['report'])}):")
-    for r in d["report"]:
-        t += ["", f"{r['autore']} ({r['ora']})"] + [f"- {v['testo']}" for v in r["voci"]]
-    if not d["report"]:
-        t.append("Nessun report inviato.")
     testo = _senza_codici("\n".join(t))
 
     # --- HTML (tabelle e stili in linea: e' quello che i programmi di posta leggono bene) ---
@@ -9147,6 +9149,23 @@ def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
                        f'<tr><td style="background:#f4f5ff;border:1px solid #dfe3fb;border-radius:12px;padding:16px 18px;font-size:14px;'
                        f'line-height:1.55;color:#1f2937;"><div style="font-size:12px;letter-spacing:.6px;text-transform:uppercase;'
                        f'color:{blu};font-weight:700;">🤖&nbsp; Il punto di Ceerlo</div>{_html_ceerlo(ai)}</td></tr></table></td></tr>')
+    # i report del giorno: uno per collega, chiusi a tendina (si aprono toccando "Report di ...").
+    # I programmi di posta che non gestiscono le tendine (es. Gmail sul web) li mostrano gia' aperti.
+    rep_html = []
+    for r in d["report"]:
+        voci = "".join(f'<li style="margin:3px 0;">{esc(v["testo"])}'
+                       + (' <span style="font-size:11px;background:#eef1fd;color:#3b4fe4;border-radius:8px;padding:1px 7px;">task</span>' if v["task"] else "")
+                       + (' <span style="font-size:11px;background:#fff4d6;color:#b45309;border-radius:8px;padding:1px 7px;">promemoria</span>' if v["promemoria"] else "")
+                       + "</li>" for v in r["voci"])
+        n = len(r["voci"])
+        rep_html.append(f'<details style="border:1px solid {bordo};border-radius:10px;margin:0 0 8px;background:#ffffff;">'
+                        f'<summary style="display:block;list-style:none;cursor:pointer;padding:11px 14px;font-weight:700;font-size:14px;color:#111827;">'
+                        f'<span style="color:{blu};">&#9656;</span> Report di {_h.escape(r["autore"] or "")}'
+                        f'<span style="font-weight:400;color:{grigio};font-size:12.5px;"> · {esc(r["ora"])} · '
+                        f'{n} {"voce" if n == 1 else "voci"}</span></summary>'
+                        f'<ul style="margin:0;padding:0 14px 12px 34px;font-size:14px;line-height:1.5;color:#1f2937;">{voci}</ul></details>')
+    blocchi.append(sezione(f"Report di oggi ({len(d['report'])})", "📝",
+                           "".join(rep_html) or f'<div style="color:{grigio};font-size:14px;">Nessun report inviato.</div>'))
     blocchi.append(sezione(f"Domani, {_giorno_lungo(d['domani'])}", "📅", agenda(domani_k)))
     extra = []
     for p in d["promemoria"]:
@@ -9162,18 +9181,6 @@ def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
                  f"#{esc(x['id'])}" + (f" · {esc(', '.join(x['chi']))}" if x["chi"] else ""),
                  "#fde4e1" if x["scaduta"] else "#fff4d6") for x in d["task"]), "#c2410c"))
     blocchi.append(sezione("Oggi in agenda", "🗓️", agenda(oggi_k), grigio))
-    rep_html = []
-    for r in d["report"]:
-        voci = "".join(f'<li style="margin:3px 0;">{esc(v["testo"])}'
-                       + (' <span style="font-size:11px;background:#eef1fd;color:#3b4fe4;border-radius:8px;padding:1px 7px;">task</span>' if v["task"] else "")
-                       + (' <span style="font-size:11px;background:#fff4d6;color:#b45309;border-radius:8px;padding:1px 7px;">promemoria</span>' if v["promemoria"] else "")
-                       + "</li>" for v in r["voci"])
-        rep_html.append(f'<div style="border:1px solid {bordo};border-radius:10px;padding:12px 14px;margin:0 0 8px;">'
-                        f'<div style="font-weight:700;font-size:14px;color:#111827;">{esc(r["autore"])}'
-                        f'<span style="font-weight:400;color:{grigio};font-size:12.5px;"> · {esc(r["ora"])}</span></div>'
-                        f'<ul style="margin:6px 0 0;padding-left:20px;font-size:14px;line-height:1.5;color:#1f2937;">{voci}</ul></div>')
-    blocchi.append(sezione(f"Report di oggi ({len(d['report'])})", "📝",
-                           "".join(rep_html) or f'<div style="color:{grigio};font-size:14px;">Nessun report inviato.</div>'))
     if not ai and ceerlo.attivo() and minuti_ceerlo:
         blocchi.append(f'<tr><td style="padding:4px 28px;font-size:12px;color:{grigio};">Ceerlo stasera non ha risposto in tempo: '
                        f'il riepilogo e\' senza il suo riassunto.</td></tr>')
