@@ -9139,7 +9139,7 @@ def _contesto_cliente(client_id="", nome=""):
         db.close()
 
 
-def contesto_ceerlo(pagina="", client_id="", quote_id=""):
+def contesto_ceerlo(pagina="", client_id="", quote_id="", con_appuntamenti=True):
     parti = []
     if pagina:
         parti.append(f"L'utente e' nella pagina {pagina} del gestionale.")
@@ -9157,7 +9157,8 @@ def contesto_ceerlo(pagina="", client_id="", quote_id=""):
     try:
         oggi = datetime.date.today().isoformat()
         domani = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
-        vicini = [e for e in eventi_vicini() if e["inizio"][:10] in (oggi, domani)] if integrazioni_google.calendar_collegato() else []
+        vicini = [e for e in eventi_vicini() if e["inizio"][:10] in (oggi, domani)] \
+            if con_appuntamenti and integrazioni_google.calendar_collegato() else []
         if vicini:
             parti.append("Appuntamenti di oggi e domani:\n" + "\n".join(
                 f"- {e['inizio'][:16].replace('T', ' ')} {e['titolo']}" + (f" (cliente {e['cliente']})" if e["cliente"] else "")
@@ -9165,6 +9166,49 @@ def contesto_ceerlo(pagina="", client_id="", quote_id=""):
     except Exception as e:
         print(f"[ceerlo] Calendario non letto: {e}")
     return "\n\n".join(x for x in parti if x)
+
+
+def _contesto_utente(username):
+    """Per una @menzione: chi e', le sue task aperte visibili a chi chiede e i suoi ultimi report."""
+    u = next((x for x in load_users() if x["username"].lower() == username.lower()), None)
+    if not u:
+        return ""
+    righe = [f"Collega @{u['username']}: {u.get('full_name') or u['username']}, ruolo {u.get('role')}."]
+    try:
+        aperte = [t for t in load_tasks() if t.get("status") not in ("resolved", "failed")
+                  and task_visibile(t, session["user_id"], session["user_role"])
+                  and (u["username"] in [a.replace("@", "") for a in (t.get("assigned_to") or [])] or t.get("created_by") == u["username"])]
+        for t in aperte[:10]:
+            righe.append(f"- Task #{t['id']} ({t.get('status')}, scadenza {t.get('etc') or '-'}): {(t.get('description') or '')[:200]}")
+    except Exception as e:
+        print(f"[ceerlo] Task non lette: {e}")
+    db = _DBSession()
+    try:
+        for r in db.query(_Report).filter(_Report.autore == u["username"], _Report.stato != "bozza").order_by(
+                _Report.creato_il.desc()).limit(2).all():
+            righe.append(f"Report del {(r.creato_il or '')[:16]}: {(r.testo or '')[:600]}")
+    finally:
+        db.close()
+    return "\n".join(righe)
+
+
+def contesto_tag(testo):
+    """Dati dei #clienti, #preventivi e @colleghi citati nella domanda (stessi codici delle altre chat: #ID[nome], @utente)."""
+    parti, visti = [], set()
+    for ident in re.findall(r"(?:^|\s)#([A-Z0-9-]+)", testo or ""):
+        if ident in visti or len(visti) >= 5:
+            continue
+        visti.add(ident)
+        if ident.startswith("CLT-"):
+            parti.append(_contesto_cliente(ident))
+        else:
+            parti.append(contesto_ceerlo(quote_id=ident, con_appuntamenti=False))
+    for nome in re.findall(r"@(\w+)", testo or ""):
+        if nome.lower() in visti or len(visti) >= 8:
+            continue
+        visti.add(nome.lower())
+        parti.append(_contesto_utente(nome))
+    return "\n\n".join(p for p in parti if p)
 
 
 def contesto_evento(ev):
@@ -9184,6 +9228,9 @@ def api_ceerlo_chiedi():
         return jsonify({"ok": False, "error": "Scrivi una domanda."}), 400
     contesto = contesto_ceerlo(str(d.get("pagina") or "")[:200], str(d.get("cliente_id") or "")[:50],
                                str(d.get("preventivo") or "")[:50])
+    citati = contesto_tag(str(storia[-1].get("testo") or ""))
+    if citati:
+        contesto += "\n\nCITATI NELLA DOMANDA (#cliente o #preventivo, @collega):\n" + citati
     messaggi = [{"role": "system", "content": ceerlo.prompt_sistema(session.get("user_name"), session.get("user_role"), contesto)}]
     messaggi += [{"role": "user" if m.get("ruolo") == "utente" else "assistant", "content": str(m["testo"])[:4000]} for m in storia]
     try:

@@ -101,53 +101,48 @@
   </section>
 
   <div class="home-columns">
-    <!-- Archivio -->
+    <!-- Strumenti, raggruppati per area -->
     <section class="home-panel">
-      <h3 class="section-label">Archivio</h3>
-      <div class="quick-list">
-        <a href="{{ url_for('anagrafica_clienti') }}" class="quick-link">
-          <span class="quick-icon"><i class="fas fa-address-card"></i></span>
-          <span><strong>Anagrafica Clienti</strong><small>Dati e documenti dei clienti</small></span>
-          <i class="fas fa-chevron-right quick-arrow"></i>
-        </a>
-        <a href="{{ url_for('dashboard_magazzino') }}" class="quick-link">
-          <span class="quick-icon"><i class="fas fa-warehouse"></i></span>
-          <span><strong>Magazzino</strong><small>Articoli, giacenze e prenotazioni</small></span>
-          <i class="fas fa-chevron-right quick-arrow"></i>
-        </a>
-        <a href="{{ url_for('dashboard_catalogo') }}" class="quick-link">
-          <span class="quick-icon"><i class="fas fa-book"></i></span>
-          <span><strong>Catalogo</strong><small>Listini, sconti e prezzi ricavati dai preventivi (bozza)</small></span>
-          <i class="fas fa-chevron-right quick-arrow"></i>
-        </a>
-        <a href="{{ url_for('dashboard_campionari') }}" class="quick-link">
-          <span class="quick-icon"><i class="fas fa-swatchbook"></i></span>
-          <span><strong>Campionari</strong><small>Campioni in sala e foto di bagni realizzati</small></span>
-          <i class="fas fa-chevron-right quick-arrow"></i>
-        </a>
-        <a href="{{ url_for('calendario_page') }}" class="quick-link">
-          <span class="quick-icon"><i class="fas fa-calendar-alt"></i></span>
-          <span><strong>Calendario</strong><small>Appuntamenti del calendario condiviso del negozio</small></span>
-          <i class="fas fa-chevron-right quick-arrow"></i>
-        </a>
-        <a href="{{ url_for('archivio_globale') }}" class="quick-link">
-          <span class="quick-icon"><i class="fas fa-archive"></i></span>
-          <span><strong>Archivio Preventivi</strong><small>Tutti i preventivi, anche chiusi e annullati</small></span>
-          <i class="fas fa-chevron-right quick-arrow"></i>
-        </a>
-        <a href="{{ url_for('tasks_page') }}" class="quick-link">
-          <span class="quick-icon"><i class="fas fa-tasks"></i></span>
-          <span><strong>Task &amp; Report</strong><small>Attività del team, le tue task e i report</small></span>
-          <i class="fas fa-chevron-right quick-arrow"></i>
-        </a>
-        <a href="{{ url_for('report_page') }}" class="quick-link">
-          <span class="quick-icon"><i class="fas fa-clipboard-list"></i></span>
-          <span><strong>Report</strong><small>Il tuo report e l'ultimo di ogni collega</small></span>
-          <i class="fas fa-chevron-right quick-arrow"></i>
-        </a>
+      <h3 class="section-label">Strumenti</h3>
+      <div class="tool-groups">
+        <div class="tool-group">
+          <div class="tool-group-title">Clienti e preventivi</div>
+          <div class="tool-grid">
+            <a href="{{ url_for('anagrafica_clienti') }}" class="tool-tile" title="Dati e documenti dei clienti">
+              <span class="quick-icon"><i class="fas fa-address-card"></i></span><span>Clienti</span>
+            </a>
+            <a href="{{ url_for('archivio_globale') }}" class="tool-tile" title="Tutti i preventivi, anche chiusi e annullati">
+              <span class="quick-icon"><i class="fas fa-archive"></i></span><span>Archivio preventivi</span>
+            </a>
+          </div>
+        </div>
+        <div class="tool-group">
+          <div class="tool-group-title">Team e agenda</div>
+          <div class="tool-grid">
+            <a href="{{ url_for('tasks_page') }}" class="tool-tile" title="Attività del team, le tue task e i report">
+              <span class="quick-icon"><i class="fas fa-tasks"></i></span><span>Task &amp; Report</span>
+            </a>
+            <a href="{{ url_for('calendario_page') }}" class="tool-tile" title="Appuntamenti del calendario condiviso del negozio">
+              <span class="quick-icon"><i class="fas fa-calendar-alt"></i></span><span>Calendario</span>
+            </a>
+          </div>
+        </div>
+        <div class="tool-group">
+          <div class="tool-group-title">Prodotti</div>
+          <div class="tool-grid">
+            <a href="{{ url_for('dashboard_magazzino') }}" class="tool-tile" title="Articoli, giacenze e prenotazioni">
+              <span class="quick-icon"><i class="fas fa-warehouse"></i></span><span>Magazzino</span>
+            </a>
+            <a href="{{ url_for('dashboard_catalogo') }}" class="tool-tile" title="Listini, sconti e prezzi ricavati dai preventivi (bozza)">
+              <span class="quick-icon"><i class="fas fa-book"></i></span><span>Catalogo</span>
+            </a>
+            <a href="{{ url_for('dashboard_campionari') }}" class="tool-tile" title="Campioni in sala e foto di bagni realizzati">
+              <span class="quick-icon"><i class="fas fa-swatchbook"></i></span><span>Campionari</span>
+            </a>
+          </div>
+        </div>
       </div>
     </section>
-
     <!-- Amministrazione (CEO/Admin) -->
     {% if session.user_role in ['amministratore', 'ceo'] %}
     <section class="home-panel">
@@ -163,6 +158,13 @@
           <span><strong>Gestione Utenti</strong><small>Aggiungi o modifica gli account</small></span>
           <i class="fas fa-chevron-right quick-arrow"></i>
         </a>
+        {% if session.user_role == 'amministratore' %}
+        <a href="{{ url_for('impostazioni_google') }}" class="quick-link">
+          <span class="quick-icon dark"><i class="fas fa-plug"></i></span>
+          <span><strong>Email, Calendar e Ceerlo</strong><small>Collegamenti a Gmail, Google Calendar e AI locale</small></span>
+          <i class="fas fa-chevron-right quick-arrow"></i>
+        </a>
+        {% endif %}
         <a href="{{ url_for('gestisci_margini') }}" class="quick-link">
           <span class="quick-icon dark"><i class="fas fa-cogs"></i></span>
           <span><strong>Margini</strong><small>Logiche di ricarico</small></span>
@@ -274,6 +276,14 @@
   .quick-icon.danger { background: var(--danger-bg); color: var(--danger-text); }
   .quick-link.danger strong { color: var(--danger-text); }
   .quick-arrow { color: var(--text-subtle); font-size: 12px; }
+  .tool-groups { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-xs); padding: 6px 18px 16px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 20px; }
+  .tool-group-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin: 12px 0 8px; }
+  .tool-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .tool-tile { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+    text-decoration: none; color: var(--text); font-size: 13px; font-weight: 600; transition: background .15s, border-color .15s; }
+  .tool-tile:hover { background: var(--surface-hover); border-color: var(--accent); }
+  .tool-tile .quick-icon { width: 30px; height: 30px; font-size: 13px; }
 
   @media (max-width: 1100px) { .flow-grid { grid-template-columns: repeat(3, 1fr); } }
   @media (max-width: 700px) {
