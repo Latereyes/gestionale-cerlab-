@@ -524,6 +524,15 @@ class UI:
 
 
 # =====================================================================================
+# Un programma fatto con PyInstaller passa ai processi che avvia le sue variabili interne (_PYI_..., _MEI...):
+# un altro .exe PyInstaller avviato con quelle si crede un "figlio" e si ferma con
+# "Security validation failure: failed to obtain executable path for parent process".
+def ambiente_pulito():
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("_PYI", "_MEI"))}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
 # Programma principale
 # =====================================================================================
 class ClientNotifiche:
@@ -894,7 +903,7 @@ del "%~f0"
 """, encoding="utf-8")
         import subprocess
         subprocess.Popen(["cmd.exe", "/c", str(bat)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                         close_fds=True)
+                         close_fds=True, env=ambiente_pulito())
 
     # ---------- ciclo principale ----------
     def _controlla_attivita(self):

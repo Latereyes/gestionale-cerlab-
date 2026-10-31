@@ -712,7 +712,11 @@ class AppLauncher(Tk):
 
             # Avviamo lo script .bat in modo completamente indipendente e nascosto
             # CREATE_NO_WINDOW nasconde la finestra del prompt che altrimenti lampeggerebbe
-            subprocess.Popen(['cmd.exe', '/c', batch_path], creationflags=subprocess.CREATE_NO_WINDOW)
+            # ambiente senza le variabili interne di PyInstaller: altrimenti GestionaleNotifiche, avviato
+            # dall'installer, si ferma con "Security validation failure ... parent process"
+            env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("_PYI", "_MEI"))}
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            subprocess.Popen(['cmd.exe', '/c', batch_path], creationflags=subprocess.CREATE_NO_WINDOW, env=env)
 
         except Exception as e:
             print(f"!!! ERRORE CRITICO: Impossibile creare o lanciare lo script di aggiornamento. Errore: {e}")
