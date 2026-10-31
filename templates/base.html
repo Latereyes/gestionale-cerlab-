@@ -1042,29 +1042,7 @@
        <i class="fas fa-file-invoice"></i> Fatture
     </a>
 
-    <a href="{{ url_for('dashboard_magazzino') }}" 
-       class="btn {{ 'disabled' if active_page == 'magazzino' else '' }}" 
-       title="Magazzino">
-       <i class="fas fa-warehouse"></i> Magazzino
-    </a>
-
-    <a href="{{ url_for('dashboard_catalogo') }}" 
-       class="btn {{ 'disabled' if active_page == 'catalogo' else '' }}" 
-       title="Catalogo (bozza)">
-       <i class="fas fa-book"></i> Catalogo
-    </a>
-
-    <a href="{{ url_for('dashboard_campionari') }}" 
-       class="btn {{ 'disabled' if active_page == 'campionari' else '' }}" 
-       title="Campionari">
-       <i class="fas fa-swatchbook"></i> Campionari
-    </a>
-
-    <a href="{{ url_for('calendario_page') }}" 
-       class="btn {{ 'disabled' if active_page == 'calendario' else '' }}" 
-       title="Calendario appuntamenti (Google Calendar)">
-       <i class="fas fa-calendar-alt"></i> Calendario
-    </a>
+    {# Magazzino, Catalogo, Campionari e Calendario si aprono dalla home (Strumenti) #}
 
 </div> 
 {% endmacro %}

@@ -226,9 +226,22 @@ riepilogo_coda = _CODA.riepilogo
 
 # --- Prompt ---
 
-def prompt_sistema(utente_nome, ruolo, contesto):
+DOMANDA_APPROFONDISCI = "Vuoi che controlli piu' a fondo?"
+
+
+def prompt_sistema(utente_nome, ruolo, contesto, profondo=None):
+    """profondo=None: richiesta senza modalita' (riepilogo serale); False: risposta rapida; True: controllo approfondito."""
     oggi = datetime.datetime.now()
     giorno = ("lunedi'", "martedi'", "mercoledi'", "giovedi'", "venerdi'", "sabato", "domenica")[oggi.weekday()]
+    if profondo is None:
+        modo = ""
+    elif profondo:
+        modo = ("Questa e' una risposta APPROFONDITA: il CONTESTO contiene molti piu' dati del solito. Controllali con cura, "
+                "incrocia preventivi, pagamenti, note e report, e dai una risposta completa e ordinata. Non chiedere di approfondire ancora. ")
+    else:
+        modo = ("Questa e' una risposta RAPIDA con i dati principali. Se la domanda richiede di guardare piu' dati di quelli "
+                "che hai (per esempio tutto lo storico, tutti i preventivi o tutti i pagamenti), rispondi con quello che hai "
+                f"e chiudi il messaggio con la domanda esatta: \"{DOMANDA_APPROFONDISCI}\". Se la risposta e' gia' completa non farla. ")
     return (
         f"Sei {NOME}, l'assistente del gestionale di CERLAB (negozio di arredo bagno, pavimenti e rivestimenti). "
         f"Rispondi sempre in italiano, in modo breve, cordiale e pratico. Oggi e' {giorno} {oggi:%d/%m/%Y}, ore {oggi:%H:%M}. "
@@ -238,14 +251,20 @@ def prompt_sistema(utente_nome, ruolo, contesto):
         "#CODICE[nome] (es. #CF-08AG2611A12[Maria Rossi]), senza aggiungere prefissi e senza grassetto attorno: "
         "nel gestionale diventa un link. Puoi usare elenchi puntati e **grassetto** per il resto del testo. "
         "Nei testi da mandare ai clienti (mail, messaggi) non scrivere #codici ne' @colleghi, dai del Lei e firma come il team CERLAB. "
-        "Il CONTESTO qui sotto contiene i dati del gestionale che ti servono (report, task, appuntamenti, clienti, "
-        "preventivi): usali per rispondere in modo utile, riassumendo e collegando le informazioni. "
-        "Se qualcosa non c'e', di' cosa hai trovato e dove guardare nel gestionale (es. pagina Task & Report, "
-        "Calendario, scheda cliente), e suggerisci di citare il cliente con # o il collega con @. "
+        "Il CONTESTO qui sotto contiene i dati del gestionale (report, task, appuntamenti, clienti con anagrafica e note interne, "
+        "preventivi con importi, pagamenti e saldi): usali direttamente per rispondere, riassumendo e collegando le informazioni. "
+        "Non mandare l'utente a cercare in un'altra pagina quello che e' gia' nel CONTESTO: scrivi tu i dati (note, importi, saldi, date). "
+        + modo +
+        "Se un dato proprio non c'e', dillo e suggerisci di citare il cliente con # o il collega con @. "
         "Non inventare nomi, date o numeri del gestionale; per domande generali (come si fa una cosa, consigli, "
         "testi da scrivere a un cliente) rispondi liberamente. Non puoi ancora modificare dati del gestionale: se ti chiedono di farlo, "
         "spiega dove farlo nelle pagine.\n\nCONTESTO:\n" + (contesto or "(nessun dato)")
     )
+
+
+def chiede_approfondimento(testo):
+    """La risposta di Ceerlo chiude con la proposta di controllare piu' a fondo?"""
+    return "a fondo?" in (testo or "").lower()[-200:]
 
 
 def prompt_riassunto(evento, contesto):
@@ -253,7 +272,9 @@ def prompt_riassunto(evento, contesto):
         f"Prepara un riassunto per l'appuntamento \"{evento.get('titolo')}\" del {evento.get('inizio', '')[:16].replace('T', ' ')}"
         f"{' con ' + evento['cliente'] if evento.get('cliente') else ''}. "
         "In massimo 8 righe: chi e' il cliente, cosa ha in corso (preventivi e stato), cosa dicono note e report recenti, "
-        "e 2-3 punti da ricordare o chiedere all'appuntamento. Usa solo i dati del contesto.\n\nCONTESTO:\n" + contesto
+        "e 2-3 punti da ricordare o chiedere all'appuntamento. Quando nomini il cliente o un preventivo scrivi il codice "
+        "come nel contesto, nella forma #CODICE[nome]: nel gestionale diventa un link. Niente importi. "
+        "Usa solo i dati del contesto.\n\nCONTESTO:\n" + contesto
     )
 
 

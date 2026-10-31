@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, json, re, datetime, uuid, copy, base64
 import urllib.request
+import urllib.parse
 from pathlib import Path
 from flask import Flask, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, jsonify
 from jinja2.runtime import Undefined
@@ -8941,8 +8942,8 @@ def dati_riepilogo(reports, oggi=None):
     utenti = {u["username"]: u for u in load_users()}
     nome = lambda u: (utenti.get(u.lstrip("@")) or {}).get("full_name") or u.lstrip("@")
     def pulisci(t):
-        """Niente importi, niente #codici e @username: nelle email vanno i nomi."""
-        t = re.sub(r"#([A-Z0-9-]+)\[([^\]]+)\]", r"\2", t or "")
+        """Niente importi e @username (nelle email vanno i nomi). I #CODICE[nome] restano: nell'email diventano link."""
+        t = t or ""
         t = re.sub(r"@(\w+)", lambda m: (utenti.get(m.group(1)) or {}).get("full_name") or m.group(0), t)
         return integrazioni_google.togli_importi(t)
     d = {"oggi": oggi, "domani": domani, "errori": [],
@@ -9020,8 +9021,9 @@ def riassunto_serale_ceerlo(d, minuti=MINUTI_ATTESA_CEERLO):
                     "'Oggi' (cosa e' stato fatto e cosa e' rimasto aperto, dai report), 'Domani' (appuntamenti, promemoria, "
                     "incassi previsti, in ordine di orario) e 'Attenzione' (task scadute, appuntamenti senza nessuno assegnato, "
                     "cose da non dimenticare; se non c'e' nulla scrivi 'Niente di urgente'). Sotto ogni titolo righe che "
-                    "iniziano con '- '. In tutto massimo 15 righe. Niente importi o cifre in euro, niente #codici ne' @: "
-                    "scrivi i nomi. Usa solo i dati del contesto.")}]
+                    "iniziano con '- '. In tutto massimo 15 righe. Niente importi o cifre in euro. Per clienti e preventivi "
+                    "scrivi il codice come nel contesto, nella forma #CODICE[nome]: nell'email diventa un link. "
+                    "Per i colleghi scrivi i nomi, senza @. Usa solo i dati del contesto.")}]
     try:
         jid = ceerlo.aggiungi("riepilogo", messaggi, ceerlo.PRIO_RICHIESTA, "riepilogo", chiave=f"riepilogo:{d['oggi']}")
     except Exception as ex:
@@ -9031,7 +9033,7 @@ def riassunto_serale_ceerlo(d, minuti=MINUTI_ATTESA_CEERLO):
     while time.time() < fine:
         st = ceerlo.stato_job(jid) or {}
         if st.get("stato") == "fatto":
-            testo = re.sub(r"#([A-Z0-9-]+)\[([^\]]+)\]", r"\2", st.get("risposta") or "")
+            testo = st.get("risposta") or ""
             testo = re.sub(r"@(\w+)", lambda m: (next((u.get("full_name") for u in load_users()
                                                          if u["username"].lower() == m.group(1).lower()), None) or m.group(1)), testo)
             return integrazioni_google.togli_importi(testo.replace("**", "").strip())
@@ -9041,6 +9043,26 @@ def riassunto_serale_ceerlo(d, minuti=MINUTI_ATTESA_CEERLO):
         time.sleep(5)
     integrazioni_google.log(f"Riepilogo: Ceerlo non ha finito in {minuti} minuti, parte senza riassunto")
     return ""
+
+
+_CODICE_TAG = re.compile(r"#([A-Z0-9][A-Z0-9-]{2,})\[([^\]\n]+)\]")
+
+
+def _senza_codici(testo):
+    """#CODICE[nome] -> nome (testo semplice delle email)."""
+    return _CODICE_TAG.sub(r"\2", testo or "")
+
+
+def indirizzo_gestionale():
+    """Indirizzo con cui PC dell'ufficio e telefoni aprono il gestionale: Tailscale se c'e', altrimenti la rete locale."""
+    return DISPLAY_URL if DISPLAY_URL.endswith("/") else DISPLAY_URL + "/"
+
+
+def _link_email(testo_html):
+    """Nell'HTML gia' neutralizzato, #CODICE[nome] diventa un link che apre il cliente o il preventivo nel gestionale."""
+    base = indirizzo_gestionale()
+    return _CODICE_TAG.sub(lambda m: f'<a href="{base}ceerlo/vai/{urllib.parse.quote(m.group(1))}" '
+                                     f'style="color:#3b4fe4;text-decoration:underline;">{m.group(2)}</a>', testo_html)
 
 
 def _html_ceerlo(testo):
@@ -9057,10 +9079,10 @@ def _html_ceerlo(testo):
         if not r:
             continue
         if r[:2] in ("- ", "* ", "• "):
-            lista.append(_h.escape(r[2:].strip()))
+            lista.append(_link_email(_h.escape(r[2:].strip())))
         else:
             chiudi()
-            titolo = r.strip("#: ").strip()
+            titolo = _senza_codici(r.strip("#: ").strip())
             pezzi.append(f'<div style="font-weight:700;color:#1e2a78;margin:10px 0 2px;font-size:15px;">{_h.escape(titolo)}</div>')
     chiudi()
     return "".join(pezzi)
@@ -9069,7 +9091,7 @@ def _html_ceerlo(testo):
 def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
     """(oggetto, testo semplice, html) del riepilogo serale."""
     import html as _h
-    esc = lambda t: _h.escape(t or "")
+    esc = lambda t: _link_email(_h.escape(t or ""))  # i #CODICE[nome] diventano link al gestionale
     d = dati_riepilogo(reports, adesso.date())
     ai = riassunto_serale_ceerlo(d, minuti_ceerlo) if minuti_ceerlo else ""
     oggi_k, domani_k = d["oggi"].isoformat(), d["domani"].isoformat()
@@ -9096,7 +9118,7 @@ def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
         t += ["", f"{r['autore']} ({r['ora']})"] + [f"- {v['testo']}" for v in r["voci"]]
     if not d["report"]:
         t.append("Nessun report inviato.")
-    testo = "\n".join(t)
+    testo = _senza_codici("\n".join(t))
 
     # --- HTML (tabelle e stili in linea: e' quello che i programmi di posta leggono bene) ---
     blu, grigio, bordo = "#3b4fe4", "#64748b", "#e5e7eb"
@@ -9683,8 +9705,31 @@ def prossimi_eventi(ore):
     return [e for e in eventi_vicini() if da <= e["inizio"][:16] <= limite]
 
 
-def _contesto_cliente(client_id="", nome=""):
-    """Dati del cliente per Ceerlo: anagrafica essenziale, note interne, preventivi (senza importi), report che lo citano."""
+def _euro(x):
+    return f"{_to_float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " EUR"
+
+
+def _riga_soldi(numero):
+    """Per Ceerlo dentro il gestionale: totale, incassato, da saldare e pagamenti programmati di un preventivo."""
+    p = load_quote(numero) or {}
+    if not p:
+        return ""
+    pag = p.get("pagamenti") or []
+    incassato = sum(_to_float(x.get("importo")) for x in pag if not x.get("is_scheduled"))
+    programmati = [x for x in pag if x.get("is_scheduled")]
+    pezzi = [f"totale {_euro(p.get('totale'))}", f"incassato {_euro(incassato)}"]
+    if p.get("stato") in STATI_CON_INCASSI:
+        residuo = _residuo_da_saldare(p)
+        pezzi.append("SALDATO" if residuo <= 0.01 else f"da saldare {_euro(residuo)}")
+    if programmati:
+        pezzi.append("incassi programmati: " + ", ".join(
+            f"{_euro(x.get('importo'))} il {str(x.get('data') or '?')[:10]}" for x in programmati[:5]))
+    return ", ".join(pezzi)
+
+
+def _contesto_cliente(client_id="", nome="", importi=False, profondo=False):
+    """Dati del cliente per Ceerlo: anagrafica, note interne, preventivi (con importi e saldi solo in chat), report che lo citano.
+    profondo=True (\"controlla piu' a fondo\") allarga note, preventivi e report."""
     db = _DBSession()
     try:
         cli = db.query(_Cliente).filter_by(id_cliente=client_id).first() if client_id else None
@@ -9695,22 +9740,35 @@ def _contesto_cliente(client_id="", nome=""):
         nome_cli = cli.cliente or cli.rag_sociale or cli.id_cliente
         righe = [f"Cliente: #{cli.id_cliente}[{nome_cli}]" + (f" ({cli.rag_sociale})" if cli.rag_sociale and cli.rag_sociale != nome_cli else ""),
                  f"Zona: {' '.join(x for x in (cli.indirizzo, cli.comune, cli.provincia) if x)}".rstrip()]
+        if importi:  # in chat anche i recapiti: Ceerlo li puo' dare senza mandare nella scheda cliente
+            recapiti = ", ".join(f"{k} {v}" for k, v in (("tel.", getattr(cli, "telefono", "")), ("email", getattr(cli, "email", "")),
+                                                         ("P.IVA", getattr(cli, "p_iva", ""))) if v)
+            if recapiti:
+                righe.append("Recapiti: " + recapiti)
         if (cli.note_interne or "").strip():
-            righe.append("Note interne: " + cli.note_interne.strip()[:1500])
-        prev = db.query(_Preventivo).filter_by(id_cliente=cli.id_cliente).order_by(_Preventivo.data.desc()).limit(10).all()
+            righe.append("Note interne: " + cli.note_interne.strip()[:6000 if profondo else 2500])
+        prev = db.query(_Preventivo).filter_by(id_cliente=cli.id_cliente).order_by(_Preventivo.data.desc()).limit(
+            40 if profondo else 10).all()
         if prev:
-            righe.append("Preventivi (piu' recenti prima): " + "; ".join(
-                f"#{p.numero} del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})" for p in prev))
+            if importi:
+                righe.append("Preventivi (piu' recenti prima):")
+                for p in prev:
+                    soldi = _riga_soldi(p.numero)
+                    righe.append(f"- #{p.numero} del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})"
+                                 + (f": {soldi}" if soldi else ""))
+            else:
+                righe.append("Preventivi (piu' recenti prima): " + "; ".join(
+                    f"#{p.numero} del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})" for p in prev))
         reports = db.query(_Report).filter(_Report.stato != "bozza", _Report.testo.ilike(f"%{nome_cli}%")).order_by(
-            _Report.creato_il.desc()).limit(5).all()
+            _Report.creato_il.desc()).limit(15 if profondo else 5).all()
         for r in reports:
-            righe.append(f"Report di {r.autore_nome} del {(r.creato_il or '')[:10]}: {(r.testo or '')[:400]}")
+            righe.append(f"Report di {r.autore_nome} del {(r.creato_il or '')[:10]}: {(r.testo or '')[:1000 if profondo else 400]}")
         return "\n".join(righe)
     finally:
         db.close()
 
 
-def contesto_ceerlo(pagina="", client_id="", quote_id="", con_appuntamenti=True):
+def contesto_ceerlo(pagina="", client_id="", quote_id="", con_appuntamenti=True, importi=False, profondo=False):
     parti = []
     if pagina:
         parti.append(f"L'utente e' nella pagina {pagina} del gestionale.")
@@ -9719,12 +9777,14 @@ def contesto_ceerlo(pagina="", client_id="", quote_id="", con_appuntamenti=True)
         try:
             p = db.query(_Preventivo).filter_by(numero=quote_id).first()
             if p:
-                parti.append(f"Preventivo aperto: #{p.numero} del {p.data}, stato {p.stato}, venditore {p.venditore}.")
+                soldi = _riga_soldi(p.numero) if importi else ""
+                parti.append(f"Preventivo: #{p.numero} del {p.data}, cliente {p.cliente or '?'}, stato {p.stato}, "
+                             f"venditore {p.venditore}" + (f", {soldi}" if soldi else "") + ".")
                 client_id = client_id or p.id_cliente or ""
         finally:
             db.close()
     if client_id:
-        parti.append(_contesto_cliente(client_id))
+        parti.append(_contesto_cliente(client_id, importi=importi, profondo=profondo))
     try:
         oggi = datetime.date.today().isoformat()
         domani = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
@@ -9770,17 +9830,25 @@ def _contesto_utente(username):
     return "\n".join(righe)
 
 
-def contesto_tag(testo):
+def _esiste_cliente(ident):
+    db = _DBSession()
+    try:
+        return db.query(_Cliente.id_cliente).filter_by(id_cliente=ident).first() is not None
+    finally:
+        db.close()
+
+
+def contesto_tag(testo, profondo=False):
     """Dati dei #clienti, #preventivi e @colleghi citati nella domanda (stessi codici delle altre chat: #ID[nome], @utente)."""
     parti, visti = [], set()
     for ident in re.findall(r"(?:^|\s)#([A-Z0-9-]+)", testo or ""):
         if ident in visti or len(visti) >= 5:
             continue
         visti.add(ident)
-        if ident.startswith("CLT-"):
-            parti.append(_contesto_cliente(ident))
+        if ident.startswith("CLT-") or _esiste_cliente(ident):
+            parti.append(_contesto_cliente(ident, importi=True, profondo=profondo))
         else:
-            parti.append(contesto_ceerlo(quote_id=ident, con_appuntamenti=False))
+            parti.append(contesto_ceerlo(quote_id=ident, con_appuntamenti=False, importi=True, profondo=profondo))
     for nome in re.findall(r"@(\w+)", testo or ""):
         if nome.lower() in visti or len(visti) >= 8:
             continue
@@ -9799,26 +9867,62 @@ def _riga_task(t):
             f"stato {t.get('status')}, scadenza {t.get('etc') or '-'}: {(t.get('description') or '')[:200]}")
 
 
-def contesto_generale(domanda):
+_PAROLE_SOLDI = ("sald", "pagament", "pagat", "incass", "soldi", "debit", "credit", "acconto", "acconti", "rata", "rate",
+                 "import", "fattur", "euro", "quanto")
+
+
+def _contesto_saldi(limite):
+    """Preventivi confermati non ancora saldati (dal residuo piu' alto) e incassi programmati dei prossimi 30 giorni."""
+    righe = []
+    aperti = []
+    for q in get_all_quotes():
+        if q.get("stato") not in STATI_CON_INCASSI:
+            continue
+        p = load_quote(q["numero"]) or {}
+        residuo = _residuo_da_saldare(p) if p else 0
+        if residuo > 0.01:
+            aperti.append((residuo, p))
+    aperti.sort(key=lambda x: -x[0])
+    if aperti:
+        righe.append(f"Preventivi da saldare ({len(aperti)}, dal residuo piu' alto; totale da incassare "
+                     f"{_euro(sum(r for r, _ in aperti))}):")
+        for residuo, p in aperti[:limite]:
+            righe.append(f"- #{p.get('numero')}[{p.get('cliente') or p.get('rag_sociale') or '?'}] stato {p.get('stato')}, "
+                         + _riga_soldi(p.get("numero")))
+    else:
+        righe.append("Nessun preventivo confermato da saldare.")
+    oggi = datetime.date.today()
+    prog = incassi_programmati((oggi - datetime.timedelta(days=60)).isoformat(), (oggi + datetime.timedelta(days=30)).isoformat())
+    if prog:
+        righe.append("Incassi programmati (da 60 giorni fa ai prossimi 30; SCADUTO = data passata e non ancora incassato):")
+        righe += [f"- {x['data']} {_euro(x['importo'])} #{x['preventivo']}[{x['cliente']}]" + (" SCADUTO" if x["scaduto"] else "")
+                  + (f" ({x['note']})" if x["note"] else "") for x in prog[:limite * 2]]
+    return "\n".join(righe)
+
+
+def contesto_generale(domanda, profondo=False):
     """Quello che Ceerlo sa sempre (ultimo report di ogni collega, le tue task aperte, appuntamenti di oggi),
-    piu' i dati che la domanda tira in ballo: report, task del team, agenda, preventivi recenti, clienti nominati."""
+    piu' i dati che la domanda tira in ballo: report, task del team, agenda, preventivi, saldi, clienti nominati.
+    profondo=True ("controlla piu' a fondo") prende tutto, con limiti piu' larghi."""
     q = (domanda or "").lower()
     me, ruolo = session["user_id"], session.get("user_role")
     parti = []
     db = _DBSession()
     try:
-        dal = (datetime.date.today() - datetime.timedelta(days=30 if "report" in q else 14)).isoformat()
+        giorni = 60 if profondo else (30 if "report" in q else 14)
+        dal = (datetime.date.today() - datetime.timedelta(days=giorni)).isoformat()
         reports = [r.to_dict() for r in db.query(_Report).filter(_Report.stato != "bozza", _Report.creato_il >= dal)
-                   .order_by(_Report.creato_il.desc()).limit(40).all()]
-        if "report" in q:
-            parti.append("Report degli ultimi 30 giorni (dal piu' recente):\n" + "\n".join(_riga_report(r) for r in reports[:15]))
+                   .order_by(_Report.creato_il.desc()).limit(80 if profondo else 40).all()]
+        if profondo or "report" in q:
+            parti.append(f"Report degli ultimi {giorni} giorni (dal piu' recente):\n"
+                         + "\n".join(_riga_report(r) for r in reports[:50 if profondo else 15]))
         elif reports:
             parti.append("Ultimo report di ogni collega:\n" + "\n".join(_riga_report(r) for r in ultimi_report_per_autore(reports)))
-        if any(k in q for k in ("preventiv", "offert", "ordin")):
-            prev = db.query(_Preventivo).order_by(_Preventivo.data.desc()).limit(15).all()
-            parti.append("Ultimi preventivi (senza importi): " + "; ".join(
-                f"#{p.numero} del {p.data or '?'} cliente {p.cliente or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})"
-                for p in prev))
+        if profondo or any(k in q for k in ("preventiv", "offert", "ordin")):
+            prev = db.query(_Preventivo).order_by(_Preventivo.data.desc()).limit(40 if profondo else 15).all()
+            parti.append("Ultimi preventivi:\n" + "\n".join(
+                f"- #{p.numero}[{p.cliente or '?'}] del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'}): "
+                + _riga_soldi(p.numero) for p in prev))
         # clienti nominati per nome nella domanda, anche senza #
         if len(q) >= 4:
             trovati = []
@@ -9827,33 +9931,38 @@ def contesto_generale(domanda):
                     if nome and len(nome) >= 4 and nome.lower() in q:
                         trovati.append(c.id_cliente)
                         break
-                if len(trovati) >= 3:
+                if len(trovati) >= (6 if profondo else 3):
                     break
             for cid in trovati:
-                parti.append(_contesto_cliente(cid))
+                parti.append(_contesto_cliente(cid, importi=True, profondo=profondo))
     finally:
         db.close()
+    if profondo or any(k in q for k in _PAROLE_SOLDI):
+        try:
+            parti.append(_contesto_saldi(40 if profondo else 15))
+        except Exception as e:
+            print(f"[ceerlo] Saldi non letti: {e}")
     try:
         visibili = [t for t in load_tasks() if t.get("status") not in ("resolved", "failed")
                     and task_visibile(t, me, ruolo)]
         mie = [t for t in visibili if me in [a.replace("@", "") for a in (t.get("assigned_to") or [])]
                or t.get("created_by") == me]
         if mie:
-            parti.append("Le task aperte di chi ti scrive:\n" + "\n".join(_riga_task(t) for t in mie[:10]))
-        if "task" in q or "attivit" in q or "da fare" in q:
+            parti.append("Le task aperte di chi ti scrive:\n" + "\n".join(_riga_task(t) for t in mie[:30 if profondo else 10]))
+        if profondo or "task" in q or "attivit" in q or "da fare" in q:
             altre = [t for t in visibili if t not in mie]
             if altre:
-                parti.append("Altre task aperte del team:\n" + "\n".join(_riga_task(t) for t in altre[:20]))
+                parti.append("Altre task aperte del team:\n" + "\n".join(_riga_task(t) for t in altre[:60 if profondo else 20]))
     except Exception as e:
         print(f"[ceerlo] Task non lette: {e}")
-    if any(k in q for k in ("appuntament", "calendari", "agenda", "settimana", "domani", "sopralluog", "impegn")):
+    if profondo or any(k in q for k in ("appuntament", "calendari", "agenda", "settimana", "domani", "sopralluog", "impegn")):
         try:
             if integrazioni_google.calendar_collegato():
-                oggi = datetime.date.today().isoformat()
-                fino = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
-                prossimi = [e for e in eventi_vicini() if oggi <= e["inizio"][:10] <= fino]
-                parti.append("Appuntamenti delle prossime due settimane:\n" + ("\n".join(
-                    _riga_evento(e) for e in prossimi) or "nessuno"))
+                oggi = datetime.date.today()
+                da = (oggi - datetime.timedelta(days=7 if profondo else 0)).isoformat()
+                fino = (oggi + datetime.timedelta(days=30 if profondo else 14)).isoformat()
+                prossimi = [e for e in eventi_vicini() if da <= e["inizio"][:10] <= fino]
+                parti.append(f"Appuntamenti dal {da} al {fino}:\n" + ("\n".join(_riga_evento(e) for e in prossimi) or "nessuno"))
             else:
                 parti.append("Il calendario Google non e' ancora collegato.")
         except Exception as e:
@@ -9883,13 +9992,23 @@ def api_ceerlo_chiedi():
     storia = [m for m in (d.get("messaggi") or [])[-10:] if isinstance(m, dict) and str(m.get("testo") or "").strip()]
     if not storia or storia[-1].get("ruolo") != "utente":
         return jsonify({"ok": False, "error": "Scrivi una domanda."}), 400
+    domanda = str(storia[-1].get("testo") or "")
+    # "controlla piu' a fondo": dal tasto della chat, o rispondendo si' alla domanda che Ceerlo fa in fondo alla risposta rapida
+    precedente = next((str(m.get("testo") or "") for m in reversed(storia[:-1]) if m.get("ruolo") != "utente"), "")
+    profondo = bool(d.get("approfondito")) or (ceerlo.chiede_approfondimento(precedente) and
+                                               bool(re.match(r"\s*(s[iì]'?|ok|certo|vai|controlla|approfondisci)\b", domanda.lower())))
+    if profondo:
+        # la domanda vera e' quella prima del "si'": e' da li' che si capisce quali dati servono
+        prima = [str(m.get("testo") or "") for m in storia[:-1] if m.get("ruolo") == "utente"]
+        domanda = " ".join(prima[-2:] + [domanda])
     contesto = contesto_ceerlo(str(d.get("pagina") or "")[:200], str(d.get("cliente_id") or "")[:50],
-                               str(d.get("preventivo") or "")[:50])
-    contesto += "\n\n" + contesto_generale(str(storia[-1].get("testo") or ""))
-    citati = contesto_tag(str(storia[-1].get("testo") or ""))
+                               str(d.get("preventivo") or "")[:50], importi=True, profondo=profondo)
+    contesto += "\n\n" + contesto_generale(domanda, profondo=profondo)
+    citati = contesto_tag(domanda, profondo=profondo)
     if citati:
         contesto += "\n\nCITATI NELLA DOMANDA (#cliente o #preventivo, @collega):\n" + citati
-    messaggi = [{"role": "system", "content": ceerlo.prompt_sistema(session.get("user_name"), session.get("user_role"), contesto)}]
+    messaggi = [{"role": "system", "content": ceerlo.prompt_sistema(session.get("user_name"), session.get("user_role"),
+                                                                    contesto, profondo=profondo)}]
     messaggi += [{"role": "user" if m.get("ruolo") == "utente" else "assistant", "content": str(m["testo"])[:4000]} for m in storia]
     try:
         jid = ceerlo.aggiungi(session["user_id"], messaggi, ceerlo.PRIO_CHAT, "chat")

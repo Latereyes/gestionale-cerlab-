@@ -38,12 +38,12 @@
 
 <style>
 .ceerlo { position: fixed; left: 18px; bottom: 18px; z-index: 9998; font-size: 14px; }
-.ceerlo-avatar { width: 64px; height: 64px; border: 0; background: transparent; padding: 0; cursor: pointer; position: relative;
+.ceerlo-avatar { width: 76px; height: 76px; border: 0; background: transparent; padding: 0; cursor: pointer; position: relative;
     filter: drop-shadow(0 4px 10px rgba(0,0,0,.25)); transition: transform .2s; }
 .ceerlo-avatar:hover { transform: translateY(-3px) rotate(-4deg); }
-.ceerlo-avatar img { width: 64px; height: 64px; object-fit: contain; }
+.ceerlo-avatar img { width: 76px; height: 76px; object-fit: contain; }
 .ceerlo-avatar img + svg { display: none; }
-.ceerlo-avatar svg { width: 64px; height: 64px; }
+.ceerlo-avatar svg { width: 76px; height: 76px; }
 .ceerlo-occhio { animation: ceerlo-blink 5s infinite; transform-origin: center; transform-box: fill-box; }
 @keyframes ceerlo-blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
 .ceerlo-pensa { position: absolute; top: -6px; right: -10px; background: #fff; border-radius: 10px; padding: 3px 6px; display: flex; gap: 3px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
@@ -51,32 +51,42 @@
 .ceerlo-pensa i:nth-child(2) { animation-delay: .2s; } .ceerlo-pensa i:nth-child(3) { animation-delay: .4s; }
 @keyframes ceerlo-dots { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 
-.ceerlo-fumetto { position: absolute; left: 10px; bottom: 78px; width: 260px; background: #fffbe6; border: 1px solid #e8d77a;
+.ceerlo-fumetto { position: absolute; left: 10px; bottom: 90px; width: 260px; background: #fffbe6; border: 1px solid #e8d77a;
     border-radius: 14px; padding: 12px 28px 12px 12px; box-shadow: 0 6px 18px rgba(0,0,0,.18); cursor: pointer; line-height: 1.45; }
 .ceerlo-fumetto::after { content: ""; position: absolute; left: 22px; bottom: -9px; border: 9px solid transparent; border-bottom: 0; border-top-color: #fffbe6; }
 .ceerlo-chiudi-fumetto { position: absolute; top: 4px; right: 6px; border: 0; background: none; font-size: 18px; cursor: pointer; color: #887; }
 
-.ceerlo-pannello { position: absolute; left: 0; bottom: 78px; width: 360px; max-height: min(560px, 70vh); background: #fff;
+.ceerlo-pannello { position: absolute; left: 0; bottom: 90px; width: 360px; box-sizing: border-box; max-height: min(560px, 70vh); background: #fff;
     border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.25); display: flex; flex-direction: column; overflow: hidden; }
 .ceerlo-pannello[hidden], .ceerlo-fumetto[hidden], .ceerlo-pensa[hidden] { display: none; }
 .ceerlo-testa { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #3b4cca; color: #fff; }
 .ceerlo-stato { font-size: 11px; opacity: .85; flex: 1; }
 .ceerlo-azione { border: 0; background: none; color: #fff; cursor: pointer; font-size: 14px; }
 .ceerlo-messaggi { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: #f6f7fb; min-height: 160px; }
-.ceerlo-msg { max-width: 85%; padding: 8px 11px; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word; line-height: 1.45; }
+.ceerlo-msg { max-width: 85%; min-width: 0; box-sizing: border-box; padding: 8px 11px; border-radius: 12px; white-space: pre-wrap;
+    overflow-wrap: anywhere; word-break: break-word; line-height: 1.45; }
+.ceerlo-msg a { overflow-wrap: anywhere; }
+.ceerlo-approfondisci { align-self: flex-start; margin-top: -2px; font-size: 12.5px; padding: 5px 10px; border-radius: 14px;
+    border: 1px solid #c7cdf5; background: #eef0fd; color: #3b4cca; cursor: pointer; }
+.ceerlo-approfondisci:disabled { opacity: .5; cursor: default; }
 .ceerlo-msg.utente { align-self: flex-end; background: #3b4cca; color: #fff; border-bottom-right-radius: 4px; }
 .ceerlo-msg.utente a, .ceerlo-msg.utente .shout-mention { color: #fff; }
 .ceerlo-msg.da-ceerlo { align-self: flex-start; background: #fff; border: 1px solid #e3e5ef; border-bottom-left-radius: 4px; }
 .ceerlo-msg.info { align-self: center; background: none; color: #777; font-size: 12px; text-align: center; }
-.ceerlo-scrivi { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #eee; position: relative; }
+.ceerlo-scrivi { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #eee; position: relative; min-width: 0; }
+.ceerlo-scrivi .btn { flex: 0 0 auto; width: auto; }
+.ceerlo-scrivi .mention-list { left: 8px; right: 8px; max-width: calc(100% - 16px); box-sizing: border-box; }
 .ceerlo-scrivi .cb-editor { flex: 1; min-width: 0; border-radius: 10px; }
-.ceerlo-scrivi textarea { flex: 1; resize: none; border-radius: 10px; padding: 8px; font: inherit; }
+.ceerlo-scrivi textarea { flex: 1; min-width: 0; width: auto; box-sizing: border-box; resize: none; border-radius: 10px; padding: 8px; font: inherit; }
 
 @media (max-width: 768px) {
-    .ceerlo { left: 10px; bottom: 10px; }
-    .ceerlo-avatar, .ceerlo-avatar svg, .ceerlo-avatar img { width: 50px; height: 50px; }
-    .ceerlo-pannello { position: fixed; left: 8px; right: 8px; bottom: 70px; width: auto; max-height: 75vh; }
-    .ceerlo-fumetto { bottom: 62px; width: min(260px, calc(100vw - 40px)); }
+    .ceerlo { left: 8px; bottom: calc(var(--m-footer-h, 0px) + 8px); }  /* sopra la barra in basso delle dashboard */
+    .ceerlo-avatar, .ceerlo-avatar svg, .ceerlo-avatar img { width: 64px; height: 64px; }
+    /* la chat occupa la larghezza dello schermo, margini compresi, senza mai sforare ai lati */
+    .ceerlo-pannello { position: fixed; left: 8px; right: 8px; bottom: calc(var(--m-footer-h, 0px) + 80px); width: auto;
+        max-width: calc(100vw - 16px); max-height: calc(100dvh - var(--m-footer-h, 0px) - 100px); }
+    .ceerlo-msg { max-width: 92%; }
+    .ceerlo-fumetto { bottom: 76px; width: min(260px, calc(100vw - 40px)); box-sizing: border-box; }
 }
 @media print { .ceerlo { display: none; } }
 </style>
@@ -115,10 +125,28 @@
         elenco.scrollTop = elenco.scrollHeight;
         return d;
     }
+    // Ceerlo risponde prima in modo rapido; se chiude con "Vuoi che controlli piu' a fondo?" sotto compare il tasto
+    const chiedeApprofondimento = t => /a fondo\?/i.test(String(t || '').slice(-200));
+    let approfondito = false;
+    function tastoApprofondisci() {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'ceerlo-approfondisci';
+        b.innerHTML = '<i class="fas fa-search-plus"></i> Sì, controlla più a fondo';
+        b.onclick = () => {
+            if (invia.disabled) return;
+            b.disabled = true; approfondito = true;
+            input.value = 'Sì, controlla più a fondo';
+            $('ceerlo-form').requestSubmit();
+        };
+        elenco.appendChild(b);
+        elenco.scrollTop = elenco.scrollHeight;
+    }
     function disegna() {
         elenco.innerHTML = '';
-        if (!storia.length) mostraMessaggio('da-ceerlo', 'Ciao! Sono Ceerlo. Chiedimi di clienti, preventivi o appuntamenti: uso i dati della pagina in cui sei.');
+        if (!storia.length) mostraMessaggio('da-ceerlo', 'Ciao! Sono Ceerlo. Chiedimi di clienti, preventivi, saldi o appuntamenti: uso i dati del gestionale e della pagina in cui sei.');
         storia.forEach(m => mostraMessaggio(m.ruolo === 'utente' ? 'utente' : 'da-ceerlo', m.testo));
+        const ultimo = storia[storia.length - 1];
+        if (ultimo && ultimo.ruolo !== 'utente' && chiedeApprofondimento(ultimo.testo) && !inAttesa) tastoApprofondisci();
     }
     function apri() { fumetto.hidden = true; pannello.hidden = false; disegna(); input.focus(); }
 
@@ -166,6 +194,7 @@
                 storia.push({ruolo: 'ceerlo', testo});
                 scrivi('ceerlo-storia', storia.slice(-20));
                 mostraMessaggio('da-ceerlo', testo);
+                if (d.stato === 'fatto' && chiedeApprofondimento(testo)) tastoApprofondisci();
                 if (pannello.hidden) { mostraFumetto('Ho la risposta alla tua domanda: cliccami.'); }
                 break;
             }
@@ -180,12 +209,14 @@
         const testo = input.value.trim();
         if (!testo || invia.disabled) return;
         input.value = '';
+        const aFondo = approfondito; approfondito = false;
+        elenco.querySelectorAll('.ceerlo-approfondisci').forEach(b => b.remove());
         storia.push({ruolo: 'utente', testo});
         scrivi('ceerlo-storia', storia.slice(-20));
         mostraMessaggio('utente', testo);
         try {
             const r = await fetch('/api/ceerlo/chiedi', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({messaggi: storia.slice(-10), pagina: location.pathname,
+                body: JSON.stringify({messaggi: storia.slice(-10), pagina: location.pathname, approfondito: aFondo,
                                       cliente_id: box.dataset.cliente, preventivo: box.dataset.preventivo})});
             const d = await r.json();
             if (!d.ok) throw new Error(d.error);

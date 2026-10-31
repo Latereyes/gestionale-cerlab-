@@ -151,6 +151,11 @@
     const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const piu = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
     const esc = t => String(t || '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    // riassunti di Ceerlo: #CODICE[nome] diventa il link al cliente o al preventivo, **grassetto** in grassetto
+    const conLink = t => esc(t)
+        .replace(/(^|[\s*(\[:>])#([A-Z0-9][A-Z0-9-]{2,})(?:\[([^\]\n]+)\])?/g,
+            (m, pre, id, nome) => `${pre}<a href="/ceerlo/vai/${encodeURIComponent(id)}">${nome || '#' + id}</a>`)
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
     const ora = s => s.length > 10 ? new Date(s).toLocaleTimeString('it-IT', {hour: '2-digit', minute: '2-digit'}) : '';
     const mio = ev => (ev.assegnati || []).includes(IO);
     const visibili = () => soloMiei.checked ? eventi.filter(mio) : eventi;
@@ -290,7 +295,7 @@
                         ${UTENTI.map(u => `<label class="chip-utente"><input type="checkbox" value="${esc(u.username)}" ${(ev.assegnati || []).includes(u.username) ? 'checked' : ''}> ${esc(u.nome)}</label>`).join('')}
                         <button type="button" class="btn btn-small primary" data-salva-assegnati="${esc(ev.id)}">Salva</button>
                     </div>
-                    ${ev.riassunto ? `<details class="riassunto"><summary><i class="fas fa-robot"></i> Riassunto di Ceerlo</summary>${esc(ev.riassunto)}</details>` : ''}
+                    ${ev.riassunto ? `<details class="riassunto"><summary><i class="fas fa-robot"></i> Riassunto di Ceerlo</summary>${conLink(ev.riassunto)}</details>` : ''}
                     <div class="azioni-evento">
                         <button type="button" class="btn btn-small" data-assegna="${esc(ev.id)}"><i class="fas fa-user-plus"></i> Assegna</button>
                         ${conCeerlo ? `<button type="button" class="btn btn-small" data-riassumi="${esc(ev.id)}"><i class="fas fa-robot"></i> ${ev.riassunto ? 'Rifai riassunto' : 'Riassunto'}</button>` : ''}
