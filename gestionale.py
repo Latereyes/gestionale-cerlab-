@@ -9249,11 +9249,13 @@ def impostazioni_chiusura():
 @role_required("amministratore")
 def impostazioni_google_email_prova():
     me = next((u for u in load_users() if u["username"] == session["user_id"]), {})
-    if not me.get("email"):
-        flash("Aggiungi prima la tua email in Gestione Utenti: la prova arriva a te.", "error")
+    # la prova va a tutti quelli che ricevono i report (piu' chi la manda), cosi' si vede subito chi la riceve davvero
+    destinatari = sorted(set(indirizzi_email("email_report")) | ({me["email"]} if me.get("email") else set()))
+    if not destinatari:
+        flash("Nessun destinatario: in Gestione Utenti aggiungi l'email e la spunta 'riceve i report'.", "error")
     else:
-        ok, errore = integrazioni_google.email_prova(me["email"])
-        flash(f"Email di prova inviata a {me['email']}." if ok else errore, "success" if ok else "error")
+        ok, errore = integrazioni_google.email_prova(destinatari)
+        flash(f"Email di prova inviata a: {', '.join(destinatari)}." if ok else errore, "success" if ok else "error")
     return redirect(url_for("impostazioni_google"))
 
 

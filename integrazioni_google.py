@@ -257,8 +257,10 @@ def manda_in_background(destinatari, oggetto, testo):
     threading.Thread(target=_manda, args=(destinatari, oggetto, testo), daemon=True).start()
 
 
-def email_prova(destinatario):
-    return _manda([destinatario], "Prova email dal Gestionale Cerlab",
+def email_prova(destinatari):
+    if isinstance(destinatari, str):
+        destinatari = [destinatari]
+    return _manda(list(destinatari), "Prova email dal Gestionale Cerlab",
                   "Se leggi questo messaggio l'invio delle email dal gestionale funziona.")
 
 

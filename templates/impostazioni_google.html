@@ -43,7 +43,8 @@
             </form>
             <form method="post" action="{{ url_for('impostazioni_google_email_prova') }}" style="margin-top:8px; text-align:right;"
                   onsubmit="const b = this.querySelector('button'); b.disabled = true; b.innerHTML = '<i class=&quot;fas fa-spinner fa-spin&quot;></i> Invio in corso, attendi...';">
-                <button type="submit" class="btn" {% if not stato.email.attiva %}disabled title="Prima salva account Gmail e password per le app"{% endif %}><i class="fas fa-vial"></i> Manda una email di prova a me</button>
+                <button type="submit" class="btn" {% if not stato.email.attiva %}disabled title="Prima salva account Gmail e password per le app"{% endif %}><i class="fas fa-vial"></i> Manda una email di prova</button>
+                <div class="muted" style="font-size:12px; margin-top:4px;">Arriva a te e a tutti quelli che ricevono i report (elenco qui sotto).</div>
                 {% if not stato.email.attiva %}<div class="muted" style="font-size:12px; margin-top:4px;">Si attiva dopo aver salvato account Gmail e password per le app.</div>{% endif %}
             </form>
 
