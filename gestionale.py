@@ -9262,7 +9262,8 @@ def impostazioni_google_email_prova():
 @role_required("amministratore")
 def impostazioni_google_calendar():
     f = request.form
-    valori = {"client_id": (f.get("client_id") or "").strip(), "calendar_id": (f.get("calendar_id") or "").strip()}
+    valori = {"client_id": (f.get("client_id") or "").strip(),
+              "calendar_id": integrazioni_google.normalizza_id_calendario(f.get("calendar_id"))}
     if (f.get("client_secret") or "").strip():
         valori["client_secret"] = integrazioni_google.proteggi(f["client_secret"].strip())
     integrazioni_google.aggiorna_sezione("calendar", valori)

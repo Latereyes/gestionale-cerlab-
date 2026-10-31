@@ -454,6 +454,27 @@ def _api(metodo, percorso, parametri=None, corpo=None):
         raise RuntimeError(f"Google Calendar ha risposto {e.code}.")
 
 
+def normalizza_id_calendario(testo):
+    """Accetta l'ID calendario anche incollato come link (embed?src=..., ?cid=..., indirizzo iCal):
+    restituisce solo l'ID, es. 'negozio@gmail.com' o 'abc...@group.calendar.google.com'."""
+    testo = (testo or "").strip()
+    if "://" not in testo:
+        return urllib.parse.unquote(testo)
+    url = urllib.parse.urlparse(testo)
+    q = urllib.parse.parse_qs(url.query)
+    for chiave in ("src", "cid"):
+        if q.get(chiave):
+            valore = q[chiave][0]
+            if chiave == "cid" and "@" not in valore:  # i link "aggiungi calendario" hanno l'ID in base64
+                try:
+                    valore = base64.urlsafe_b64decode(valore + "=" * (-len(valore) % 4)).decode()
+                except Exception:
+                    pass
+            return valore.strip()
+    m = re.search(r"/calendar/ical/([^/]+)/", url.path)  # indirizzo iCal pubblico o segreto
+    return urllib.parse.unquote(m.group(1)) if m else testo
+
+
 def _id_calendario():
     return leggi_config()["calendar"]["calendar_id"] or "primary"
 
