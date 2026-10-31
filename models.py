@@ -313,6 +313,7 @@ class Task(Base):
     etc = Column(String, default="")         # Estimated Time Complete "YYYY-MM-DD" (obbligatoria per le task nuove)
     etc_avvisata = Column(String, default="")  # ultima ETC per cui e' gia' partito l'avviso di scadenza
     titolo = Column(String, default="")        # titolo breve scritto da Ceerlo (vuoto se l'AI non c'era)
+    concluso_il = Column(String, default="")   # "YYYY-MM-DD" in cui e' stata risolta o chiusa: dopo 7 giorni va in archivio
 
     def __repr__(self):
         return f"<Task(id='{self.id}', status='{self.status}')>"
@@ -333,7 +334,30 @@ class Task(Base):
             "report_id": self.report_id or "",
             "etc": self.etc or "",
             "titolo": self.titolo or "",
+            "concluded_at": self.data_conclusione(),
         }
+
+    def data_conclusione(self):
+        """Quando e' stata conclusa. Per le task chiuse prima che esistesse il campo: la data che il vecchio
+        salvataggio scriveva al posto dell'orario, oppure l'ultimo commento di chiusura."""
+        if self.status not in ("resolved", "failed"):
+            return ""
+        if self.concluso_il:
+            return self.concluso_il
+        import re as _re, datetime as _dt
+        ts = self.timestamp or ""
+        if _re.fullmatch(r"\d{4}-\d{2}-\d{2}", ts):
+            return ts
+        oggi = _dt.date.today()
+        for c in reversed(self.comments or []):
+            m = _re.match(r"(\d{2})/(\d{2})", str(c.get("timestamp") or ""))
+            if c.get("status_change") in ("resolved", "failed") and m:
+                try:
+                    d = _dt.date(oggi.year, int(m.group(2)), int(m.group(1)))
+                    return (d if d <= oggi else d.replace(year=oggi.year - 1)).isoformat()
+                except ValueError:
+                    pass
+        return "2000-01-01"  # conclusa da tempo e senza data: va in archivio
 
 
 class Report(Base):
@@ -693,7 +717,8 @@ def _apply_schema_migrations():
         "bolle":      [("extra", "TEXT DEFAULT '{}'")],
         "magazzino_movimenti": [("costo_unitario", "REAL"), ("costo_precedente", "REAL")],
         "tasks": [("tipo", "TEXT DEFAULT ''"), ("gruppo", "TEXT DEFAULT ''"), ("report_id", "TEXT DEFAULT ''"),
-                  ("etc", "TEXT DEFAULT ''"), ("etc_avvisata", "TEXT DEFAULT ''"), ("titolo", "TEXT DEFAULT ''")],
+                  ("etc", "TEXT DEFAULT ''"), ("etc_avvisata", "TEXT DEFAULT ''"), ("titolo", "TEXT DEFAULT ''"),
+                  ("concluso_il", "TEXT DEFAULT ''")],
         "reports": [("righe", "TEXT DEFAULT '[]'"), ("stato", "TEXT DEFAULT 'inviato'"), ("modificato_il", "TEXT DEFAULT ''")],
         "utenti": [("email", "TEXT DEFAULT ''"), ("email_report", "INTEGER DEFAULT 0"), ("email_admin", "INTEGER DEFAULT 0")],
     }

@@ -8485,8 +8485,10 @@ def save_tasks(tasks):
                 existing.status = t.get("status", "open")
                 existing.comments = t.get("comments", [])
                 existing.assigned_to = t.get("assigned_to", [])
-                if t.get("concluded_at"):
-                    existing.timestamp = t.get("concluded_at", existing.timestamp)
+                # la data di conclusione ha il suo campo (prima finiva al posto dell'orario di creazione)
+                if t.get("status") in ("resolved", "failed") and t.get("concluded_at") \
+                        and t["concluded_at"] != (existing.concluso_il or ""):
+                    existing.concluso_il = t["concluded_at"]
             else:
                 db.add(_Task(
                     id=tid,
