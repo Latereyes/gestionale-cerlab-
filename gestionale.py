@@ -1970,7 +1970,9 @@ def api_attivita():
     notifiche_version = APP_VERSION if _percorso_programma_notifiche() else None
     return jsonify({"app": "Gestionale Cerlab", "version": APP_VERSION, "ultimo_id": ultimo,
                     "eventi": eventi, "tuo_ip": request.remote_addr, "notifiche_version": notifiche_version,
-                    "utenti_collegati": len(get_utenti_collegati())})
+                    "utenti_collegati": len(get_utenti_collegati()),
+                    # spegnimento serale dei PC (Gestionale Notifiche) e se il riepilogo email e' gia' partito
+                    "chiusura": integrazioni_google.stato_chiusura(bool(indirizzi_email("email_report")))})
 
 def _percorso_programma_notifiche():
     nome = "GestionaleNotifiche.exe"
@@ -7779,7 +7781,8 @@ def run_server():
     is_debug_mode = "--debug" in sys.argv
     if not is_debug_mode or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         threading.Thread(target=sincronizza_stati_tutti_preventivi, daemon=True).start()
-        integrazioni_google.avvia_riepilogo_giornaliero(report_inviati_dal, lambda: indirizzi_email("email_report"))
+        integrazioni_google.avvia_riepilogo_giornaliero(report_inviati_dal, lambda: indirizzi_email("email_report"),
+                                                        componi=componi_riepilogo)
         ceerlo.avvia_riassunti_automatici(prossimi_eventi, contesto_evento, dopo=_riassunto_pronto)
     
     print(SERVER_ADDRESS_INFO)
@@ -8918,6 +8921,260 @@ def indirizzi_email(campo):
     return sorted({u["email"] for u in load_users() if u.get(campo) and u.get("email")})
 
 
+# --- Riepilogo serale impaginato (email HTML) con il punto della giornata scritto da Ceerlo ---
+
+GIORNI_IT = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
+MESI_IT = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto",
+           "settembre", "ottobre", "novembre", "dicembre")
+MINUTI_ATTESA_CEERLO = 15
+
+
+def _giorno_lungo(d):
+    return f"{GIORNI_IT[d.weekday()]} {d.day} {MESI_IT[d.month - 1]}"
+
+
+def dati_riepilogo(reports, oggi=None):
+    """Tutto quello che va nel riepilogo serale, gia' senza importi: report, agenda di oggi e domani,
+    promemoria del team, incassi previsti (solo cliente e preventivo) e task scadute o in scadenza domani."""
+    oggi = oggi or datetime.date.today()
+    domani = oggi + datetime.timedelta(days=1)
+    utenti = {u["username"]: u for u in load_users()}
+    nome = lambda u: (utenti.get(u.lstrip("@")) or {}).get("full_name") or u.lstrip("@")
+    def pulisci(t):
+        """Niente importi, niente #codici e @username: nelle email vanno i nomi."""
+        t = re.sub(r"#([A-Z0-9-]+)\[([^\]]+)\]", r"\2", t or "")
+        t = re.sub(r"@(\w+)", lambda m: (utenti.get(m.group(1)) or {}).get("full_name") or m.group(0), t)
+        return integrazioni_google.togli_importi(t)
+    d = {"oggi": oggi, "domani": domani, "errori": [],
+         "report": [{"autore": r.get("autore_nome") or r.get("autore"), "ora": (r.get("creato_il") or "")[11:16],
+                     "voci": [{"testo": pulisci(v.get("testo")), "task": bool(v.get("task_id")),
+                               "promemoria": bool(v.get("promemoria_id"))} for v in (r.get("righe") or [])]
+                     or [{"testo": pulisci(t), "task": False, "promemoria": False}
+                         for t in (r.get("testo") or "").splitlines() if t.strip()]}
+                    for r in reports],
+         "agenda": {oggi.isoformat(): [], domani.isoformat(): []}, "promemoria": [], "incassi": [], "task": []}
+    if integrazioni_google.calendar_collegato():
+        try:
+            for e in integrazioni_google.eventi(oggi, domani):
+                g = e["inizio"][:10]
+                if g in d["agenda"]:
+                    d["agenda"][g].append({"ora": "" if e["tutto_il_giorno"] else e["inizio"][11:16],
+                                           "titolo": pulisci(e["titolo"]), "cliente": e.get("cliente") or "",
+                                           "luogo": e.get("luogo") or "", "chi": [nome(u) for u in e.get("assegnati") or []]})
+        except Exception as ex:
+            d["errori"].append(f"Calendario non letto: {ex}")
+    db = _DBSession()
+    try:
+        for p in db.query(_Promemoria).filter(_Promemoria.fatto == False,  # noqa: E712
+                                              _Promemoria.data <= domani.isoformat()).all():
+            if p.assegnati and p.data >= oggi.isoformat():  # i personali restano personali
+                d["promemoria"].append({"data": p.data, "ora": p.ora or "", "testo": pulisci(p.testo),
+                                        "di": p.autore_nome or p.autore, "per": [nome(a) for a in p.assegnati]})
+    finally:
+        db.close()
+    d["promemoria"].sort(key=lambda p: (p["data"], p["ora"] or "99"))
+    d["incassi"] = [{"cliente": x["cliente"], "preventivo": x["preventivo"], "scaduto": x["scaduto"]}
+                    for x in incassi_programmati(oggi.isoformat(), domani.isoformat()) if x["data"] == domani.isoformat()]
+    for t in load_tasks():
+        if t.get("status") in ("resolved", "failed") or t.get("tipo") == "personale" or not t.get("etc"):
+            continue
+        if t["etc"] <= domani.isoformat():
+            d["task"].append({"id": t["id"], "testo": pulisci(t.get("description"))[:300], "etc": t["etc"],
+                              "scaduta": t["etc"] < oggi.isoformat(),
+                              "chi": [nome(a) for a in t.get("assigned_to") or []]})
+    d["task"].sort(key=lambda t: t["etc"])
+    return d
+
+
+def _contesto_riepilogo(d):
+    righe = [f"OGGI: {_giorno_lungo(d['oggi'])}. DOMANI: {_giorno_lungo(d['domani'])}.", "", "REPORT DI OGGI:"]
+    for r in d["report"]:
+        righe.append(f"{r['autore']} ({r['ora']}):")
+        righe += [f"  - {v['testo']}" + (" [diventata task]" if v["task"] else "") + (" [promemoria]" if v["promemoria"] else "")
+                  for v in r["voci"]]
+    if not d["report"]:
+        righe.append("nessun report")
+    for g, titolo in ((d["oggi"], "APPUNTAMENTI DI OGGI"), (d["domani"], "APPUNTAMENTI DI DOMANI")):
+        lista = d["agenda"][g.isoformat()]
+        righe += ["", titolo + ":"] + ([f"  - {a['ora'] or 'tutto il giorno'} {a['titolo']}"
+                                        + (f", cliente {a['cliente']}" if a["cliente"] else "")
+                                        + (f", con {', '.join(a['chi'])}" if a["chi"] else ", non assegnato")
+                                        for a in lista] or ["  nessuno"])
+    righe += ["", "PROMEMORIA DEL TEAM (oggi e domani):"] + (
+        [f"  - {p['data']} {p['ora']} {p['testo']} (per {', '.join(p['per'])})" for p in d["promemoria"]] or ["  nessuno"])
+    righe += ["", "INCASSI PREVISTI DOMANI (senza importi):"] + (
+        [f"  - {x['cliente']} preventivo {x['preventivo']}" for x in d["incassi"]] or ["  nessuno"])
+    righe += ["", "TASK SCADUTE O IN SCADENZA DOMANI:"] + (
+        [f"  - #{t['id']} {t['testo'][:150]} (entro {t['etc']}{', SCADUTA' if t['scaduta'] else ''}; {', '.join(t['chi'])})"
+         for t in d["task"]] or ["  nessuna"])
+    return "\n".join(righe)
+
+
+def riassunto_serale_ceerlo(d, minuti=MINUTI_ATTESA_CEERLO):
+    """Chiede a Ceerlo il punto della giornata e aspetta al massimo `minuti`: se non risponde si va avanti senza."""
+    if not ceerlo.attivo():
+        return ""
+    messaggi = [{"role": "system", "content": ceerlo.prompt_sistema("il CEO e il team", "riepilogo serale", _contesto_riepilogo(d))},
+                {"role": "user", "content": (
+                    "Scrivi il riepilogo serale da mandare per email. Tre parti brevi con questi titoli su righe a se': "
+                    "'Oggi' (cosa e' stato fatto e cosa e' rimasto aperto, dai report), 'Domani' (appuntamenti, promemoria, "
+                    "incassi previsti, in ordine di orario) e 'Attenzione' (task scadute, appuntamenti senza nessuno assegnato, "
+                    "cose da non dimenticare; se non c'e' nulla scrivi 'Niente di urgente'). Sotto ogni titolo righe che "
+                    "iniziano con '- '. In tutto massimo 15 righe. Niente importi o cifre in euro, niente #codici ne' @: "
+                    "scrivi i nomi. Usa solo i dati del contesto.")}]
+    try:
+        jid = ceerlo.aggiungi("riepilogo", messaggi, ceerlo.PRIO_RICHIESTA, "riepilogo", chiave=f"riepilogo:{d['oggi']}")
+    except Exception as ex:
+        integrazioni_google.log(f"Riepilogo: Ceerlo non disponibile ({ex})")
+        return ""
+    fine = time.time() + minuti * 60
+    while time.time() < fine:
+        st = ceerlo.stato_job(jid) or {}
+        if st.get("stato") == "fatto":
+            testo = re.sub(r"#([A-Z0-9-]+)\[([^\]]+)\]", r"\2", st.get("risposta") or "")
+            testo = re.sub(r"@(\w+)", lambda m: (next((u.get("full_name") for u in load_users()
+                                                         if u["username"].lower() == m.group(1).lower()), None) or m.group(1)), testo)
+            return integrazioni_google.togli_importi(testo.replace("**", "").strip())
+        if st.get("stato") in ("errore", None) or not st:
+            integrazioni_google.log(f"Riepilogo: Ceerlo non ha risposto ({st.get('errore', 'richiesta persa')})")
+            return ""
+        time.sleep(5)
+    integrazioni_google.log(f"Riepilogo: Ceerlo non ha finito in {minuti} minuti, parte senza riassunto")
+    return ""
+
+
+def _html_ceerlo(testo):
+    """Il testo di Ceerlo ('Titolo' + righe '- ...') in HTML semplice per le email."""
+    import html as _h
+    pezzi, lista = [], []
+    def chiudi():
+        if lista:
+            pezzi.append('<ul style="margin:4px 0 12px;padding-left:20px;">' + "".join(
+                f'<li style="margin:3px 0;">{x}</li>' for x in lista) + "</ul>")
+            lista.clear()
+    for riga in testo.splitlines():
+        r = riga.strip()
+        if not r:
+            continue
+        if r[:2] in ("- ", "* ", "• "):
+            lista.append(_h.escape(r[2:].strip()))
+        else:
+            chiudi()
+            titolo = r.strip("#: ").strip()
+            pezzi.append(f'<div style="font-weight:700;color:#1e2a78;margin:10px 0 2px;font-size:15px;">{_h.escape(titolo)}</div>')
+    chiudi()
+    return "".join(pezzi)
+
+
+def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
+    """(oggetto, testo semplice, html) del riepilogo serale."""
+    import html as _h
+    esc = lambda t: _h.escape(t or "")
+    d = dati_riepilogo(reports, adesso.date())
+    ai = riassunto_serale_ceerlo(d, minuti_ceerlo) if minuti_ceerlo else ""
+    oggi_k, domani_k = d["oggi"].isoformat(), d["domani"].isoformat()
+    oggetto = f"Riepilogo di {_giorno_lungo(d['oggi'])}"
+
+    # --- testo semplice (per i programmi di posta senza HTML) ---
+    t = [oggetto.upper(), ""]
+    if ai:
+        t += ["IL PUNTO DI CEERLO", ai, ""]
+    for g, titolo in ((domani_k, "DOMANI"), (oggi_k, "OGGI")):
+        t.append(f"APPUNTAMENTI {titolo}:")
+        t += [f"- {a['ora'] or 'tutto il giorno'} {a['titolo']}" + (f" ({a['cliente']})" if a["cliente"] else "")
+              + (f" - {', '.join(a['chi'])}" if a["chi"] else "") for a in d["agenda"][g]] or ["- nessuno"]
+        t.append("")
+    if d["promemoria"]:
+        t += ["PROMEMORIA:"] + [f"- {p['data'][8:10]}/{p['data'][5:7]} {p['ora']} {p['testo']} (per {', '.join(p['per'])})"
+                                for p in d["promemoria"]] + [""]
+    if d["incassi"]:
+        t += ["INCASSI PREVISTI DOMANI:"] + [f"- {x['cliente']} (preventivo {x['preventivo']})" for x in d["incassi"]] + [""]
+    if d["task"]:
+        t += ["TASK SCADUTE O IN SCADENZA:"] + [f"- #{x['id']} {x['testo'][:120]} (entro {x['etc']})" for x in d["task"]] + [""]
+    t.append(f"REPORT DI OGGI ({len(d['report'])}):")
+    for r in d["report"]:
+        t += ["", f"{r['autore']} ({r['ora']})"] + [f"- {v['testo']}" for v in r["voci"]]
+    if not d["report"]:
+        t.append("Nessun report inviato.")
+    testo = "\n".join(t)
+
+    # --- HTML (tabelle e stili in linea: e' quello che i programmi di posta leggono bene) ---
+    blu, grigio, bordo = "#3b4fe4", "#64748b", "#e5e7eb"
+    def sezione(titolo, icona, corpo, colore=blu):
+        return (f'<tr><td style="padding:18px 28px 4px;"><div style="font-size:12px;letter-spacing:.6px;text-transform:uppercase;'
+                f'color:{colore};font-weight:700;margin-bottom:8px;">{icona}&nbsp; {esc(titolo)}</div>{corpo}</td></tr>')
+    def riga(ora, testo_html, sotto="", colore="#eef1fd"):
+        sotto = f'<div style="font-size:12.5px;color:{grigio};margin-top:2px;">{sotto}</div>' if sotto else ""
+        return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 6px;border-collapse:separate;">'
+                f'<tr><td width="74" valign="top" style="background:{colore};border-radius:8px 0 0 8px;padding:9px 8px;font-size:13px;'
+                f'font-weight:700;color:#1f2937;text-align:center;">{ora}</td>'
+                f'<td valign="top" style="background:#f8fafc;border-radius:0 8px 8px 0;padding:9px 12px;font-size:14px;color:#111827;">'
+                f'{testo_html}{sotto}</td></tr></table>')
+    def agenda(chiave):
+        lista = d["agenda"][chiave]
+        if not lista:
+            return f'<div style="color:{grigio};font-size:14px;">Nessun appuntamento.</div>'
+        return "".join(riga(esc(a["ora"]) or "Tutto il giorno", f"<b>{esc(a['titolo'])}</b>",
+                            " · ".join(x for x in (esc(a["cliente"]), esc(a["luogo"]),
+                                                   ("con " + esc(", ".join(a["chi"]))) if a["chi"] else
+                                                   '<span style="color:#b45309;">non assegnato</span>') if x))
+                       for a in lista)
+    blocchi = []
+    if ai:
+        blocchi.append(f'<tr><td style="padding:22px 28px 6px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
+                       f'<tr><td style="background:#f4f5ff;border:1px solid #dfe3fb;border-radius:12px;padding:16px 18px;font-size:14px;'
+                       f'line-height:1.55;color:#1f2937;"><div style="font-size:12px;letter-spacing:.6px;text-transform:uppercase;'
+                       f'color:{blu};font-weight:700;">🤖&nbsp; Il punto di Ceerlo</div>{_html_ceerlo(ai)}</td></tr></table></td></tr>')
+    blocchi.append(sezione(f"Domani, {_giorno_lungo(d['domani'])}", "📅", agenda(domani_k)))
+    extra = []
+    for p in d["promemoria"]:
+        extra.append(riga(esc(p["ora"]) or ("Domani" if p["data"] == domani_k else "Oggi"), "🔔 " + esc(p["testo"]),
+                          f"per {esc(', '.join(p['per']))} · da {esc(p['di'])}", "#fff4d6"))
+    for x in d["incassi"]:
+        extra.append(riga("Incasso", f"<b>{esc(x['cliente'])}</b>", f"preventivo {esc(x['preventivo'])}", "#dcf5e6"))
+    if extra:
+        blocchi.append(sezione("Promemoria e incassi previsti", "🔔", "".join(extra), "#b45309"))
+    if d["task"]:
+        blocchi.append(sezione("Task scadute o in scadenza", "⏰", "".join(
+            riga("Scaduta" if x["scaduta"] else f"{x['etc'][8:10]}/{x['etc'][5:7]}", esc(x["testo"]),
+                 f"#{esc(x['id'])}" + (f" · {esc(', '.join(x['chi']))}" if x["chi"] else ""),
+                 "#fde4e1" if x["scaduta"] else "#fff4d6") for x in d["task"]), "#c2410c"))
+    blocchi.append(sezione("Oggi in agenda", "🗓️", agenda(oggi_k), grigio))
+    rep_html = []
+    for r in d["report"]:
+        voci = "".join(f'<li style="margin:3px 0;">{esc(v["testo"])}'
+                       + (' <span style="font-size:11px;background:#eef1fd;color:#3b4fe4;border-radius:8px;padding:1px 7px;">task</span>' if v["task"] else "")
+                       + (' <span style="font-size:11px;background:#fff4d6;color:#b45309;border-radius:8px;padding:1px 7px;">promemoria</span>' if v["promemoria"] else "")
+                       + "</li>" for v in r["voci"])
+        rep_html.append(f'<div style="border:1px solid {bordo};border-radius:10px;padding:12px 14px;margin:0 0 8px;">'
+                        f'<div style="font-weight:700;font-size:14px;color:#111827;">{esc(r["autore"])}'
+                        f'<span style="font-weight:400;color:{grigio};font-size:12.5px;"> · {esc(r["ora"])}</span></div>'
+                        f'<ul style="margin:6px 0 0;padding-left:20px;font-size:14px;line-height:1.5;color:#1f2937;">{voci}</ul></div>')
+    blocchi.append(sezione(f"Report di oggi ({len(d['report'])})", "📝",
+                           "".join(rep_html) or f'<div style="color:{grigio};font-size:14px;">Nessun report inviato.</div>'))
+    if not ai and ceerlo.attivo() and minuti_ceerlo:
+        blocchi.append(f'<tr><td style="padding:4px 28px;font-size:12px;color:{grigio};">Ceerlo stasera non ha risposto in tempo: '
+                       f'il riepilogo e\' senza il suo riassunto.</td></tr>')
+    chiusura = integrazioni_google.leggi_config()["chiusura"]
+    nota = f" I PC dell'ufficio si spengono alle {esc(chiusura['ora'])}." if chiusura["spegni"] else ""
+    html = f"""<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>{esc(oggetto)}</title></head>
+<body style="margin:0;padding:0;background:#eef0f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef0f5;"><tr><td align="center" style="padding:24px 10px;">
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(15,23,42,.08);">
+<tr><td style="background:linear-gradient(135deg,#3b4fe4,#6a3de8);background-color:#3b4fe4;padding:24px 28px;color:#ffffff;">
+<div style="font-size:12px;letter-spacing:3px;font-weight:700;opacity:.85;">CERLAB · GESTIONALE</div>
+<div style="font-size:22px;font-weight:700;margin-top:6px;">Riepilogo di {esc(_giorno_lungo(d['oggi']))}</div>
+<div style="font-size:13px;opacity:.85;margin-top:4px;">{len(d['report'])} report · {len(d['agenda'][domani_k])} appuntamenti domani · {len(d['task'])} task da tenere d'occhio</div>
+</td></tr>
+{''.join(blocchi)}
+<tr><td style="padding:18px 28px 24px;"><a href="{esc(DISPLAY_URL)}" style="display:inline-block;background:{blu};color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:10px 18px;border-radius:8px;">Apri il gestionale</a></td></tr>
+<tr><td style="padding:14px 28px;background:#f8fafc;border-top:1px solid {bordo};font-size:11.5px;color:{grigio};line-height:1.5;">
+Email automatica del Gestionale Cerlab, senza dati economici.{nota}</td></tr>
+</table></td></tr></table></body></html>"""
+    return oggetto, testo, html
+
+
 def report_inviati_dal(quando):
     db = _DBSession()
     try:
@@ -8959,6 +9216,31 @@ def impostazioni_google_email():
         valori["password"] = integrazioni_google.proteggi(f["password"].strip())
     integrazioni_google.aggiorna_sezione("email", valori)
     flash("Impostazioni email salvate.", "success")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/riepilogo/anteprima")
+@login_required
+@role_required("amministratore")
+def anteprima_riepilogo():
+    """L'email del riepilogo di oggi come arriverebbe adesso (senza aspettare Ceerlo, se non con ?ceerlo=1)."""
+    oggi = datetime.date.today()
+    reports = report_inviati_dal(f"{oggi} 00:00:00")
+    _, _, html = componi_riepilogo(reports, f"{oggi} 00:00:00", datetime.datetime.now(),
+                                   minuti_ceerlo=5 if request.args.get("ceerlo") == "1" else 0)
+    return html
+
+
+@app.route("/impostazioni/chiusura", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_chiusura():
+    ora = (request.form.get("ora") or "").strip()
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", ora):
+        flash("Ora di spegnimento non valida.", "error")
+        return redirect(url_for("impostazioni_google"))
+    integrazioni_google.aggiorna_sezione("chiusura", {"spegni": bool(request.form.get("spegni")), "ora": ora})
+    flash("Chiusura serale salvata: Gestionale Notifiche la applica sui PC entro pochi secondi.", "success")
     return redirect(url_for("impostazioni_google"))
 
 

@@ -6,6 +6,9 @@ Resta nell'area di notifica vicino all'orologio e mostra avvisi (con suono) quan
 - i colleghi lavorano sul gestionale (pagamenti, bolle, conferme, PDF...).
 Cliccando un avviso si apre la pagina giusta del gestionale.
 
+Se nel gestionale è attiva la chiusura serale, all'ora scelta spegne il PC (con avviso
+5 minuti prima, "Rimanda di 30 minuti" e "Non stasera"), dopo che è partito il riepilogo email.
+
 Trova da solo il PC server sulla rete locale e si avvia con Windows. Al primo avvio chiede
 utente e password del gestionale (una volta sola) per abilitare il PC.
 
@@ -19,6 +22,7 @@ si scarica anche dal gestionale (pulsante "Notifiche su questo PC").
 """
 import concurrent.futures
 import ctypes
+import datetime
 import json
 import os
 import queue
@@ -42,6 +46,10 @@ PORTA = 5001
 INTERVALLO_SECS = 5
 MINUTI_INATTIVITA = 30   # PC senza mouse/tastiera per tanto tempo: si nascondono i messaggi personali
 SECS_BLOCCO = 60         # PC bloccato (Win+L) per almeno tanto: idem
+MINUTI_AVVISO_SPEGNIMENTO = 5   # l'avviso di spegnimento compare tanto prima
+MINUTI_RIMANDA = 30
+MINUTI_ATTESA_RIEPILOGO = 20    # al massimo si aspetta tanto il riepilogo email prima di spegnere
+ORE_FINESTRA_SPEGNIMENTO = 4    # oltre l'ora di spegnimento + tanto non si spegne più (PC rimasto in sospensione...)
 CONFIG = Path(os.environ.get("APPDATA") or Path.home()) / "GestionaleNotifiche" / "config.json"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 # Dimensione degli avvisi scelta dal menu, moltiplicata alla scala calcolata dallo schermo
@@ -378,6 +386,84 @@ class UI:
             w.geometry(f"{larghezza}x{h}+{destra - larghezza - margine}+{y}")
             y -= self.px(10)
 
+    # ---------- spegnimento serale ----------
+    def avviso_spegnimento(self, quando):
+        """Finestra con il conto alla rovescia fino a `quando` (datetime); poi spegne il PC,
+        dopo aver aspettato (al massimo MINUTI_ATTESA_RIEPILOGO) che il gestionale abbia mandato il riepilogo."""
+        if getattr(self, "_spegnimento_aperto", False):
+            return
+        self._spegnimento_aperto = True
+        w = tk.Toplevel(self.root)
+        w.title(APP + " - Spegnimento")
+        w.attributes("-topmost", True)
+        w.resizable(False, False)
+        try:
+            w.iconbitmap(resource_path("favicon.ico"))
+        except Exception:
+            pass
+        f = tk.Frame(w, padx=self.px(24), pady=self.px(20), bg="#ffffff")
+        f.pack()
+        tk.Frame(f, bg="#4f46e5", height=self.px(3)).pack(fill="x", pady=(0, self.px(10)))
+        tk.Label(f, text="⏻  Chiusura serale", font=self.font(13, "Segoe UI Semibold"), bg="#ffffff", fg="#0f172a").pack(anchor="w")
+        conto = tk.Label(f, text="", font=self.font(11), bg="#ffffff", fg="#334155", justify="left")
+        conto.pack(anchor="w", pady=(self.px(6), 0))
+        tk.Label(f, text="Salva il lavoro aperto. Se stai ancora lavorando, rimanda.", font=self.font(9),
+                 bg="#ffffff", fg="#64748b").pack(anchor="w", pady=(self.px(2), self.px(14)))
+        bottoni = tk.Frame(f, bg="#ffffff")
+        bottoni.pack(fill="x")
+        stato = {"chiuso": False, "inizio_attesa": None}
+
+        def chiudi():
+            stato["chiuso"] = True
+            self._spegnimento_aperto = False
+            w.destroy()
+
+        def rimanda():
+            self.app.rimanda_spegnimento()
+            chiudi()
+
+        def non_stasera():
+            self.app.salta_spegnimento()
+            chiudi()
+
+        def spegni():
+            conto.configure(text="Spegnimento in corso...")
+            self.app.spegni_pc()
+            chiudi()
+
+        def aggiorna():
+            if stato["chiuso"]:
+                return
+            mancano = (quando - datetime.datetime.now()).total_seconds()
+            if mancano > 0:
+                m, sec = divmod(int(mancano), 60)
+                conto.configure(text=f"Il PC si spegne alle {quando:%H:%M}, tra {m}:{sec:02d}.")
+            elif not self.app.riepilogo_pronto():
+                stato["inizio_attesa"] = stato["inizio_attesa"] or time.time()
+                if time.time() - stato["inizio_attesa"] < MINUTI_ATTESA_RIEPILOGO * 60:
+                    conto.configure(text="Aspetto che il gestionale mandi il riepilogo serale,\npoi il PC si spegne.")
+                    w.after(5000, aggiorna)
+                    return
+                spegni()
+                return
+            else:
+                spegni()
+                return
+            w.after(1000, aggiorna)
+
+        tk.Button(bottoni, text="Non stasera", command=non_stasera, relief="flat", bg="#f1f5f9",
+                  padx=self.px(10), font=self.font(9)).pack(side="left")
+        tk.Button(bottoni, text="Spegni ora", command=spegni, relief="flat", bg="#f1f5f9",
+                  padx=self.px(10), font=self.font(9)).pack(side="right")
+        tk.Button(bottoni, text=f"Rimanda di {MINUTI_RIMANDA} minuti", command=rimanda, relief="flat", bg="#4f46e5",
+                  fg="#ffffff", padx=self.px(14), font=self.font(9)).pack(side="right", padx=(0, self.px(6)))
+        w.protocol("WM_DELETE_WINDOW", rimanda)  # chiudere la finestra = rimandare, mai spegnere di colpo
+        w.update_idletasks()
+        w.geometry(f"+{(w.winfo_screenwidth() - w.winfo_reqwidth()) // 2}+{(w.winfo_screenheight() - w.winfo_reqheight()) // 3}")
+        w.focus_force()
+        suono("notifica")
+        aggiorna()
+
     # ---------- finestra di accesso ----------
     def chiedi_accesso(self):
         if getattr(self, "_login_aperto", False):
@@ -461,6 +547,10 @@ class ClientNotifiche:
         self.non_letti = 0
         self.collegato = None
         self.mio_ip = None
+        self.chiusura = self.cfg.get("chiusura")  # {"spegni", "ora", "pronto"} dal server, ricordata se il server è già spento
+        self.spegni_qui = self.cfg.get("spegni_qui", True)
+        self.avviato = datetime.datetime.now()
+        self.rimanda_fino = None
         self.base_img = Image.open(resource_path("favicon.ico")).convert("RGBA").resize((64, 64))
         self.icon = pystray.Icon("GestionaleNotifiche", self._immagine(), self._tooltip(), self._menu())
         self.ui = UI(self)
@@ -477,7 +567,8 @@ class ClientNotifiche:
             CONFIG.parent.mkdir(parents=True, exist_ok=True)
             self.cfg.update({"server": self.server, "notifiche": self.attive, "suono": self.suono_attivo,
                              "token": self.token, "minuti_inattivita": self.minuti_inattivita,
-                             "dimensione": self.dimensione})
+                             "dimensione": self.dimensione, "spegni_qui": self.spegni_qui,
+                             "chiusura": {k: v for k, v in (self.chiusura or {}).items() if k != "pronto"} or None})
             self.cfg.pop("utente_nome", None)  # l'utente non è più fisso: lo dice il server
             CONFIG.write_text(json.dumps(self.cfg), encoding="utf-8")
         except Exception:
@@ -622,6 +713,8 @@ class ClientNotifiche:
             M("Mostra avvisi", self._toggle_notifiche, checked=lambda i: self.attive),
             M("Suono", self._toggle_suono, checked=lambda i: self.suono_attivo),
             M("Avvia con Windows", self._toggle_avvio, checked=lambda i: self.avvio_automatico()),
+            M(lambda i: f"Spegni il PC alle {(self.chiusura or {}).get('ora', '20:00')}", self._toggle_spegni,
+              checked=lambda i: self.spegni_qui, visible=lambda i: bool((self.chiusura or {}).get("spegni"))),
             M("Dimensione avvisi", pystray.Menu(*[
                 M(nome, self._imposta_dimensione(valore), radio=True,
                   checked=lambda i, v=valore: abs(self.dimensione - v) < 0.01)
@@ -651,6 +744,62 @@ class ClientNotifiche:
         self.suono_attivo = not self.suono_attivo
         self._salva_config()
         self.icon.update_menu()
+
+    def _toggle_spegni(self, *_):
+        self.spegni_qui = not self.spegni_qui
+        self._salva_config()
+        self._aggiorna()
+
+    # ---------- chiusura serale ----------
+    def _ora_spegnimento(self, adesso):
+        try:
+            h, m = (int(x) for x in str((self.chiusura or {}).get("ora") or "20:00").split(":"))
+            return adesso.replace(hour=h, minute=m, second=0, microsecond=0)
+        except ValueError:
+            return None
+
+    def riepilogo_pronto(self):
+        """Il gestionale ha già mandato il riepilogo serale (o non deve mandarlo). Se il server non risponde
+        non c'è niente da aspettare."""
+        return not self.collegato or bool((self.chiusura or {}).get("pronto", True))
+
+    def rimanda_spegnimento(self):
+        adesso = datetime.datetime.now()
+        base = max(adesso, self.rimanda_fino or self._ora_spegnimento(adesso) or adesso)
+        self.rimanda_fino = base + datetime.timedelta(minutes=MINUTI_RIMANDA)
+        self.avviso("sistema", f"Spegnimento rimandato alle {self.rimanda_fino:%H:%M}", "")
+
+    def salta_spegnimento(self):
+        self.cfg["spegnimento_fatto"] = datetime.date.today().isoformat()
+        self._salva_config()
+        self.avviso("sistema", "Stasera il PC non si spegne da solo", "Ricordati di spegnerlo quando hai finito.")
+
+    def spegni_pc(self):
+        self.cfg["spegnimento_fatto"] = datetime.date.today().isoformat()
+        self._salva_config()
+        try:
+            import subprocess
+            subprocess.Popen(["shutdown", "/s", "/t", "60", "/c",
+                              "Chiusura serale del Gestionale Cerlab: il PC si spegne tra un minuto. Per annullare: shutdown /a"],
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            print(f"Spegnimento non avviato: {e}")
+
+    def _controlla_spegnimento(self):
+        ch = self.chiusura or {}
+        if not ch.get("spegni") or not self.spegni_qui:
+            return
+        adesso = datetime.datetime.now()
+        if self.cfg.get("spegnimento_fatto") == adesso.date().isoformat():
+            return
+        ora = self._ora_spegnimento(adesso)
+        if not ora or self.avviato > ora:  # PC acceso dopo l'orario: si lascia stare
+            return
+        if adesso > ora + datetime.timedelta(hours=ORE_FINESTRA_SPEGNIMENTO):
+            return
+        quando = max(ora, self.rimanda_fino or ora)
+        if adesso >= quando - datetime.timedelta(minutes=MINUTI_AVVISO_SPEGNIMENTO):
+            self.ui.esegui(self.ui.avviso_spegnimento, quando)
 
     def _toggle_avvio(self, *_):
         self.imposta_avvio_automatico(not self.avvio_automatico())
@@ -754,6 +903,11 @@ del "%~f0"
             eventi = []  # server riavviato: il contatore riparte da zero
         self.mio_ip = dati.get("tuo_ip")
         self.versione_server = dati.get("notifiche_version")
+        if "chiusura" in dati:
+            prima = {k: v for k, v in (self.chiusura or {}).items() if k != "pronto"}
+            self.chiusura = dati["chiusura"]
+            if prima != {k: v for k, v in (self.chiusura or {}).items() if k != "pronto"}:
+                self._salva_config()
         if self.ultimo_id is not None:
             # niente avvisi per le azioni fatte da questo stesso PC (tranne i PDF falliti)
             altrui = [e for e in eventi if e.get("ip") != self.mio_ip or e.get("tipo") == "pdf_errore"]
@@ -829,6 +983,10 @@ del "%~f0"
                         self.ui.esegui(self.ui.chiedi_accesso)
                 else:
                     self.collegato = False
+                    try:
+                        self._controlla_spegnimento()
+                    except Exception as e:
+                        print(f"Controllo spegnimento: {e}")
                     self._aggiorna()
                     time.sleep(30)
                     continue
@@ -848,6 +1006,10 @@ del "%~f0"
                     self.avviso("sistema", "Il gestionale non risponde", "Il PC server potrebbe essere spento o scollegato.")
                 if fallimenti >= 12:  # ~1 minuto: forse il server ha cambiato indirizzo
                     self.server, fallimenti = None, 0
+            try:
+                self._controlla_spegnimento()  # anche col server spento: l'orario resta quello ricordato
+            except Exception as e:
+                print(f"Controllo spegnimento: {e}")
             self._aggiorna()
             time.sleep(INTERVALLO_SECS)
 

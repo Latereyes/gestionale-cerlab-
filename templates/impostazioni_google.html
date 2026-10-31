@@ -33,7 +33,9 @@
                     <label class="riga-check"><input type="checkbox" name="invia_report" value="1" {% if stato.email.invia_report %}checked{% endif %}> Email a ogni report inviato</label>
                     <label class="riga-check"><input type="checkbox" name="riepilogo" value="1" {% if stato.email.riepilogo %}checked{% endif %}> Riepilogo giornaliero dei report alle
                         <input type="time" name="ora_riepilogo" value="{{ stato.email.ora_riepilogo }}" style="width:auto;"></label>
+                    {% if stato.chiusura.spegni %}<small class="muted">Con lo spegnimento serale attivo il riepilogo parte alle <strong>{{ stato.chiusura.ora_riepilogo }}</strong>, mezz'ora prima che i PC si spengano.</small><br>{% endif %}
                     {% if stato.email.ultimo_riepilogo %}<small class="muted">Ultimo riepilogo: {{ stato.email.ultimo_riepilogo[:16] }}</small>{% endif %}
+                    <small><a href="{{ url_for('anteprima_riepilogo') }}" target="_blank" rel="noopener"><i class="fas fa-eye"></i> Anteprima del riepilogo di oggi</a></small>
                 </div>
                 <div class="toolbar" style="justify-content: flex-end;">
                     <button type="submit" class="btn primary">Salva</button>
@@ -53,6 +55,28 @@
                 <li><strong>Richieste del tasto admin:</strong>
                     {% for u in ricevono_admin %}{{ u.full_name or u.username }} &lt;{{ u.email }}&gt;{% if not loop.last %}, {% endif %}{% else %}<span class="muted">nessuno</span>{% endfor %}</li>
             </ul>
+        </div>
+    </div>
+
+    <div class="card" id="chiusura">
+        <div class="card-header">
+            <h3><i class="fas fa-power-off"></i> Chiusura serale</h3>
+            <span class="stato-pill {{ 'ok' if stato.chiusura.spegni else '' }}">{{ 'Spegnimento alle ' ~ stato.chiusura.ora if stato.chiusura.spegni else 'Spegnimento non attivo' }}</span>
+        </div>
+        <div class="card-body">
+            <p class="muted">Gestionale Notifiche spegne i PC dell'ufficio (anche questo) all'ora scelta. Cinque minuti prima mostra un avviso
+                con <strong>Rimanda di 30 minuti</strong> e <strong>Non stasera</strong>. Prima di spegnersi aspetta che il riepilogo
+                serale sia partito, cosi' l'email arriva sempre. Un PC acceso dopo l'orario non viene spento; su un singolo PC
+                lo spegnimento si toglie dal menu dell'icona vicino all'orologio.</p>
+            <form method="post" action="{{ url_for('impostazioni_chiusura') }}">
+                <div class="form-group">
+                    <label class="riga-check"><input type="checkbox" name="spegni" value="1" {% if stato.chiusura.spegni %}checked{% endif %}> Spegni i PC alle
+                        <input type="time" name="ora" value="{{ stato.chiusura.ora }}" style="width:auto;"></label>
+                </div>
+                <div class="toolbar" style="justify-content: flex-end;">
+                    <button type="submit" class="btn primary">Salva</button>
+                </div>
+            </form>
         </div>
     </div>
 

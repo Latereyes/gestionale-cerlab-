@@ -110,7 +110,11 @@ _PREDEFINITA = {
               "invia_report": True, "riepilogo": True, "ora_riepilogo": "19:00", "ultimo_riepilogo": ""},
     "calendar": {"client_id": "", "client_secret": "", "calendar_id": "", "refresh_token": "",
                  "account": "", "collegato_il": ""},
+    # Chiusura serale: Gestionale Notifiche spegne i PC all'ora scelta; il riepilogo parte MINUTI_PRIMA prima
+    "chiusura": {"spegni": False, "ora": "20:00"},
 }
+
+MINUTI_PRIMA = 30  # con lo spegnimento attivo il riepilogo parte mezz'ora prima (c'e' tempo per il riassunto AI)
 
 
 def leggi_config():
@@ -151,7 +155,38 @@ def stato_pubblico():
                  | {"password_salvata": bool(e["password"]), "attiva": email_attiva(cfg)},
         "calendar": {k: c[k] for k in ("client_id", "calendar_id", "account", "collegato_il")}
                     | {"secret_salvato": bool(c["client_secret"]), "collegato": bool(c["refresh_token"])},
+        "chiusura": dict(cfg["chiusura"]) | {"ora_riepilogo": ora_riepilogo(cfg)},
     }
+
+
+def _ora_minuti(testo, predefinita):
+    try:
+        ora, minuti = (int(x) for x in (testo or predefinita).split(":"))
+        return ora, minuti
+    except ValueError:
+        return tuple(int(x) for x in predefinita.split(":"))
+
+
+def ora_riepilogo(cfg=None):
+    """Ora del riepilogo serale: quella scelta, oppure MINUTI_PRIMA prima dello spegnimento dei PC."""
+    cfg = cfg or leggi_config()
+    if cfg["chiusura"]["spegni"]:
+        ora, minuti = _ora_minuti(cfg["chiusura"]["ora"], "20:00")
+        t = datetime.datetime.combine(datetime.date.today(), datetime.time(ora, minuti)) - datetime.timedelta(minutes=MINUTI_PRIMA)
+        return t.strftime("%H:%M")
+    return cfg["email"]["ora_riepilogo"] or "19:00"
+
+
+def stato_chiusura(destinatari_presenti=True, adesso=None):
+    """Per Gestionale Notifiche: se e a che ora spegnere i PC, e se il riepilogo e' gia' partito (pronto)."""
+    cfg = leggi_config()
+    adesso = adesso or datetime.datetime.now()
+    e = cfg["email"]
+    ora, minuti = _ora_minuti(ora_riepilogo(cfg), "19:00")
+    scadenza = adesso.replace(hour=ora, minute=minuti, second=0, microsecond=0)
+    serve = email_attiva(cfg) and e["riepilogo"] and destinatari_presenti
+    pronto = not serve or (e["ultimo_riepilogo"] or "") >= scadenza.strftime("%Y-%m-%d %H:%M:%S")
+    return {"spegni": bool(cfg["chiusura"]["spegni"]), "ora": cfg["chiusura"]["ora"] or "20:00", "pronto": pronto}
 
 
 # --- Email ---
@@ -171,7 +206,7 @@ def togli_importi(testo):
     return _IMPORTO.sub("[importo]", testo or "")
 
 
-def _manda(destinatari, oggetto, testo):
+def _manda(destinatari, oggetto, testo, html=None):
     cfg = leggi_config()["email"]
     password = svela(cfg["password"])
     if not cfg["mittente"] or not password:
@@ -184,6 +219,8 @@ def _manda(destinatari, oggetto, testo):
     msg["To"] = ", ".join(dest)
     msg["Subject"] = oggetto
     msg.set_content(togli_importi(testo))
+    if html:
+        msg.add_alternative(html, subtype="html")  # l'HTML arriva gia' senza importi (lo compone chi lo manda)
     utente, chiave = cfg["mittente"].strip(), password.replace(" ", "").strip()
     errori = []
     # prima SSL sulla 465; se Gmail chiude la connessione (rete, antivirus, errore temporaneo) riprova con STARTTLS sulla 587
@@ -255,31 +292,29 @@ def email_admin_task(richiesta, destinatari):
     manda_in_background(destinatari, oggetto, testo)
 
 
-def avvia_riepilogo_giornaliero(report_dal, destinatari):
-    """Ogni giorno all'ora scelta manda i report inviati dall'ultimo riepilogo a chi riceve i report.
+def avvia_riepilogo_giornaliero(report_dal, destinatari, componi=None):
+    """Ogni giorno all'ora del riepilogo manda i report inviati dall'ultimo riepilogo a chi riceve i report.
     report_dal(quando) -> lista di report (dict) inviati dopo 'quando' ("YYYY-MM-DD HH:MM:SS");
-    destinatari() -> indirizzi email.
+    destinatari() -> indirizzi email;
+    componi(reports, dal, adesso) -> (oggetto, testo, html): l'email impaginata (facoltativa, se fallisce si manda il testo).
     Se il PC era spento all'ora del riepilogo, parte appena il gestionale si riaccende."""
     def _giro():
         while True:
             try:
-                _controlla_riepilogo(report_dal, destinatari())
+                _controlla_riepilogo(report_dal, destinatari(), componi=componi)
             except Exception as e:
                 log(f"Riepilogo: errore {e}")
-            time.sleep(300)
+            time.sleep(60)
     threading.Thread(target=_giro, daemon=True, name="RiepilogoEmail").start()
 
 
-def _controlla_riepilogo(report_dal, destinatari, adesso=None):
+def _controlla_riepilogo(report_dal, destinatari, adesso=None, componi=None):
     cfg = leggi_config()
     e = cfg["email"]
     if not email_attiva(cfg) or not e["riepilogo"] or not destinatari:
         return False
     adesso = adesso or datetime.datetime.now()
-    try:
-        ora, minuti = (int(x) for x in (e["ora_riepilogo"] or "19:00").split(":"))
-    except ValueError:
-        ora, minuti = 19, 0
+    ora, minuti = _ora_minuti(ora_riepilogo(cfg), "19:00")
     scadenza = adesso.replace(hour=ora, minute=minuti, second=0, microsecond=0)
     ultimo = e["ultimo_riepilogo"]
     if adesso < scadenza or (ultimo and ultimo >= scadenza.strftime("%Y-%m-%d %H:%M:%S")):
@@ -292,7 +327,13 @@ def _controlla_riepilogo(report_dal, destinatari, adesso=None):
         testo = f"Report inviati dal {dal[:16]}: {len(reports)}\n\n" + "\n\n".join(blocchi)
     else:
         testo = f"Nessun report inviato dal {dal[:16]}."
-    ok, _ = _manda(destinatari, f"Riepilogo report del {adesso:%d/%m/%Y}", testo)
+    oggetto, html = f"Riepilogo report del {adesso:%d/%m/%Y}", None
+    if componi:
+        try:
+            oggetto, testo, html = componi(reports, dal, adesso)
+        except Exception as ex:
+            log(f"Riepilogo impaginato non riuscito, parte quello semplice: {ex}")
+    ok, _ = _manda(destinatari, oggetto, testo, html)
     if ok:
         aggiorna_sezione("email", {"ultimo_riepilogo": adesso.strftime("%Y-%m-%d %H:%M:%S")})
     return ok
