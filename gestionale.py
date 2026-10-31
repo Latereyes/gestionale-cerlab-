@@ -9211,6 +9211,79 @@ def contesto_tag(testo):
     return "\n\n".join(p for p in parti if p)
 
 
+def _riga_report(r):
+    return f"- {r.get('autore_nome') or r.get('autore')} ({(r.get('creato_il') or '')[:16]}): {(r.get('testo') or '').strip()[:700]}"
+
+
+def _riga_task(t):
+    assegnati = ", ".join(t.get("assigned_to") or []) or "-"
+    return (f"- Task #{t['id']} di {t.get('created_by_name') or t.get('created_by')} per {assegnati}, "
+            f"stato {t.get('status')}, scadenza {t.get('etc') or '-'}: {(t.get('description') or '')[:200]}")
+
+
+def contesto_generale(domanda):
+    """Quello che Ceerlo sa sempre (ultimo report di ogni collega, le tue task aperte, appuntamenti di oggi),
+    piu' i dati che la domanda tira in ballo: report, task del team, agenda, preventivi recenti, clienti nominati."""
+    q = (domanda or "").lower()
+    me, ruolo = session["user_id"], session.get("user_role")
+    parti = []
+    db = _DBSession()
+    try:
+        dal = (datetime.date.today() - datetime.timedelta(days=30 if "report" in q else 14)).isoformat()
+        reports = [r.to_dict() for r in db.query(_Report).filter(_Report.stato != "bozza", _Report.creato_il >= dal)
+                   .order_by(_Report.creato_il.desc()).limit(40).all()]
+        if "report" in q:
+            parti.append("Report degli ultimi 30 giorni (dal piu' recente):\n" + "\n".join(_riga_report(r) for r in reports[:15]))
+        elif reports:
+            parti.append("Ultimo report di ogni collega:\n" + "\n".join(_riga_report(r) for r in ultimi_report_per_autore(reports)))
+        if any(k in q for k in ("preventiv", "offert", "ordin")):
+            prev = db.query(_Preventivo).order_by(_Preventivo.data.desc()).limit(15).all()
+            parti.append("Ultimi preventivi (senza importi): " + "; ".join(
+                f"{p.numero} del {p.data or '?'} cliente {p.cliente or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})"
+                for p in prev))
+        # clienti nominati per nome nella domanda, anche senza #
+        if len(q) >= 4:
+            trovati = []
+            for c in db.query(_Cliente.id_cliente, _Cliente.cliente, _Cliente.rag_sociale).all():
+                for nome in (c.cliente, c.rag_sociale):
+                    if nome and len(nome) >= 4 and nome.lower() in q:
+                        trovati.append(c.id_cliente)
+                        break
+                if len(trovati) >= 3:
+                    break
+            for cid in trovati:
+                parti.append(_contesto_cliente(cid))
+    finally:
+        db.close()
+    try:
+        visibili = [t for t in load_tasks() if t.get("status") not in ("resolved", "failed")
+                    and task_visibile(t, me, ruolo)]
+        mie = [t for t in visibili if me in [a.replace("@", "") for a in (t.get("assigned_to") or [])]
+               or t.get("created_by") == me]
+        if mie:
+            parti.append("Le task aperte di chi ti scrive:\n" + "\n".join(_riga_task(t) for t in mie[:10]))
+        if "task" in q or "attivit" in q or "da fare" in q:
+            altre = [t for t in visibili if t not in mie]
+            if altre:
+                parti.append("Altre task aperte del team:\n" + "\n".join(_riga_task(t) for t in altre[:20]))
+    except Exception as e:
+        print(f"[ceerlo] Task non lette: {e}")
+    if any(k in q for k in ("appuntament", "calendari", "agenda", "settimana", "domani", "sopralluog", "impegn")):
+        try:
+            if integrazioni_google.calendar_collegato():
+                oggi = datetime.date.today().isoformat()
+                fino = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
+                prossimi = [e for e in eventi_vicini() if oggi <= e["inizio"][:10] <= fino]
+                parti.append("Appuntamenti delle prossime due settimane:\n" + ("\n".join(
+                    f"- {e['inizio'][:16].replace('T', ' ')} {e['titolo']}" + (f" (cliente {e['cliente']})" if e["cliente"] else "")
+                    for e in prossimi) or "nessuno"))
+            else:
+                parti.append("Il calendario Google non e' ancora collegato.")
+        except Exception as e:
+            print(f"[ceerlo] Calendario non letto: {e}")
+    return "\n\n".join(x for x in parti if x)
+
+
 def contesto_evento(ev):
     testo = (f"Appuntamento: {ev['titolo']} il {ev['inizio'][:16].replace('T', ' ')}"
              + (f" a {ev['luogo']}" if ev.get("luogo") else "") + (f". Note: {ev['descrizione'][:500]}" if ev.get("descrizione") else ""))
@@ -9228,6 +9301,7 @@ def api_ceerlo_chiedi():
         return jsonify({"ok": False, "error": "Scrivi una domanda."}), 400
     contesto = contesto_ceerlo(str(d.get("pagina") or "")[:200], str(d.get("cliente_id") or "")[:50],
                                str(d.get("preventivo") or "")[:50])
+    contesto += "\n\n" + contesto_generale(str(storia[-1].get("testo") or ""))
     citati = contesto_tag(str(storia[-1].get("testo") or ""))
     if citati:
         contesto += "\n\nCITATI NELLA DOMANDA (#cliente o #preventivo, @collega):\n" + citati
