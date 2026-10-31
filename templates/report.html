@@ -11,7 +11,7 @@
         <div class="rp-composer-head">
             <div>
                 <h2 id="rpTitolo">Il tuo report</h2>
-                <p id="rpSottotitolo">Una voce per riga. Spunta <i class="far fa-square"></i> per trasformarla in una task; se tagghi un <strong>@collega</strong> o un <strong>@gruppo</strong> diventa una task da sola.</p>
+                <p id="rpSottotitolo">Una voce per riga. Spunta <i class="far fa-square"></i> per trasformarla in una task; se tagghi un <strong>@collega</strong> o un <strong>@gruppo</strong> diventa una task da sola. Con <i class="fas fa-bell"></i> diventa invece un promemoria nel calendario.</p>
             </div>
             <div class="rp-head-side">
                 <span id="rpStato" class="rp-stato" style="display: none;"></span>
@@ -79,7 +79,7 @@
     .rp-stato.modifica { background: var(--warning-bg); color: var(--warning-text); }
 
     .rp-voci { display: flex; flex-direction: column; gap: 8px; }
-    .rp-voce { display: grid; grid-template-columns: 34px minmax(0, 1fr) 30px; gap: 4px 8px; align-items: start; padding: 8px 8px 8px 6px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); transition: border-color 0.15s, background 0.15s; }
+    .rp-voce { display: grid; grid-template-columns: 34px minmax(0, 1fr) 30px 30px; gap: 4px 8px; align-items: start; padding: 8px 8px 8px 6px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); transition: border-color 0.15s, background 0.15s; }
     .rp-voce:focus-within { border-color: var(--accent); }
     .rp-voce.is-task { background: var(--accent-light); border-color: hsl(244, 60%, 85%); }
     .rp-check { width: 30px; height: 30px; margin-top: 2px; border: none; background: none; border-radius: 8px; color: var(--text-subtle); font-size: 19px; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
@@ -92,7 +92,17 @@
     .rp-campo .mention-list { top: 100%; bottom: auto; left: 0; right: 0; margin-top: 4px; max-height: 220px; }
     .rp-togli { width: 30px; height: 30px; margin-top: 2px; border: none; background: none; color: var(--text-subtle); font-size: 15px; cursor: pointer; border-radius: 8px; padding: 0; }
     .rp-togli:hover { color: var(--danger); background: var(--danger-bg); }
-    .rp-meta { grid-column: 2 / 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12.5px; }
+    .rp-voce.is-promemoria { background: hsl(42, 100%, 96%); border-color: hsl(42, 80%, 78%); }
+    .rp-prom { width: 30px; height: 30px; margin-top: 2px; border: none; background: none; color: var(--text-subtle); font-size: 15px; cursor: pointer; border-radius: 8px; padding: 0; }
+    .rp-prom i { pointer-events: none; }
+    .rp-prom:hover { color: hsl(38, 90%, 40%); background: var(--surface-2); }
+    .rp-voce.is-promemoria .rp-prom { color: hsl(38, 90%, 40%); }
+    .rp-prom:disabled { cursor: default; opacity: 0.35; }
+    .rp-chi.promemoria { color: hsl(30, 80%, 32%); border-color: hsl(42, 80%, 78%); }
+    .rp-etc input[type=time] { width: 96px; }
+    .report-voci li.voce-promemoria > i { color: hsl(38, 90%, 40%); font-size: 13px; margin-top: 4px; }
+    .report-voci .voce-prom-link { font-size: 11.5px; font-weight: 600; color: hsl(30, 80%, 32%); background: hsl(42, 100%, 92%); border-radius: 999px; padding: 1px 8px; margin-left: 6px; text-decoration: none; white-space: nowrap; }
+    .rp-meta { grid-column: 2 / 5; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12.5px; }
     .rp-meta:empty { display: none; }
     .rp-chi { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent); background: var(--surface); border: 1px solid hsl(244, 60%, 85%); border-radius: 999px; padding: 3px 10px; }
     .rp-chi.privata { color: var(--text-muted); border-color: var(--border); }
@@ -209,11 +219,40 @@ document.addEventListener('DOMContentLoaded', () => {
   const aggiornaVoce = (riga) => {
     const ta = riga.querySelector('textarea');
     const taskId = riga.dataset.taskId || '';
+    const promId = riga.dataset.promemoriaId || '';
     const { nomi, gruppo } = assegnazione(ta.value);
-    const auto = nomi.length > 0;
+    // in alternativa alla task la voce puo' diventare un promemoria (campanella): vince anche sui @tag
+    const isProm = !taskId && (!!promId || riga.dataset.promemoria === '1');
+    const auto = nomi.length > 0 && !isProm;
     const spuntata = riga.dataset.task === '1';
-    const isTask = !!taskId || spuntata || auto;
+    const isTask = !isProm && (!!taskId || spuntata || auto);
     riga.classList.toggle('is-task', isTask);
+    riga.classList.toggle('is-promemoria', isProm);
+    const prom = riga.querySelector('.rp-prom');
+    prom.disabled = !!taskId || !!promId;
+    prom.title = promId ? 'Questa voce è già un promemoria' : (taskId ? 'Questa voce è già una task' : (isProm ? 'Togli il promemoria: resta una voce' : 'Fai diventare questa voce un promemoria nel calendario'));
+    if (isProm) {
+      const check = riga.querySelector('.rp-check');
+      check.innerHTML = '<i class="far fa-square"></i>';
+      check.disabled = !!promId;
+      check.title = promId ? 'Questa voce è già un promemoria' : 'Fai diventare questa voce una task (al posto del promemoria)';
+      const meta = riga.querySelector('.rp-meta');
+      if (promId) {
+        meta.innerHTML = `<a class="rp-task-link" href="/calendario?giorno=${escapeHtml(riga.dataset.promData || '')}"><i class="fas fa-bell"></i> Promemoria del ${escapeHtml(dataIt(riga.dataset.promData))}${riga.dataset.promOra ? ' alle ' + escapeHtml(riga.dataset.promOra) : ''} creato</a>`;
+        return;
+      }
+      const tutti = nomi.length ? nomi : [];
+      const chi = tutti.length
+        ? `<span class="rp-chi promemoria"><i class="fas fa-bell"></i> Promemoria per te e ${escapeHtml(tutti.join(', '))}</span>`
+        : `<span class="rp-chi promemoria"><i class="fas fa-bell"></i> Promemoria per te</span>`;
+      meta.innerHTML = `${chi}<label class="rp-etc"><i class="far fa-calendar-alt"></i> Il <input type="date" class="prom-data" min="${oggiIso()}" required aria-label="Giorno del promemoria"></label>` +
+        `<label class="rp-etc"><i class="far fa-clock"></i> alle <input type="time" class="prom-ora" aria-label="Ora del promemoria (facoltativa)"></label>`;
+      const d = meta.querySelector('.prom-data'), o = meta.querySelector('.prom-ora');
+      d.value = riga.dataset.promData || ''; o.value = riga.dataset.promOra || '';
+      d.addEventListener('change', () => { riga.dataset.promData = d.value; d.closest('.rp-etc').classList.remove('manca'); });
+      o.addEventListener('change', () => { riga.dataset.promOra = o.value; });
+      return;
+    }
     const check = riga.querySelector('.rp-check');
     const icona = isTask ? '<i class="fas fa-check-square"></i>' : '<i class="far fa-square"></i>';
     if (check.innerHTML !== icona) check.innerHTML = icona;
@@ -243,12 +282,17 @@ document.addEventListener('DOMContentLoaded', () => {
     riga.dataset.task = dati.task && !dati.task_id ? '1' : '';
     riga.dataset.taskId = dati.task_id || '';
     riga.dataset.etc = dati.etc || '';
+    riga.dataset.promemoria = dati.promemoria && !dati.promemoria_id ? '1' : '';
+    riga.dataset.promemoriaId = dati.promemoria_id || '';
+    riga.dataset.promData = dati.prom_data || '';
+    riga.dataset.promOra = dati.prom_ora || '';
     riga.innerHTML = `
       <button type="button" class="rp-check"></button>
       <div class="rp-campo">
         <textarea class="con-badge" rows="1" placeholder="Scrivi una voce… (@ collega o gruppo, # preventivo o cliente)"></textarea>
         <div class="mention-list"></div>
       </div>
+      <button type="button" class="rp-prom"><i class="fas fa-bell"></i></button>
       <button type="button" class="rp-togli" title="Togli voce"><i class="fas fa-times"></i></button>
       <div class="rp-meta"></div>`;
     const ta = riga.querySelector('textarea');
@@ -270,13 +314,21 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     riga.querySelector('.rp-check').addEventListener('click', () => {
-      riga.dataset.task = riga.dataset.task === '1' ? '' : '1';
+      if (riga.dataset.promemoria === '1') { riga.dataset.promemoria = ''; riga.dataset.task = '1'; }
+      else riga.dataset.task = riga.dataset.task === '1' ? '' : '1';
       aggiornaVoce(riga);
       const etc = riga.querySelector('.rp-etc input');
       if (etc && !etc.value) etc.focus();
     });
+    riga.querySelector('.rp-prom').addEventListener('click', () => {
+      riga.dataset.promemoria = riga.dataset.promemoria === '1' ? '' : '1';
+      if (riga.dataset.promemoria) riga.dataset.task = '';
+      aggiornaVoce(riga);
+      const d = riga.querySelector('.prom-data');
+      if (d && !d.value) d.focus();
+    });
     const togli = riga.querySelector('.rp-togli');
-    if (dati.task_id) { togli.style.visibility = 'hidden'; togli.disabled = true; }
+    if (dati.task_id || dati.promemoria_id) { togli.style.visibility = 'hidden'; togli.disabled = true; }
     togli.addEventListener('click', () => {
       riga.remove();
       if (!voci.children.length) nuovaVoce();
@@ -292,7 +344,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const leggiVoci = () => [...voci.querySelectorAll('.rp-voce')].map(r => {
     const etc = r.querySelector('.rp-etc input');
     return { testo: r.querySelector('textarea').value.trim(), task: r.classList.contains('is-task'),
-             etc: etc ? etc.value : (r.dataset.etc || ''), task_id: r.dataset.taskId || '' };
+             etc: etc ? etc.value : (r.dataset.etc || ''), task_id: r.dataset.taskId || '',
+             promemoria: r.classList.contains('is-promemoria'), prom_data: r.dataset.promData || '',
+             prom_ora: r.dataset.promOra || '', promemoria_id: r.dataset.promemoriaId || '' };
   }).filter(v => v.testo);
 
   const impronta = () => JSON.stringify(leggiVoci());
@@ -337,6 +391,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     if (prima) { prima.focus(); mostraErrore('Scegli sul calendario entro quando va completata ogni voce che diventa task.'); return false; }
+    voci.querySelectorAll('.rp-voce.is-promemoria').forEach(r => {
+      const d = r.querySelector('.prom-data');
+      if (d && !d.value && r.querySelector('textarea').value.trim()) {
+        d.closest('.rp-etc').classList.add('manca');
+        prima = prima || d;
+      }
+    });
+    if (prima) { prima.focus(); mostraErrore('Scegli il giorno di ogni promemoria.'); return false; }
     return true;
   };
 
@@ -401,9 +463,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return `<div class="report-corpo">${window.parseMessage(escapeHtml(r.testo || '')).replace(/\n/g, '<br>')}</div>`;
     }
     return '<ul class="report-voci">' + r.righe.map(v => {
-      const isTask = !!v.task_id;
-      const link = isTask ? `<a class="voce-task-link" href="/tasks#${escapeHtml(v.task_id)}"><i class="fas fa-tasks"></i> Task</a>` : '';
-      return `<li class="${isTask ? 'voce-task' : ''}"><i class="fas ${isTask ? 'fa-check-square' : 'fa-circle'}"></i><span class="voce-testo">${window.parseMessage(escapeHtml(v.testo)).replace(/\n/g, '<br>')}${link}</span></li>`;
+      const isTask = !!v.task_id, isProm = !isTask && !!v.promemoria_id;
+      const link = isTask ? `<a class="voce-task-link" href="/tasks#${escapeHtml(v.task_id)}"><i class="fas fa-tasks"></i> Task</a>`
+        : (isProm ? `<a class="voce-prom-link" href="/calendario?giorno=${escapeHtml(v.prom_data || '')}"><i class="fas fa-bell"></i> ${escapeHtml(dataIt(v.prom_data))}${v.prom_ora ? ' ' + escapeHtml(v.prom_ora) : ''}</a>` : '');
+      return `<li class="${isTask ? 'voce-task' : (isProm ? 'voce-promemoria' : '')}"><i class="fas ${isTask ? 'fa-check-square' : (isProm ? 'fa-bell' : 'fa-circle')}"></i><span class="voce-testo">${window.parseMessage(escapeHtml(v.testo)).replace(/\n/g, '<br>')}${link}</span></li>`;
     }).join('') + '</ul>';
   };
 

@@ -1026,7 +1026,7 @@ from models import (
     Preventivo as _Preventivo, Ordine as _Ordine, Bolla as _Bolla,
     Cliente as _Cliente,
     Utente as _Utente,
-    Task as _Task, AdminTask as _AdminTask, Report as _Report,
+    Task as _Task, AdminTask as _AdminTask, Report as _Report, Promemoria as _Promemoria,
     Message as _Message, TagboxEntry as _TagboxEntry,
     Notification as _Notification, ConfigMargini as _ConfigMargini,
     ArticoloMagazzino as _ArticoloMagazzino, MovimentoMagazzino as _MovimentoMagazzino,
@@ -8563,6 +8563,7 @@ def voci_report(dati, me, vecchie=None):
     if not isinstance(grezze, list):
         return None, "Voci del report non valide."
     task_esistenti = {v.get("task_id") for v in (vecchie or []) if v.get("task_id")}
+    prom_esistenti = {v.get("promemoria_id") for v in (vecchie or []) if v.get("promemoria_id")}
     all_users = load_users()
     ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
     voci = []
@@ -8576,9 +8577,15 @@ def voci_report(dati, me, vecchie=None):
             return None, "Una voce del report e' troppo lunga."
         task_id = str(r.get("task_id") or "")
         task_id = task_id if task_id in task_esistenti else ""
+        prom_id = str(r.get("promemoria_id") or "")
+        prom_id = prom_id if prom_id in prom_esistenti else ""
+        # Una voce puo' diventare task oppure promemoria (in alternativa): il promemoria vince sui @tag
+        promemoria = bool(prom_id or (r.get("promemoria") and not task_id))
         tipo, _, _ = assegnazione_da_menzioni(testo, me, all_users, ruoli)
-        voci.append({"testo": testo, "task": bool(task_id or r.get("task") or tipo != "personale"),
-                     "etc": str(r.get("etc") or "").strip()[:10], "task_id": task_id})
+        voci.append({"testo": testo, "task": not promemoria and bool(task_id or r.get("task") or tipo != "personale"),
+                     "etc": str(r.get("etc") or "").strip()[:10], "task_id": task_id,
+                     "promemoria": promemoria, "prom_data": str(r.get("prom_data") or "").strip()[:10],
+                     "prom_ora": str(r.get("prom_ora") or "").strip()[:5], "promemoria_id": prom_id})
     return voci, None
 
 
@@ -8588,6 +8595,10 @@ def crea_task_dalle_voci(voci, report_id):
     for v in voci:
         if v["task"] and not v["task_id"]:
             err = errore_etc(v["etc"])
+            if err:
+                return 0, f"Voce \"{v['testo'][:40]}\": {err}"
+        if v.get("promemoria") and not v.get("promemoria_id"):
+            err = errore_data_promemoria(v.get("prom_data"), v.get("prom_ora"))
             if err:
                 return 0, f"Voce \"{v['testo'][:40]}\": {err}"
     all_users = load_users()
@@ -8602,6 +8613,11 @@ def crea_task_dalle_voci(voci, report_id):
                 return create, err
             v["task_id"] = tid
             create += 1
+        elif v.get("promemoria") and not v.get("promemoria_id"):
+            pid, err = crea_promemoria(me, nome, v["testo"], v["prom_data"], v.get("prom_ora") or "", report_id=report_id)
+            if err:
+                return create, err
+            v["promemoria_id"] = pid
     return create, None
 
 
@@ -8656,10 +8672,10 @@ def api_report_salva():
         return jsonify({"ok": False, "error": "Scrivi almeno una voce del report."}), 400
     if azione == "invia":
         for v in voci:
-            if v["task"]:
-                e = errore_etc(v["etc"])
-                if e:
-                    return jsonify({"ok": False, "error": f"Voce \"{v['testo'][:40]}\": {e}"}), 400
+            e = errore_etc(v["etc"]) if v["task"] else \
+                (errore_data_promemoria(v["prom_data"], v["prom_ora"]) if v["promemoria"] else None)
+            if e:
+                return jsonify({"ok": False, "error": f"Voce \"{v['testo'][:40]}\": {e}"}), 400
 
     adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db = _DBSession()
@@ -9113,6 +9129,181 @@ def _data_ordinabile(testo):
     if m:
         return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
     return testo if re.match(r"\d{4}-\d{2}-\d{2}$", testo) else ""
+
+
+# --- Incassi programmati (dai pagamenti dei preventivi) e promemoria, mostrati nel calendario ---
+
+STATI_CON_INCASSI = ("Confermato", "In Lavorazione", "Chiuso")
+
+
+def incassi_programmati(dal, al):
+    """Pagamenti programmati (non ancora incassati) con data tra dal e al (stringhe YYYY-MM-DD)."""
+    db = _DBSession()
+    try:
+        righe = db.query(_Preventivo.numero, _Preventivo.cliente, _Preventivo.rag_sociale, _Preventivo.id_cliente,
+                         _Preventivo.stato, _Preventivo.pagamenti).filter(_Preventivo.stato.in_(STATI_CON_INCASSI)).all()
+    finally:
+        db.close()
+    oggi = datetime.date.today().isoformat()
+    incassi = []
+    for r in righe:
+        for pag in r.pagamenti or []:
+            data = str(pag.get("data") or "")[:10]
+            if not pag.get("is_scheduled") or not (dal <= data <= al):
+                continue
+            incassi.append({"id": pag.get("id") or "", "data": data, "importo": _to_float(pag.get("importo")),
+                            "note": pag.get("note") or "", "preventivo": r.numero, "cliente": r.cliente or r.rag_sociale or "",
+                            "cliente_id": r.id_cliente or "", "scaduto": data < oggi})
+    return sorted(incassi, key=lambda x: (x["data"], x["preventivo"]))
+
+
+def _promemoria_come_task(p):
+    """Un promemoria ha le stesse regole di visibilita' e di avviso delle task."""
+    return {"tipo": "utente" if p.get("assegnati") else "personale", "created_by": p.get("autore"),
+            "assigned_to": p.get("assegnati") or []}
+
+
+def promemoria_visibile(p, me, ruolo):
+    return task_visibile(_promemoria_come_task(p), me, ruolo)
+
+
+def errore_data_promemoria(data, ora=""):
+    try:
+        giorno = datetime.date.fromisoformat(data or "")
+        if ora:
+            datetime.time.fromisoformat(ora)
+    except ValueError:
+        return "Scegli il giorno (e l'ora, se serve) del promemoria."
+    if giorno < datetime.date.today():
+        return "Il promemoria non puo' essere nel passato."
+    return None
+
+
+def crea_promemoria(me, nome, testo, data, ora="", assegnati=None, cliente_id="", preventivo="", report_id=""):
+    """Crea un promemoria e avvisa subito i colleghi a cui e' rivolto. Restituisce (id, None) o (None, errore).
+    assegnati: ["@utente", "@gruppo"]; si aggiungono anche i @colleghi e @gruppi scritti nel testo."""
+    testo = (testo or "").strip()
+    if not testo:
+        return None, "Scrivi il testo del promemoria."
+    err = errore_data_promemoria(data, ora)
+    if err:
+        return None, err
+    all_users = load_users()
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    tipo, dal_testo, _ = assegnazione_da_menzioni(testo, me, all_users, ruoli)
+    tutti = [a for a in (assegnati or []) if a != f"@{me}"]
+    if tipo != "personale":
+        tutti += [a for a in dal_testo if a not in tutti]
+    pid = "PRM-" + uuid.uuid4().hex[:8].upper()
+    db = _DBSession()
+    try:
+        db.add(_Promemoria(id=pid, testo=testo[:2000], data=data, ora=ora or "", autore=me, autore_nome=nome,
+                           assegnati=tutti[:10], cliente_id=cliente_id or "", preventivo=preventivo or "",
+                           report_id=report_id or "", creato_il=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                           fatto=False, avvisato=""))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[crea_promemoria] Errore: {e}")
+        return None, "Errore nel salvataggio del promemoria."
+    finally:
+        db.close()
+    quando = datetime.date.fromisoformat(data).strftime("%d/%m") + (f" alle {ora}" if ora else "")
+    for u in destinatari_task(_promemoria_come_task({"autore": me, "assegnati": tutti}), all_users) - {me}:
+        add_notification(u, f"🔔 {nome} ti ha lasciato un promemoria per il {quando}: {testo[:80]}",
+                         link=f"/calendario?giorno={data}", tipo="task")
+    return pid, None
+
+
+_ultimo_controllo_promemoria = 0.0
+
+
+def controlla_promemoria():
+    """Al giorno (e all'ora) del promemoria avvisa autore e destinatari, una volta sola. Al massimo ogni minuto."""
+    global _ultimo_controllo_promemoria
+    if time.time() - _ultimo_controllo_promemoria < 60:
+        return
+    _ultimo_controllo_promemoria = time.time()
+    adesso = datetime.datetime.now()
+    oggi, ora = adesso.strftime("%Y-%m-%d"), adesso.strftime("%H:%M")
+    db = _DBSession()
+    try:
+        dovuti = [p for p in db.query(_Promemoria).filter(_Promemoria.fatto == False, _Promemoria.data <= oggi).all()  # noqa: E712
+                  if (p.data < oggi or not p.ora or p.ora <= ora) and (p.avvisato or "") != f"{p.data} {p.ora}"]
+        if not dovuti:
+            return
+        all_users = load_users()
+        for p in dovuti:
+            for u in destinatari_task(_promemoria_come_task(p.to_dict()), all_users):
+                add_notification(u, f"🔔 Promemoria: {(p.testo or '')[:100]}", link=f"/calendario?giorno={p.data}", tipo="scadenza")
+            p.avvisato = f"{p.data} {p.ora}"
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[controlla_promemoria] Errore: {e}")
+    finally:
+        db.close()
+
+
+@app.route("/api/calendario/voci")
+@login_required
+def api_calendario_voci():
+    """Voci del gestionale da mettere nel calendario: incassi programmati e promemoria visibili all'utente."""
+    dal, al = request.args.get("dal") or "", request.args.get("al") or ""
+    try:
+        datetime.date.fromisoformat(dal); datetime.date.fromisoformat(al)
+    except ValueError:
+        return jsonify({"ok": False, "error": "Date non valide."}), 400
+    me, ruolo = session["user_id"], session.get("user_role")
+    utenti = {u["username"]: u for u in load_users()}
+    db = _DBSession()
+    try:
+        prom = [p.to_dict() for p in db.query(_Promemoria).filter(_Promemoria.data >= dal, _Promemoria.data <= al).all()]
+    finally:
+        db.close()
+    prom = [p for p in prom if promemoria_visibile(p, me, ruolo)]
+    for p in prom:
+        p["per"] = [(utenti.get(a.lstrip("@")) or {}).get("full_name") or a.lstrip("@") for a in p["assegnati"]]
+        p["mio"] = p["autore"] == me
+    return jsonify({"ok": True, "incassi": incassi_programmati(dal, al),
+                    "promemoria": sorted(prom, key=lambda p: (p["data"], p["ora"] or "99"))})
+
+
+@app.route("/api/promemoria", methods=["POST"])
+@login_required
+def api_promemoria_crea():
+    d = request.get_json(silent=True) or {}
+    assegnati = [f"@{u}" for u in _assegnati_validi(d.get("assegnati"))]
+    pid, err = crea_promemoria(session["user_id"], session.get("user_name") or session["user_id"], d.get("testo"),
+                               (d.get("data") or "").strip(), (d.get("ora") or "").strip(), assegnati,
+                               str(d.get("cliente_id") or "")[:50], str(d.get("preventivo") or "")[:50])
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    return jsonify({"ok": True, "id": pid})
+
+
+@app.route("/api/promemoria/<pid>", methods=["POST", "DELETE"])
+@login_required
+def api_promemoria_modifica(pid):
+    """POST {fatto: true/false}: lo segna fatto (autore o destinatari). DELETE: lo toglie (autore o amministratore)."""
+    me, ruolo = session["user_id"], session.get("user_role")
+    db = _DBSession()
+    try:
+        p = db.query(_Promemoria).filter_by(id=pid).first()
+        if not p or not promemoria_visibile(p.to_dict(), me, ruolo):
+            return jsonify({"ok": False, "error": "Promemoria non trovato."}), 404
+        if request.method == "DELETE":
+            if p.autore != me and ruolo != "amministratore":
+                return jsonify({"ok": False, "error": "Puo' eliminarlo solo chi l'ha scritto."}), 403
+            db.delete(p)
+        else:
+            if me not in destinatari_task(_promemoria_come_task(p.to_dict()), load_users()) and ruolo != "amministratore":
+                return jsonify({"ok": False, "error": "Non e' un tuo promemoria."}), 403
+            p.fatto = bool((request.get_json(silent=True) or {}).get("fatto"))
+        db.commit()
+        return jsonify({"ok": True})
+    finally:
+        db.close()
 
 
 def _assegnati_validi(valore):
@@ -9728,6 +9919,7 @@ def tipo_notifica(n):
 @login_required
 def get_notifications():
     controlla_task_scadute()
+    controlla_promemoria()
     me = session["user_id"]
     my_n = [n for n in load_notifications() if (n.get("target_user") or n.get("user_id")) == me]
     unread = sum(1 for n in my_n if not n["read"])

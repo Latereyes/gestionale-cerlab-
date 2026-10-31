@@ -363,6 +363,35 @@ class Report(Base):
         }
 
 
+class Promemoria(Base):
+    """Promemoria a una data (e ora): nascono da una voce di report o dal calendario e compaiono nel calendario.
+    Senza assegnati e' personale (lo vede solo l'autore); con @colleghi o @gruppi lo vedono anche loro."""
+    __tablename__ = "promemoria"
+
+    id = Column(String, primary_key=True)
+    testo = Column(Text)
+    data = Column(String, index=True)          # "YYYY-MM-DD"
+    ora = Column(String, default="")           # "HH:MM", vuoto = in giornata
+    autore = Column(String, index=True)        # username
+    autore_nome = Column(String, default="")
+    assegnati = Column(JSON, default=list)     # ["@utente", "@gruppo"], come le task
+    cliente_id = Column(String, default="")
+    preventivo = Column(String, default="")
+    report_id = Column(String, default="")
+    creato_il = Column(String, default="")
+    fatto = Column(Boolean, default=False)
+    avvisato = Column(String, default="")      # data+ora per cui e' gia' partito l'avviso
+
+    def to_dict(self):
+        return {
+            "id": self.id, "testo": self.testo or "", "data": self.data or "", "ora": self.ora or "",
+            "autore": self.autore or "", "autore_nome": self.autore_nome or "",
+            "assegnati": self.assegnati or [], "cliente_id": self.cliente_id or "",
+            "preventivo": self.preventivo or "", "report_id": self.report_id or "",
+            "creato_il": self.creato_il or "", "fatto": bool(self.fatto),
+        }
+
+
 class AdminTask(Base):
     """Sostituisce data/admin_tasks.json"""
     __tablename__ = "admin_tasks"

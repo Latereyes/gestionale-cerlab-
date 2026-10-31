@@ -10,15 +10,12 @@
 <div class="cal-wrap">
 
     {% if not collegato %}
-    <div class="card">
-        <div class="empty-state">
-            <i class="fas fa-calendar-times"></i>
-            <h4>Google Calendar non ancora collegato</h4>
-            <p>Un amministratore deve collegare il calendario condiviso del negozio da
-                {% if session.user_role == 'amministratore' %}<a href="{{ url_for('impostazioni_google') }}">Email e Google Calendar</a>{% else %}Email e Google Calendar{% endif %}.</p>
-        </div>
+    <div class="avviso-google">
+        <i class="fas fa-calendar-times"></i>
+        <span>Google Calendar non è ancora collegato: qui vedi solo incassi e promemoria. Gli appuntamenti arrivano quando un amministratore lo collega da
+            {% if session.user_role == 'amministratore' %}<a href="{{ url_for('impostazioni_google') }}">Email e Google Calendar</a>{% else %}Email e Google Calendar{% endif %}.</span>
     </div>
-    {% else %}
+    {% endif %}
 
     <div class="card cal-card">
         <div class="cal-barra">
@@ -30,19 +27,25 @@
             </div>
             <div class="cal-azioni">
                 <label class="filtro-miei"><input type="checkbox" id="solo-miei"> Solo i miei</label>
-                <button class="btn primary" id="btn-nuovo"><i class="fas fa-plus"></i> Nuovo appuntamento</button>
+                <label class="filtro-miei"><input type="checkbox" id="mostra-incassi" checked> Incassi</label>
+                <button class="btn" id="btn-promemoria"><i class="fas fa-bell"></i> Promemoria</button>
+                <button class="btn primary" id="btn-nuovo"><i class="fas fa-plus"></i> {{ 'Nuovo appuntamento' if collegato else 'Nuovo' }}</button>
             </div>
         </div>
         <div class="cal-griglia" id="griglia">
             {% for g in ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'] %}<div class="cal-intestazione">{{ g }}</div>{% endfor %}
         </div>
         <p class="cal-stato muted" id="stato"></p>
+        <div class="cal-legenda">
+            <span><i class="leg app"></i> Appuntamento</span><span><i class="leg mio"></i> Assegnato a te</span>
+            <span><i class="leg inc"></i> Incasso programmato</span><span><i class="leg prom"></i> Promemoria</span>
+        </div>
     </div>
 
     <div class="card">
         <div class="giorno-testa">
             <h3 id="giorno-titolo"></h3>
-            <button class="btn btn-small" id="btn-nuovo-giorno"><i class="fas fa-plus"></i> Appuntamento in questo giorno</button>
+            <button class="btn btn-small" id="btn-nuovo-giorno"><i class="fas fa-plus"></i> Aggiungi in questo giorno</button>
         </div>
         <div id="giorno-eventi"></div>
     </div>
@@ -51,12 +54,16 @@
     <div class="cal-modale" id="modale" hidden>
         <div class="cal-modale-box" role="dialog" aria-modal="true" aria-labelledby="modale-titolo">
             <div class="cal-modale-testa">
-                <h3 id="modale-titolo"><i class="fas fa-calendar-plus"></i> Nuovo appuntamento</h3>
+                <h3 id="modale-titolo">Nuovo</h3>
                 <button type="button" class="btn icon-btn" data-chiudi title="Chiudi"><i class="fas fa-times"></i></button>
             </div>
             <form id="form-appuntamento" class="griglia-form" autocomplete="off">
+                <div class="tipo-scelta largo" role="radiogroup">
+                    <label><input type="radio" name="tipo" value="appuntamento" {{ 'disabled' if not collegato }}> <i class="fas fa-calendar-check"></i> Appuntamento</label>
+                    <label><input type="radio" name="tipo" value="promemoria"> <i class="fas fa-bell"></i> Promemoria</label>
+                </div>
                 <div class="form-group largo">
-                    <label>Titolo*</label>
+                    <label id="etichetta-titolo">Titolo*</label>
                     <input name="titolo" required maxlength="200" placeholder="Sopralluogo, consegna, incontro in negozio...">
                 </div>
                 <div class="form-group">
@@ -67,7 +74,7 @@
                     <label>Ora <small class="muted">(vuoto = tutto il giorno)</small></label>
                     <input type="time" name="ora">
                 </div>
-                <div class="form-group">
+                <div class="form-group solo-app">
                     <label>Durata</label>
                     <select name="durata">
                         <option value="30">30 minuti</option>
@@ -96,32 +103,33 @@
                         {% for u in utenti %}<label class="chip-utente"><input type="checkbox" name="assegnati" value="{{ u.username }}"> {{ u.nome }}</label>{% endfor %}
                     </div>
                 </div>
-                <div class="form-group largo">
+                <div class="form-group largo solo-app">
                     <label>Luogo</label>
                     <input name="luogo" maxlength="300" placeholder="Indirizzo o 'in negozio'">
                 </div>
-                <div class="form-group largo">
+                <div class="form-group largo solo-app">
                     <label>Note</label>
                     <textarea name="descrizione" rows="2" maxlength="4000"></textarea>
                 </div>
                 <input type="hidden" name="task">
                 <div class="toolbar largo modale-azioni">
                     <button type="button" class="btn" data-chiudi>Annulla</button>
-                    <button type="submit" class="btn primary" id="btn-crea"><i class="fas fa-calendar-plus"></i> Crea appuntamento</button>
+                    <button type="submit" class="btn primary" id="btn-crea">Crea</button>
                 </div>
             </form>
         </div>
     </div>
-    {% endif %}
 </div>
 
-{% if collegato %}
 <script>
 (function () {
     const IO = {{ io|tojson }};
     const UTENTI = {{ utenti|tojson }};
     const PREVENTIVI = {{ preventivi|tojson }};
     const PRECOMPILA = {{ precompila|tojson }};
+    const COLLEGATO = {{ collegato|tojson }};
+    const mostraIncassi = document.getElementById('mostra-incassi');
+    const euro = n => n.toLocaleString('it-IT', {style: 'currency', currency: 'EUR'});
     const griglia = document.getElementById('griglia');
     const form = document.getElementById('form-appuntamento');
     const modale = document.getElementById('modale');
@@ -133,7 +141,12 @@
     const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
     let mese = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
     let selezionato = new Date(oggi);
-    let eventi = [], conCeerlo = false, caricamento = 0;
+    const giornoUrl = new URLSearchParams(location.search).get('giorno');
+    if (giornoUrl && /^\d{4}-\d{2}-\d{2}$/.test(giornoUrl)) {
+        selezionato = new Date(giornoUrl + 'T00:00:00');
+        mese = new Date(selezionato.getFullYear(), selezionato.getMonth(), 1);
+    }
+    let eventi = [], incassi = [], promemoria = [], conCeerlo = false, caricamento = 0;
 
     const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const piu = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -142,6 +155,13 @@
     const mio = ev => (ev.assegnati || []).includes(IO);
     const visibili = () => soloMiei.checked ? eventi.filter(mio) : eventi;
     const delGiorno = (lista, g) => lista.filter(ev => ev.inizio.slice(0, 10) === g);
+    const promVisibili = () => soloMiei.checked ? promemoria.filter(p => p.mio || (p.assegnati || []).includes('@' + IO)) : promemoria;
+    const incVisibili = () => mostraIncassi.checked && !soloMiei.checked ? incassi : [];
+    try { mostraIncassi.checked = localStorage.getItem('calendario_incassi') !== '0'; } catch (e) {}
+    mostraIncassi.addEventListener('change', () => {
+        try { localStorage.setItem('calendario_incassi', mostraIncassi.checked ? '1' : '0'); } catch (e) {}
+        disegna();
+    });
 
     try { soloMiei.checked = localStorage.getItem('calendario_solo_miei') === '1'; } catch (e) {}
     soloMiei.addEventListener('change', () => {
@@ -159,18 +179,16 @@
         document.getElementById('mese').textContent = mese.toLocaleDateString('it-IT', {month: 'long', year: 'numeric'});
         document.getElementById('stato').textContent = 'Caricamento...';
         disegna();
-        try {
-            const r = await fetch(`/api/calendario/eventi?dal=${iso(inizio)}&al=${iso(fine)}`);
-            const dati = await r.json();
-            if (!dati.ok) throw new Error(dati.error || 'Errore');
-            if (giro !== caricamento) return;
-            eventi = dati.eventi; conCeerlo = !!dati.ceerlo;
-            document.getElementById('stato').textContent = '';
-        } catch (e) {
-            if (giro !== caricamento) return;
-            eventi = [];
-            document.getElementById('stato').innerHTML = `<span class="errore"><i class="fas fa-exclamation-triangle"></i> ${esc(e.message)}</span>`;
-        }
+        const periodo = `dal=${iso(inizio)}&al=${iso(fine)}`;
+        const leggi = async url => { const d = await (await fetch(url)).json(); if (!d.ok) throw new Error(d.error || 'Errore'); return d; };
+        const [g, v] = await Promise.allSettled([
+            COLLEGATO ? leggi(`/api/calendario/eventi?${periodo}`) : Promise.resolve({eventi: [], ceerlo: false}),
+            leggi(`/api/calendario/voci?${periodo}`)]);
+        if (giro !== caricamento) return;
+        const errori = [];
+        if (g.status === 'fulfilled') { eventi = g.value.eventi; conCeerlo = !!g.value.ceerlo; } else { eventi = []; errori.push('Google Calendar: ' + g.reason.message); }
+        if (v.status === 'fulfilled') { incassi = v.value.incassi; promemoria = v.value.promemoria; } else { incassi = []; promemoria = []; errori.push(v.reason.message); }
+        document.getElementById('stato').innerHTML = errori.map(e => `<span class="errore"><i class="fas fa-exclamation-triangle"></i> ${esc(e)}</span>`).join('<br>');
         disegna();
     }
 
@@ -179,6 +197,12 @@
         const inizio = inizioGriglia(), lista = visibili(), sel = iso(selezionato);
         for (let i = 0; i < 42; i++) {
             const d = piu(inizio, i), g = iso(d), suoi = delGiorno(lista, g);
+            const prom = promVisibili().filter(p => p.data === g), inc = incVisibili().filter(x => x.data === g);
+            const chips = [
+                ...suoi.map(ev => `<div class="cal-chip${mio(ev) ? ' mio' : ''}${ev.tutto_il_giorno ? ' intero' : ''}" data-evento="${esc(ev.id)}" title="${esc(ev.titolo)}">${ev.tutto_il_giorno ? '' : `<b>${esc(ora(ev.inizio))}</b> `}${esc(ev.titolo)}</div>`),
+                ...prom.map(p => `<div class="cal-chip prom${p.fatto ? ' fatto' : ''}" data-evento="${esc(p.id)}" title="${esc(p.testo)}"><i class="fas fa-bell"></i> ${p.ora ? `<b>${esc(p.ora)}</b> ` : ''}${esc(p.testo)}</div>`),
+                ...inc.map(x => `<div class="cal-chip inc${x.scaduto ? ' scaduto' : ''}" data-evento="inc-${esc(x.id)}" title="Incasso ${esc(x.cliente)}"><b>${esc(euro(x.importo))}</b> ${esc(x.cliente)}</div>`)];
+            const punti = [...suoi.map(ev => mio(ev) ? 'mio' : ''), ...prom.map(() => 'prom'), ...inc.map(() => 'inc')];
             const cella = document.createElement('div');
             cella.className = 'cal-cella' + (d.getMonth() !== mese.getMonth() ? ' fuori' : '') +
                 (g === iso(oggi) ? ' oggi' : '') + (g === sel ? ' scelto' : '') + (i % 7 > 4 ? ' festivo' : '');
@@ -186,10 +210,10 @@
             cella.innerHTML = `
                 <div class="cal-num"><span>${d.getDate()}</span><button type="button" class="cal-piu" data-nuovo="${g}" title="Nuovo appuntamento"><i class="fas fa-plus"></i></button></div>
                 <div class="cal-eventi">
-                    ${suoi.slice(0, 3).map(ev => `<div class="cal-chip${mio(ev) ? ' mio' : ''}${ev.tutto_il_giorno ? ' intero' : ''}" data-evento="${esc(ev.id)}" title="${esc(ev.titolo)}">${ev.tutto_il_giorno ? '' : `<b>${esc(ora(ev.inizio))}</b> `}${esc(ev.titolo)}</div>`).join('')}
-                    ${suoi.length > 3 ? `<div class="cal-altri">+${suoi.length - 3} altri</div>` : ''}
+                    ${chips.slice(0, 3).join('')}
+                    ${chips.length > 3 ? `<div class="cal-altri">+${chips.length - 3} altri</div>` : ''}
                 </div>
-                <div class="cal-punti">${suoi.slice(0, 4).map(ev => `<i class="${mio(ev) ? 'mio' : ''}"></i>`).join('')}</div>`;
+                <div class="cal-punti">${punti.slice(0, 5).map(c => `<i class="${c}"></i>`).join('')}</div>`;
             griglia.appendChild(cella);
         }
         disegnaGiorno();
@@ -221,14 +245,39 @@
         `<span class="chip-assegnato${a.username === IO ? ' mio' : ''}">${esc(a.nome)}</span>`).join('');
 
     function disegnaGiorno() {
-        const suoi = delGiorno(visibili(), iso(selezionato));
+        const g = iso(selezionato), suoi = delGiorno(visibili(), g);
+        const prom = promVisibili().filter(p => p.data === g), inc = incVisibili().filter(x => x.data === g);
         document.getElementById('giorno-titolo').textContent = selezionato.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'long'});
         const box = document.getElementById('giorno-eventi');
-        if (!suoi.length) {
-            box.innerHTML = `<p class="muted">${soloMiei.checked ? 'Nessun appuntamento assegnato a te in questo giorno.' : 'Nessun appuntamento in questo giorno.'}</p>`;
+        if (!suoi.length && !prom.length && !inc.length) {
+            box.innerHTML = `<p class="muted">${soloMiei.checked ? 'Niente di tuo in questo giorno.' : 'Niente in questo giorno.'}</p>`;
             return;
         }
-        box.innerHTML = suoi.map(ev => `
+        const htmlProm = prom.map(p => `
+            <div class="evento prom${p.fatto ? ' fatto' : ''}" data-id="${esc(p.id)}">
+                <div class="evento-ora"><i class="fas fa-bell"></i> ${p.ora ? esc(p.ora) : 'In giornata'}</div>
+                <div class="evento-corpo">
+                    <strong class="testo-prom">${window.parseMessage ? window.parseMessage(esc(p.testo)) : esc(p.testo)}</strong>
+                    <div class="muted piccolo">Promemoria di ${esc(p.autore_nome || p.autore)}${p.per.length ? ' per ' + esc(p.per.join(', ')) : ' (personale)'}${p.report_id ? ' · dal report' : ''}</div>
+                    ${p.preventivo ? `<div><i class="fas fa-file-alt"></i> <a href="/ceerlo/vai/${encodeURIComponent(p.preventivo)}">Preventivo ${esc(p.preventivo)}</a></div>` : ''}
+                    ${p.cliente_id ? `<div><i class="fas fa-user"></i> <a href="/cliente/dettaglio/${encodeURIComponent(p.cliente_id)}">${esc(nomiClienti[p.cliente_id] || p.cliente_id)}</a></div>` : ''}
+                    <div class="azioni-evento">
+                        <label class="filtro-miei"><input type="checkbox" data-fatto="${esc(p.id)}" ${p.fatto ? 'checked' : ''}> Fatto</label>
+                        ${p.mio ? `<button type="button" class="btn btn-small" data-elimina-prom="${esc(p.id)}"><i class="fas fa-trash-alt"></i> Elimina</button>` : ''}
+                    </div>
+                </div>
+            </div>`).join('');
+        const htmlInc = inc.map(x => `
+            <div class="evento inc" data-id="inc-${esc(x.id)}">
+                <div class="evento-ora"><i class="fas fa-euro-sign"></i> Incasso</div>
+                <div class="evento-corpo">
+                    <strong>${esc(euro(x.importo))}</strong> ${x.scaduto ? '<span class="etichetta-scaduto">data passata, da verificare</span>' : ''}
+                    <div><i class="fas fa-user"></i> ${x.cliente_id ? `<a href="/cliente/dettaglio/${encodeURIComponent(x.cliente_id)}">${esc(x.cliente)}</a>` : esc(x.cliente)}</div>
+                    <div><i class="fas fa-file-invoice-dollar"></i> <a href="/pagamenti/${encodeURIComponent(x.preventivo)}">Pagamenti del preventivo ${esc(x.preventivo)}</a></div>
+                    ${x.note ? `<div class="muted piccolo">${esc(x.note)}</div>` : ''}
+                </div>
+            </div>`).join('');
+        box.innerHTML = htmlInc + htmlProm + suoi.map(ev => `
             <div class="evento${mio(ev) ? ' mio' : ''}" data-id="${esc(ev.id)}">
                 <div class="evento-ora">${ev.tutto_il_giorno ? 'Tutto il giorno' : esc(ora(ev.inizio) + ' - ' + ora(ev.fine))}</div>
                 <div class="evento-corpo">
@@ -252,7 +301,29 @@
     }
 
     const boxGiorno = document.getElementById('giorno-eventi');
+    boxGiorno.addEventListener('change', async e => {
+        const c = e.target.closest('[data-fatto]');
+        if (!c) return;
+        try {
+            const d = await (await fetch(`/api/promemoria/${encodeURIComponent(c.dataset.fatto)}`, {method: 'POST',
+                headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fatto: c.checked})})).json();
+            if (!d.ok) throw new Error(d.error);
+            const p = promemoria.find(x => x.id === c.dataset.fatto);
+            if (p) p.fatto = c.checked;
+            disegna();
+        } catch (err) { alert('Non salvato: ' + err.message); c.checked = !c.checked; }
+    });
+
     boxGiorno.addEventListener('click', async e => {
+        const elimina = e.target.closest('[data-elimina-prom]');
+        if (elimina) {
+            if (!confirm('Eliminare questo promemoria?')) return;
+            const d = await (await fetch(`/api/promemoria/${encodeURIComponent(elimina.dataset.eliminaProm)}`, {method: 'DELETE'})).json();
+            if (!d.ok) { alert(d.error); return; }
+            promemoria = promemoria.filter(x => x.id !== elimina.dataset.eliminaProm);
+            disegna();
+            return;
+        }
         const apri = e.target.closest('[data-assegna]');
         if (apri) {
             const p = boxGiorno.querySelector(`[data-pannello="${CSS.escape(apri.dataset.assegna)}"]`);
@@ -329,6 +400,18 @@
 
     // --- Modale ---
     let ultimoFocus = null;
+    function impostaTipo(tipo) {
+        if (!COLLEGATO) tipo = 'promemoria';
+        form.querySelector(`[name=tipo][value=${tipo}]`).checked = true;
+        const prom = tipo === 'promemoria';
+        form.querySelectorAll('.solo-app').forEach(el => { el.hidden = prom; });
+        document.getElementById('modale-titolo').innerHTML = prom ? '<i class="fas fa-bell"></i> Nuovo promemoria' : '<i class="fas fa-calendar-plus"></i> Nuovo appuntamento';
+        document.getElementById('etichetta-titolo').textContent = prom ? 'Cosa ricordare*' : 'Titolo*';
+        form.titolo.placeholder = prom ? 'Richiamare il cliente, controllare la consegna...' : 'Sopralluogo, consegna, incontro in negozio...';
+        form.titolo.maxLength = prom ? 2000 : 200;
+        document.getElementById('btn-crea').innerHTML = prom ? '<i class="fas fa-bell"></i> Crea promemoria' : '<i class="fas fa-calendar-plus"></i> Crea appuntamento';
+    }
+    form.querySelectorAll('[name=tipo]').forEach(r => r.addEventListener('change', () => impostaTipo(r.value)));
     function apriModale(valori) {
         form.reset();
         form.cliente_id.value = ''; form.task.value = '';
@@ -337,6 +420,7 @@
         if (v.cliente && !v.cliente_id && clienti[v.cliente]) form.cliente_id.value = clienti[v.cliente];
         riempiPreventivi(v.preventivo || '');
         if (v.preventivo) sceltaPrev.dispatchEvent(new Event('change'));
+        impostaTipo(v.tipo || 'appuntamento');
         ultimoFocus = document.activeElement;
         modale.hidden = false;
         document.body.classList.add('modale-aperta');
@@ -350,6 +434,7 @@
     modale.addEventListener('click', e => { if (e.target === modale || e.target.closest('[data-chiudi]')) chiudiModale(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modale.hidden) chiudiModale(); });
     document.getElementById('btn-nuovo').onclick = () => apriModale();
+    document.getElementById('btn-promemoria').onclick = () => apriModale({tipo: 'promemoria'});
     document.getElementById('btn-nuovo-giorno').onclick = () => apriModale({giorno: iso(selezionato)});
 
     form.addEventListener('submit', async e => {
@@ -359,17 +444,22 @@
         const fd = new FormData(form);
         const dati = Object.fromEntries(fd.entries());
         dati.assegnati = fd.getAll('assegnati');
+        const prom = dati.tipo === 'promemoria';
         try {
-            const r = await fetch('/api/calendario/eventi', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dati)});
+            const r = prom
+                ? await fetch('/api/promemoria', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({testo: dati.titolo, data: dati.giorno, ora: dati.ora, assegnati: dati.assegnati,
+                                          cliente_id: dati.cliente_id, preventivo: dati.preventivo})})
+                : await fetch('/api/calendario/eventi', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dati)});
             const esito = await r.json();
             if (!esito.ok) throw new Error(esito.error || 'Errore');
-            if (window.showNotification) window.showNotification('Appuntamento creato', esito.evento.titolo);
+            if (window.showNotification) window.showNotification(prom ? 'Promemoria creato' : 'Appuntamento creato', dati.titolo);
             chiudiModale();
             selezionato = new Date(dati.giorno + 'T00:00:00');
             mese = new Date(selezionato.getFullYear(), selezionato.getMonth(), 1);
             carica();
         } catch (err) {
-            alert('Appuntamento non creato: ' + err.message);
+            alert((prom ? 'Promemoria' : 'Appuntamento') + ' non creato: ' + err.message);
         } finally {
             btn.disabled = false;
         }
@@ -384,7 +474,6 @@
     if (PRECOMPILA.cliente || PRECOMPILA.cliente_id || PRECOMPILA.preventivo || PRECOMPILA.task) apriModale(PRECOMPILA);
 })();
 </script>
-{% endif %}
 
 <style>
 .cal-wrap { max-width: 1180px; margin: 24px auto; padding: 0 16px; }
@@ -418,6 +507,29 @@
 .cal-chip.mio { background: var(--accent-light); border-left-color: var(--accent); color: #1f2a8a; }
 .cal-chip.intero { background: #fff4dc; border-left-color: #e0a100; }
 .cal-chip b { font-weight: 600; }
+.cal-chip.prom { background: #fff6d6; border-left-color: #e0a100; color: #6b4a00; }
+.cal-chip.prom.fatto { opacity: .5; text-decoration: line-through; }
+.cal-chip.inc { background: #e3f6ea; border-left-color: #1f9d55; color: #145c34; }
+.cal-chip.inc.scaduto { background: #fde8e6; border-left-color: #c0392b; color: #8a2318; }
+.cal-chip i { font-size: 10px; }
+.cal-legenda { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+.cal-legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.leg { width: 10px; height: 10px; border-radius: 3px; display: inline-block; background: #9aa3b2; }
+.leg.mio { background: var(--accent); } .leg.inc { background: #1f9d55; } .leg.prom { background: #e0a100; }
+.avviso-google { display: flex; gap: 10px; align-items: flex-start; background: #fff8e6; border: 1px solid #f1d38a; color: #6b4a00;
+                 border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; }
+.evento.prom { background: #fffbea; }
+.evento.prom.fatto .testo-prom { text-decoration: line-through; opacity: .6; }
+.evento.inc { background: #f2fbf5; }
+.etichetta-scaduto { font-size: 11px; background: #fde8e6; color: #8a2318; border-radius: 8px; padding: 1px 8px; margin-left: 6px; }
+.piccolo { font-size: 12.5px; }
+.tipo-scelta { display: flex; gap: 8px; margin-bottom: 14px; }
+.tipo-scelta label { flex: 1; display: flex !important; align-items: center; justify-content: center; gap: 8px; margin: 0 !important; cursor: pointer;
+                     border: 1px solid var(--border); border-radius: 10px; padding: 9px; font-weight: 600; font-size: 14px; }
+.tipo-scelta label:has(input:checked) { border-color: var(--accent); background: var(--accent-light); color: var(--accent); }
+.tipo-scelta label:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+.tipo-scelta input { position: absolute; opacity: 0; width: 1px !important; height: 1px !important; }
+.form-group[hidden] { display: none; }
 .cal-altri { font-size: 11px; color: var(--text-muted); padding-left: 4px; }
 .cal-punti { display: none; }
 .cal-stato { margin: 8px 0 0; font-size: 13px; min-height: 1em; }
@@ -474,6 +586,8 @@ body.modale-aperta { overflow: hidden; }
     .cal-punti { display: flex; justify-content: center; gap: 3px; margin-top: 3px; }
     .cal-punti i { width: 6px; height: 6px; border-radius: 50%; background: #9aa3b2; }
     .cal-punti i.mio { background: var(--accent); }
+    .cal-punti i.inc { background: #1f9d55; }
+    .cal-punti i.prom { background: #e0a100; }
     .griglia-form { grid-template-columns: 1fr; }
     .griglia-form .col-prev { grid-column: 1 / -1; }
     .cal-modale { padding: 0; }
