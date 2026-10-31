@@ -7,7 +7,7 @@
 {% block body %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 
-<div class="editor-container">
+<div class="cal-wrap">
 
     {% if not collegato %}
     <div class="card">
@@ -20,11 +20,40 @@
     </div>
     {% else %}
 
-    <div class="card">
-        <div class="card-header">
-            <h3><i class="fas fa-plus"></i> Nuovo appuntamento</h3>
+    <div class="card cal-card">
+        <div class="cal-barra">
+            <div class="cal-nav">
+                <button class="btn icon-btn" id="prec" title="Mese precedente"><i class="fas fa-chevron-left"></i></button>
+                <button class="btn" id="oggi">Oggi</button>
+                <button class="btn icon-btn" id="succ" title="Mese successivo"><i class="fas fa-chevron-right"></i></button>
+                <h3 id="mese"></h3>
+            </div>
+            <div class="cal-azioni">
+                <label class="filtro-miei"><input type="checkbox" id="solo-miei"> Solo i miei</label>
+                <button class="btn primary" id="btn-nuovo"><i class="fas fa-plus"></i> Nuovo appuntamento</button>
+            </div>
         </div>
-        <div class="card-body">
+        <div class="cal-griglia" id="griglia">
+            {% for g in ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'] %}<div class="cal-intestazione">{{ g }}</div>{% endfor %}
+        </div>
+        <p class="cal-stato muted" id="stato"></p>
+    </div>
+
+    <div class="card">
+        <div class="giorno-testa">
+            <h3 id="giorno-titolo"></h3>
+            <button class="btn btn-small" id="btn-nuovo-giorno"><i class="fas fa-plus"></i> Appuntamento in questo giorno</button>
+        </div>
+        <div id="giorno-eventi"></div>
+    </div>
+
+    <!-- Modale nuovo appuntamento -->
+    <div class="cal-modale" id="modale" hidden>
+        <div class="cal-modale-box" role="dialog" aria-modal="true" aria-labelledby="modale-titolo">
+            <div class="cal-modale-testa">
+                <h3 id="modale-titolo"><i class="fas fa-calendar-plus"></i> Nuovo appuntamento</h3>
+                <button type="button" class="btn icon-btn" data-chiudi title="Chiudi"><i class="fas fa-times"></i></button>
+            </div>
             <form id="form-appuntamento" class="griglia-form" autocomplete="off">
                 <div class="form-group largo">
                     <label>Titolo*</label>
@@ -49,21 +78,21 @@
                         <option value="240">4 ore</option>
                     </select>
                 </div>
-                <div class="form-group">
+                <div class="form-group col-cliente">
                     <label>Cliente</label>
-                    <input name="cliente" list="lista-clienti" value="{{ precompila.cliente }}" placeholder="Cerca cliente">
-                    <input type="hidden" name="cliente_id" value="{{ precompila.cliente_id }}">
+                    <input name="cliente" list="lista-clienti" placeholder="Cerca cliente">
+                    <input type="hidden" name="cliente_id">
                     <datalist id="lista-clienti">
                         {% for c in clienti %}<option value="{{ c.nome }}" data-id="{{ c.id }}"></option>{% endfor %}
                     </datalist>
                 </div>
-                <div class="form-group">
+                <div class="form-group col-prev">
                     <label>Preventivo</label>
-                    <input name="preventivo" value="{{ precompila.preventivo }}" placeholder="Numero, se c'e'">
+                    <select name="preventivo" id="scelta-preventivo"></select>
                 </div>
                 <div class="form-group largo">
                     <label>Assegnato a</label>
-                    <div class="scelta-utenti" id="scelta-nuovo">
+                    <div class="scelta-utenti">
                         {% for u in utenti %}<label class="chip-utente"><input type="checkbox" name="assegnati" value="{{ u.username }}"> {{ u.nome }}</label>{% endfor %}
                     </div>
                 </div>
@@ -75,22 +104,13 @@
                     <label>Note</label>
                     <textarea name="descrizione" rows="2" maxlength="4000"></textarea>
                 </div>
-                <input type="hidden" name="task" value="{{ precompila.task }}">
-                <div class="toolbar largo" style="justify-content: flex-end;">
+                <input type="hidden" name="task">
+                <div class="toolbar largo modale-azioni">
+                    <button type="button" class="btn" data-chiudi>Annulla</button>
                     <button type="submit" class="btn primary" id="btn-crea"><i class="fas fa-calendar-plus"></i> Crea appuntamento</button>
                 </div>
             </form>
         </div>
-    </div>
-
-    <div class="card">
-        <div class="card-header">
-            <button class="btn icon-btn" id="prec" title="Settimane precedenti"><i class="fas fa-chevron-left"></i></button>
-            <h3 id="periodo">Prossimi appuntamenti</h3>
-            <button class="btn icon-btn" id="succ" title="Settimane successive"><i class="fas fa-chevron-right"></i></button>
-        </div>
-        <div class="filtro-miei"><label><input type="checkbox" id="solo-miei"> Solo i miei appuntamenti</label></div>
-        <div class="card-body" id="elenco-eventi"><p class="muted">Caricamento...</p></div>
     </div>
     {% endif %}
 </div>
@@ -98,141 +118,167 @@
 {% if collegato %}
 <script>
 (function () {
-    const GIORNI = 14;
-    const elenco = document.getElementById('elenco-eventi');
-    const form = document.getElementById('form-appuntamento');
-    const clienti = {};
-    document.querySelectorAll('#lista-clienti option').forEach(o => { clienti[o.value] = o.dataset.id; });
-    let inizio = new Date(); inizio.setHours(0, 0, 0, 0);
-    let conCeerlo = false;
-    let ultimi = [];
     const IO = {{ io|tojson }};
     const UTENTI = {{ utenti|tojson }};
+    const PREVENTIVI = {{ preventivi|tojson }};
+    const PRECOMPILA = {{ precompila|tojson }};
+    const griglia = document.getElementById('griglia');
+    const form = document.getElementById('form-appuntamento');
+    const modale = document.getElementById('modale');
     const soloMiei = document.getElementById('solo-miei');
-    try { soloMiei.checked = localStorage.getItem('calendario_solo_miei') === '1'; } catch (e) {}
-    soloMiei.addEventListener('change', () => {
-        try { localStorage.setItem('calendario_solo_miei', soloMiei.checked ? '1' : '0'); } catch (e) {}
-        mostra(ultimi);
-    });
+    const sceltaPrev = document.getElementById('scelta-preventivo');
+    const clienti = {}, nomiClienti = {};
+    document.querySelectorAll('#lista-clienti option').forEach(o => { clienti[o.value] = o.dataset.id; nomiClienti[o.dataset.id] = o.value; });
+
+    const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
+    let mese = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
+    let selezionato = new Date(oggi);
+    let eventi = [], conCeerlo = false, caricamento = 0;
 
     const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const piu = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
     const esc = t => String(t || '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
-    const giornoLungo = d => d.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'long'});
     const ora = s => s.length > 10 ? new Date(s).toLocaleTimeString('it-IT', {hour: '2-digit', minute: '2-digit'}) : '';
+    const mio = ev => (ev.assegnati || []).includes(IO);
+    const visibili = () => soloMiei.checked ? eventi.filter(mio) : eventi;
+    const delGiorno = (lista, g) => lista.filter(ev => ev.inizio.slice(0, 10) === g);
 
-    form.giorno.value = iso(new Date());
-    form.cliente.addEventListener('change', () => { form.cliente_id.value = clienti[form.cliente.value] || ''; });
+    try { soloMiei.checked = localStorage.getItem('calendario_solo_miei') === '1'; } catch (e) {}
+    soloMiei.addEventListener('change', () => {
+        try { localStorage.setItem('calendario_solo_miei', soloMiei.checked ? '1' : '0'); } catch (e) {}
+        disegna();
+    });
+
+    // --- Griglia del mese: 6 settimane a partire dal lunedi' ---
+    function inizioGriglia() {
+        return piu(mese, -((mese.getDay() + 6) % 7));
+    }
 
     async function carica() {
-        const fine = piu(inizio, GIORNI - 1);
-        document.getElementById('periodo').textContent =
-            `${inizio.toLocaleDateString('it-IT', {day: 'numeric', month: 'short'})} - ${fine.toLocaleDateString('it-IT', {day: 'numeric', month: 'short', year: 'numeric'})}`;
-        elenco.innerHTML = '<p class="muted">Caricamento...</p>';
+        const inizio = inizioGriglia(), fine = piu(inizio, 41), giro = ++caricamento;
+        document.getElementById('mese').textContent = mese.toLocaleDateString('it-IT', {month: 'long', year: 'numeric'});
+        document.getElementById('stato').textContent = 'Caricamento...';
+        disegna();
         try {
             const r = await fetch(`/api/calendario/eventi?dal=${iso(inizio)}&al=${iso(fine)}`);
             const dati = await r.json();
             if (!dati.ok) throw new Error(dati.error || 'Errore');
-            conCeerlo = !!dati.ceerlo;
-            ultimi = dati.eventi;
-            mostra(ultimi);
+            if (giro !== caricamento) return;
+            eventi = dati.eventi; conCeerlo = !!dati.ceerlo;
+            document.getElementById('stato').textContent = '';
         } catch (e) {
-            elenco.innerHTML = `<p class="errore"><i class="fas fa-exclamation-triangle"></i> ${esc(e.message)}</p>`;
+            if (giro !== caricamento) return;
+            eventi = [];
+            document.getElementById('stato').innerHTML = `<span class="errore"><i class="fas fa-exclamation-triangle"></i> ${esc(e.message)}</span>`;
         }
+        disegna();
     }
 
-    const chipAssegnati = ev => (ev.assegnati_info || []).map(a =>
-        `<span class="chip-assegnato${a.username === IO ? ' mio' : ''}" title="${esc(a.nome)}">${esc(a.nome)}</span>`).join('');
-
-    function mostra(eventi) {
-        if (soloMiei.checked) eventi = eventi.filter(ev => (ev.assegnati || []).includes(IO));
-        if (!eventi.length) {
-            elenco.innerHTML = `<p class="muted">${soloMiei.checked ? 'Nessun appuntamento assegnato a te in questo periodo.' : 'Nessun appuntamento in questo periodo.'}</p>`;
-            return;
+    function disegna() {
+        griglia.querySelectorAll('.cal-cella').forEach(c => c.remove());
+        const inizio = inizioGriglia(), lista = visibili(), sel = iso(selezionato);
+        for (let i = 0; i < 42; i++) {
+            const d = piu(inizio, i), g = iso(d), suoi = delGiorno(lista, g);
+            const cella = document.createElement('div');
+            cella.className = 'cal-cella' + (d.getMonth() !== mese.getMonth() ? ' fuori' : '') +
+                (g === iso(oggi) ? ' oggi' : '') + (g === sel ? ' scelto' : '') + (i % 7 > 4 ? ' festivo' : '');
+            cella.dataset.giorno = g;
+            cella.innerHTML = `
+                <div class="cal-num"><span>${d.getDate()}</span><button type="button" class="cal-piu" data-nuovo="${g}" title="Nuovo appuntamento"><i class="fas fa-plus"></i></button></div>
+                <div class="cal-eventi">
+                    ${suoi.slice(0, 3).map(ev => `<div class="cal-chip${mio(ev) ? ' mio' : ''}${ev.tutto_il_giorno ? ' intero' : ''}" data-evento="${esc(ev.id)}" title="${esc(ev.titolo)}">${ev.tutto_il_giorno ? '' : `<b>${esc(ora(ev.inizio))}</b> `}${esc(ev.titolo)}</div>`).join('')}
+                    ${suoi.length > 3 ? `<div class="cal-altri">+${suoi.length - 3} altri</div>` : ''}
+                </div>
+                <div class="cal-punti">${suoi.slice(0, 4).map(ev => `<i class="${mio(ev) ? 'mio' : ''}"></i>`).join('')}</div>`;
+            griglia.appendChild(cella);
         }
-        const perGiorno = {};
-        eventi.forEach(ev => { (perGiorno[ev.inizio.slice(0, 10)] = perGiorno[ev.inizio.slice(0, 10)] || []).push(ev); });
-        elenco.innerHTML = Object.keys(perGiorno).sort().map(g => `
-            <div class="giorno">
-                <div class="giorno-titolo">${esc(giornoLungo(new Date(g + 'T00:00:00')))}</div>
-                ${perGiorno[g].map(ev => `
-                    <div class="evento">
-                        <div class="evento-ora">${ev.tutto_il_giorno ? 'Tutto il giorno' : esc(ora(ev.inizio) + ' - ' + ora(ev.fine))}</div>
-                        <div class="evento-corpo">
-                            <strong>${esc(ev.titolo)}</strong>
-                            ${ev.cliente ? `<div><i class="fas fa-user"></i> ${ev.cliente_id ? `<a href="/cliente/dettaglio/${encodeURIComponent(ev.cliente_id)}">${esc(ev.cliente)}</a>` : esc(ev.cliente)}</div>` : ''}
-                            ${ev.preventivo ? `<div><i class="fas fa-file-alt"></i> Preventivo ${esc(ev.preventivo)}</div>` : ''}
-                            ${ev.luogo ? `<div><i class="fas fa-map-marker-alt"></i> ${esc(ev.luogo)}</div>` : ''}
-                            <div class="riga-assegnati"><i class="fas fa-user-check"></i> ${chipAssegnati(ev) || '<span class="muted">Non assegnato</span>'}</div>
-                            <div class="modifica-assegnati" data-pannello="${esc(ev.id)}" hidden>
-                                ${UTENTI.map(u => `<label class="chip-utente"><input type="checkbox" value="${esc(u.username)}" ${(ev.assegnati || []).includes(u.username) ? 'checked' : ''}> ${esc(u.nome)}</label>`).join('')}
-                                <button type="button" class="btn btn-small primary" data-salva-assegnati="${esc(ev.id)}">Salva</button>
-                            </div>
-                            ${ev.riassunto ? `<details class="riassunto"><summary><i class="fas fa-robot"></i> Riassunto di Ceerlo</summary>${esc(ev.riassunto)}</details>` : ''}
-                            <div class="azioni-evento">
-                                <button type="button" class="btn btn-small" data-assegna="${esc(ev.id)}"><i class="fas fa-user-plus"></i> Assegna</button>
-                                ${ev.link ? `<a class="muted" href="${esc(ev.link)}" target="_blank" rel="noopener">Apri in Google Calendar</a>` : ''}
-                                ${conCeerlo ? `<button type="button" class="btn btn-small" data-riassumi="${esc(ev.id)}"><i class="fas fa-robot"></i> ${ev.riassunto ? 'Rifai riassunto' : 'Riassunto'}</button>` : ''}
-                            </div>
-                        </div>
-                    </div>`).join('')}
-            </div>`).join('');
+        disegnaGiorno();
     }
 
-    form.addEventListener('submit', async e => {
-        e.preventDefault();
-        const btn = document.getElementById('btn-crea');
-        btn.disabled = true;
-        const fd = new FormData(form);
-        const dati = Object.fromEntries(fd.entries());
-        dati.assegnati = fd.getAll('assegnati');
-        try {
-            const r = await fetch('/api/calendario/eventi', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dati)});
-            const esito = await r.json();
-            if (!esito.ok) throw new Error(esito.error || 'Errore');
-            window.showNotification ? window.showNotification('Appuntamento creato', esito.evento.titolo) : null;
-            ['titolo', 'ora', 'luogo', 'descrizione'].forEach(k => { form[k].value = ''; });
-            form.querySelectorAll('input[name="assegnati"]').forEach(c => { c.checked = false; });
-            inizio = new Date(dati.giorno + 'T00:00:00') < inizio || new Date(dati.giorno + 'T00:00:00') > piu(inizio, GIORNI - 1)
-                ? new Date(dati.giorno + 'T00:00:00') : inizio;
-            carica();
-        } catch (err) {
-            alert('Appuntamento non creato: ' + err.message);
-        } finally {
-            btn.disabled = false;
+    griglia.addEventListener('click', e => {
+        const nuovo = e.target.closest('[data-nuovo]');
+        if (nuovo) { apriModale({giorno: nuovo.dataset.nuovo}); return; }
+        const cella = e.target.closest('.cal-cella');
+        if (!cella) return;
+        const d = new Date(cella.dataset.giorno + 'T00:00:00');
+        selezionato = d;
+        if (d.getMonth() !== mese.getMonth()) { mese = new Date(d.getFullYear(), d.getMonth(), 1); carica(); } else { disegna(); }
+        const chip = e.target.closest('[data-evento]');
+        if (chip) {
+            const card = document.querySelector(`#giorno-eventi [data-id="${CSS.escape(chip.dataset.evento)}"]`);
+            if (card) {
+                card.scrollIntoView({behavior: 'smooth', block: 'center'});
+                card.classList.add('evidenziato');
+                setTimeout(() => card.classList.remove('evidenziato'), 1500);
+            }
+        } else if (window.innerWidth < 700) {
+            document.getElementById('giorno-titolo').scrollIntoView({behavior: 'smooth'});
         }
     });
 
-    // Riassunto chiesto a Ceerlo: va in coda, la pagina aspetta e poi ricarica l'elenco
-    // Assegnazione di un appuntamento esistente: apre le spunte dei colleghi, Salva le manda al gestionale
-    elenco.addEventListener('click', async e => {
+    // --- Dettaglio del giorno scelto ---
+    const chipAssegnati = ev => (ev.assegnati_info || []).map(a =>
+        `<span class="chip-assegnato${a.username === IO ? ' mio' : ''}">${esc(a.nome)}</span>`).join('');
+
+    function disegnaGiorno() {
+        const suoi = delGiorno(visibili(), iso(selezionato));
+        document.getElementById('giorno-titolo').textContent = selezionato.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'long'});
+        const box = document.getElementById('giorno-eventi');
+        if (!suoi.length) {
+            box.innerHTML = `<p class="muted">${soloMiei.checked ? 'Nessun appuntamento assegnato a te in questo giorno.' : 'Nessun appuntamento in questo giorno.'}</p>`;
+            return;
+        }
+        box.innerHTML = suoi.map(ev => `
+            <div class="evento${mio(ev) ? ' mio' : ''}" data-id="${esc(ev.id)}">
+                <div class="evento-ora">${ev.tutto_il_giorno ? 'Tutto il giorno' : esc(ora(ev.inizio) + ' - ' + ora(ev.fine))}</div>
+                <div class="evento-corpo">
+                    <strong>${esc(ev.titolo)}</strong>
+                    ${ev.cliente ? `<div><i class="fas fa-user"></i> ${ev.cliente_id ? `<a href="/cliente/dettaglio/${encodeURIComponent(ev.cliente_id)}">${esc(ev.cliente)}</a>` : esc(ev.cliente)}</div>` : ''}
+                    ${ev.preventivo ? `<div><i class="fas fa-file-alt"></i> <a href="/ceerlo/vai/${encodeURIComponent(ev.preventivo)}">Preventivo ${esc(ev.preventivo)}</a></div>` : ''}
+                    ${ev.luogo ? `<div><i class="fas fa-map-marker-alt"></i> ${esc(ev.luogo)}</div>` : ''}
+                    <div><i class="fas fa-user-check"></i> ${chipAssegnati(ev) || '<span class="muted">Non assegnato</span>'}</div>
+                    <div class="modifica-assegnati" data-pannello="${esc(ev.id)}" hidden>
+                        ${UTENTI.map(u => `<label class="chip-utente"><input type="checkbox" value="${esc(u.username)}" ${(ev.assegnati || []).includes(u.username) ? 'checked' : ''}> ${esc(u.nome)}</label>`).join('')}
+                        <button type="button" class="btn btn-small primary" data-salva-assegnati="${esc(ev.id)}">Salva</button>
+                    </div>
+                    ${ev.riassunto ? `<details class="riassunto"><summary><i class="fas fa-robot"></i> Riassunto di Ceerlo</summary>${esc(ev.riassunto)}</details>` : ''}
+                    <div class="azioni-evento">
+                        <button type="button" class="btn btn-small" data-assegna="${esc(ev.id)}"><i class="fas fa-user-plus"></i> Assegna</button>
+                        ${conCeerlo ? `<button type="button" class="btn btn-small" data-riassumi="${esc(ev.id)}"><i class="fas fa-robot"></i> ${ev.riassunto ? 'Rifai riassunto' : 'Riassunto'}</button>` : ''}
+                        ${ev.link ? `<a class="muted" href="${esc(ev.link)}" target="_blank" rel="noopener">Apri in Google Calendar</a>` : ''}
+                    </div>
+                </div>
+            </div>`).join('');
+    }
+
+    const boxGiorno = document.getElementById('giorno-eventi');
+    boxGiorno.addEventListener('click', async e => {
         const apri = e.target.closest('[data-assegna]');
         if (apri) {
-            const p = elenco.querySelector(`[data-pannello="${CSS.escape(apri.dataset.assegna)}"]`);
+            const p = boxGiorno.querySelector(`[data-pannello="${CSS.escape(apri.dataset.assegna)}"]`);
             if (p) p.hidden = !p.hidden;
             return;
         }
         const salva = e.target.closest('[data-salva-assegnati]');
-        if (!salva) return;
-        const id = salva.dataset.salvaAssegnati;
-        const scelti = [...elenco.querySelectorAll(`[data-pannello="${CSS.escape(id)}"] input:checked`)].map(c => c.value);
-        salva.disabled = true;
-        try {
-            const r = await fetch(`/api/calendario/eventi/${encodeURIComponent(id)}/assegna`, {
-                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({assegnati: scelti})});
-            const d = await r.json();
-            if (!d.ok) throw new Error(d.error || 'Errore');
-            const i = ultimi.findIndex(x => x.id === id);
-            if (i >= 0) ultimi[i] = {...ultimi[i], assegnati: d.evento.assegnati, assegnati_info: d.evento.assegnati_info,
-                                     descrizione: d.evento.descrizione};
-            mostra(ultimi);
-        } catch (err) {
-            alert('Assegnazione non salvata: ' + err.message);
-            salva.disabled = false;
+        if (salva) {
+            const id = salva.dataset.salvaAssegnati;
+            const scelti = [...boxGiorno.querySelectorAll(`[data-pannello="${CSS.escape(id)}"] input:checked`)].map(c => c.value);
+            salva.disabled = true;
+            try {
+                const r = await fetch(`/api/calendario/eventi/${encodeURIComponent(id)}/assegna`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({assegnati: scelti})});
+                const d = await r.json();
+                if (!d.ok) throw new Error(d.error || 'Errore');
+                const i = eventi.findIndex(x => x.id === id);
+                if (i >= 0) eventi[i] = {...eventi[i], assegnati: d.evento.assegnati, assegnati_info: d.evento.assegnati_info, descrizione: d.evento.descrizione};
+                disegna();
+            } catch (err) {
+                alert('Assegnazione non salvata: ' + err.message);
+                salva.disabled = false;
+            }
+            return;
         }
-    });
-
-    elenco.addEventListener('click', async e => {
+        // Riassunto chiesto a Ceerlo: va in coda, la pagina aspetta e poi ricarica
         const btn = e.target.closest('[data-riassumi]');
         if (!btn) return;
         btn.disabled = true;
@@ -257,46 +303,181 @@
         }
     });
 
-    document.getElementById('prec').onclick = () => { inizio = piu(inizio, -GIORNI); carica(); };
-    document.getElementById('succ').onclick = () => { inizio = piu(inizio, GIORNI); carica(); };
+    // --- Preventivo: elenco a scelta, filtrato sul cliente se e' stato scelto ---
+    function riempiPreventivi(scelto) {
+        const cid = form.cliente_id.value;
+        const lista = cid ? PREVENTIVI.filter(p => p.cliente_id === cid) : PREVENTIVI;
+        const etichetta = p => `${p.numero}${p.data ? ' del ' + p.data : ''}${p.stato ? ' - ' + p.stato : ''}${!cid && p.cliente ? ' - ' + p.cliente : ''}`;
+        sceltaPrev.innerHTML = `<option value="">${cid && !lista.length ? 'Nessun preventivo per questo cliente' : 'Nessun preventivo'}</option>` +
+            lista.map(p => `<option value="${esc(p.numero)}">${esc(etichetta(p))}</option>`).join('');
+        if (scelto && !lista.some(p => p.numero === scelto)) sceltaPrev.insertAdjacentHTML('beforeend', `<option value="${esc(scelto)}">${esc(scelto)}</option>`);
+        sceltaPrev.value = scelto || '';
+    }
+    form.cliente.addEventListener('input', () => {
+        const nuovo = clienti[form.cliente.value] || '';
+        if (nuovo !== form.cliente_id.value) { form.cliente_id.value = nuovo; riempiPreventivi(''); }
+    });
+    sceltaPrev.addEventListener('change', () => {
+        // scegliendo un preventivo senza cliente, il cliente si compila da solo
+        const p = PREVENTIVI.find(x => x.numero === sceltaPrev.value);
+        if (p && p.cliente_id && !form.cliente_id.value) {
+            form.cliente_id.value = p.cliente_id;
+            form.cliente.value = nomiClienti[p.cliente_id] || p.cliente || '';
+            riempiPreventivi(p.numero);
+        }
+    });
+
+    // --- Modale ---
+    let ultimoFocus = null;
+    function apriModale(valori) {
+        form.reset();
+        form.cliente_id.value = ''; form.task.value = '';
+        const v = Object.assign({giorno: iso(selezionato)}, valori || {});
+        ['giorno', 'cliente', 'cliente_id', 'task'].forEach(k => { if (v[k]) form[k].value = v[k]; });
+        if (v.cliente && !v.cliente_id && clienti[v.cliente]) form.cliente_id.value = clienti[v.cliente];
+        riempiPreventivi(v.preventivo || '');
+        if (v.preventivo) sceltaPrev.dispatchEvent(new Event('change'));
+        ultimoFocus = document.activeElement;
+        modale.hidden = false;
+        document.body.classList.add('modale-aperta');
+        setTimeout(() => form.titolo.focus(), 30);
+    }
+    function chiudiModale() {
+        modale.hidden = true;
+        document.body.classList.remove('modale-aperta');
+        if (ultimoFocus && ultimoFocus.focus) ultimoFocus.focus();
+    }
+    modale.addEventListener('click', e => { if (e.target === modale || e.target.closest('[data-chiudi]')) chiudiModale(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modale.hidden) chiudiModale(); });
+    document.getElementById('btn-nuovo').onclick = () => apriModale();
+    document.getElementById('btn-nuovo-giorno').onclick = () => apriModale({giorno: iso(selezionato)});
+
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = document.getElementById('btn-crea');
+        btn.disabled = true;
+        const fd = new FormData(form);
+        const dati = Object.fromEntries(fd.entries());
+        dati.assegnati = fd.getAll('assegnati');
+        try {
+            const r = await fetch('/api/calendario/eventi', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dati)});
+            const esito = await r.json();
+            if (!esito.ok) throw new Error(esito.error || 'Errore');
+            if (window.showNotification) window.showNotification('Appuntamento creato', esito.evento.titolo);
+            chiudiModale();
+            selezionato = new Date(dati.giorno + 'T00:00:00');
+            mese = new Date(selezionato.getFullYear(), selezionato.getMonth(), 1);
+            carica();
+        } catch (err) {
+            alert('Appuntamento non creato: ' + err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById('prec').onclick = () => { mese = new Date(mese.getFullYear(), mese.getMonth() - 1, 1); carica(); };
+    document.getElementById('succ').onclick = () => { mese = new Date(mese.getFullYear(), mese.getMonth() + 1, 1); carica(); };
+    document.getElementById('oggi').onclick = () => { selezionato = new Date(oggi); mese = new Date(oggi.getFullYear(), oggi.getMonth(), 1); carica(); };
+
     carica();
+    // Arrivando da un cliente o da un preventivo (tasto "Appuntamento") la modale si apre gia' compilata
+    if (PRECOMPILA.cliente || PRECOMPILA.cliente_id || PRECOMPILA.preventivo || PRECOMPILA.task) apriModale(PRECOMPILA);
 })();
 </script>
 {% endif %}
 
 <style>
-.editor-container { max-width: 860px; margin: 24px auto; padding: 0 16px; }
+.cal-wrap { max-width: 1180px; margin: 24px auto; padding: 0 16px; }
 .card { margin-bottom: 20px; }
-.card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.griglia-form { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 14px; }
-.griglia-form .largo { grid-column: 1 / -1; }
-.form-group { margin-bottom: 12px; }
-.giorno { margin-bottom: 16px; }
-.giorno-titolo { font-weight: 600; text-transform: capitalize; border-bottom: 1px solid #e5e5e5; padding-bottom: 4px; margin-bottom: 6px; }
-.evento { display: flex; gap: 14px; padding: 6px 0; }
+.cal-card { padding: 16px; }
+.cal-barra { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.cal-nav, .cal-azioni { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cal-nav h3 { margin: 0 0 0 8px; text-transform: capitalize; font-size: 20px; }
+.filtro-miei { display: inline-flex !important; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 14px; margin: 0 !important; }
+
+.cal-griglia { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-top: 1px solid var(--border);
+               border-left: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.cal-intestazione { padding: 8px; font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); text-align: center;
+                    background: #f8f9fb; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.cal-cella { min-height: 116px; padding: 6px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+             cursor: pointer; background: var(--surface); transition: background .12s; min-width: 0; }
+.cal-cella:hover { background: #fafbff; }
+.cal-cella.festivo { background: #fcfcfd; }
+.cal-cella.fuori { background: #f6f7f9; }
+.cal-cella.fuori .cal-num span { color: #b4b8c2; }
+.cal-cella.scelto { box-shadow: inset 0 0 0 2px var(--accent); }
+.cal-num { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.cal-cella.oggi .cal-num span { background: var(--accent); color: #fff; border-radius: 50%; width: 24px; height: 24px;
+                                display: inline-flex; align-items: center; justify-content: center; }
+.cal-piu { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 2px 5px; border-radius: 6px; opacity: 0; font-size: 11px; }
+.cal-cella:hover .cal-piu { opacity: 1; }
+.cal-piu:hover { background: var(--accent-light); color: var(--accent); }
+.cal-eventi { display: flex; flex-direction: column; gap: 3px; }
+.cal-chip { font-size: 12px; line-height: 1.3; padding: 2px 6px; border-radius: 6px; background: #eceff3; color: #333;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid #9aa3b2; }
+.cal-chip.mio { background: var(--accent-light); border-left-color: var(--accent); color: #1f2a8a; }
+.cal-chip.intero { background: #fff4dc; border-left-color: #e0a100; }
+.cal-chip b { font-weight: 600; }
+.cal-altri { font-size: 11px; color: var(--text-muted); padding-left: 4px; }
+.cal-punti { display: none; }
+.cal-stato { margin: 8px 0 0; font-size: 13px; min-height: 1em; }
+
+.giorno-testa { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 16px 16px 0; }
+.giorno-testa h3 { margin: 0; text-transform: capitalize; }
+#giorno-eventi { padding: 8px 16px 16px; }
+.evento { display: flex; gap: 14px; padding: 10px 8px; border-bottom: 1px solid #f0f0f0; border-radius: 8px; transition: background .4s; }
+.evento:last-child { border-bottom: none; }
+.evento.evidenziato { background: var(--accent-light); }
 .evento-ora { min-width: 110px; color: #666; font-size: 13px; }
-.evento-corpo { line-height: 1.5; font-size: 14px; }
+.evento-corpo { line-height: 1.6; font-size: 14px; min-width: 0; }
 .evento-corpo i { width: 16px; color: #888; }
 .errore { color: #b3261e; }
 .riassunto { margin: 6px 0; background: #f4f5fd; border-radius: 8px; padding: 6px 10px; white-space: pre-wrap; font-size: 13px; }
 .riassunto summary { cursor: pointer; font-weight: 600; white-space: normal; }
-.azioni-evento { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.azioni-evento { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .btn-small { padding: 3px 10px; font-size: 12px; }
+
 .scelta-utenti, .modifica-assegnati { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .modifica-assegnati { margin: 6px 0; padding: 8px; background: #f7f7f7; border-radius: 8px; }
 .modifica-assegnati[hidden] { display: none; }
-.chip-utente { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #ddd; border-radius: 14px;
-               padding: 3px 10px; font-size: 13px; cursor: pointer; background: #fff; font-weight: normal; }
-.chip-utente:has(input:checked) { border-color: #4a5bd4; background: #eef0fd; }
-.chip-assegnato { display: inline-block; background: #eceff1; border-radius: 10px; padding: 1px 8px; font-size: 12px; margin-right: 4px; }
-.chip-assegnato.mio { background: #dfe6fd; color: #2a3aa8; font-weight: 600; }
-.chip-utente, .filtro-miei label { margin: 0 !important; line-height: 1.4; }
+.chip-utente { display: inline-flex !important; align-items: center; gap: 4px; border: 1px solid #ddd; border-radius: 14px; margin: 0 !important;
+               padding: 3px 10px; font-size: 13px; cursor: pointer; background: #fff; font-weight: normal; line-height: 1.4; }
+.chip-utente:has(input:checked) { border-color: var(--accent); background: var(--accent-light); }
 .chip-utente input, .filtro-miei input { width: auto !important; height: auto !important; min-height: 0 !important;
                                          margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
-.filtro-miei { padding: 0 24px 8px; font-size: 13px; }
-.filtro-miei label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; }
-@media (max-width: 640px) {
+.chip-assegnato { display: inline-block; background: #eceff1; border-radius: 10px; padding: 1px 8px; font-size: 12px; margin-right: 4px; }
+.chip-assegnato.mio { background: #dfe6fd; color: #2a3aa8; font-weight: 600; }
+
+.cal-modale { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); backdrop-filter: blur(3px); z-index: 1000;
+              display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
+.cal-modale[hidden] { display: none; }
+.cal-modale-box { background: var(--surface); border-radius: var(--radius-md); width: 100%; max-width: 680px; padding: 22px 24px;
+                  box-shadow: 0 20px 50px rgba(0, 0, 0, .25); border: 1px solid var(--border); }
+.cal-modale-testa { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.cal-modale-testa h3 { margin: 0; }
+body.modale-aperta { overflow: hidden; }
+.griglia-form { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 14px; }
+.griglia-form .largo { grid-column: 1 / -1; }
+.griglia-form .col-prev { grid-column: span 2; }
+.form-group { margin-bottom: 12px; }
+.modale-azioni { justify-content: flex-end; gap: 8px; }
+
+@media (max-width: 700px) {
+    .cal-wrap { padding: 0 8px; margin-top: 12px; }
+    .cal-card { padding: 10px; }
+    .cal-nav h3 { font-size: 17px; }
+    .cal-azioni { width: 100%; justify-content: space-between; }
+    .cal-cella { min-height: 52px; padding: 4px 2px; text-align: center; }
+    .cal-num { justify-content: center; }
+    .cal-piu, .cal-eventi { display: none; }
+    .cal-intestazione { padding: 6px 0; font-size: 11px; }
+    .cal-punti { display: flex; justify-content: center; gap: 3px; margin-top: 3px; }
+    .cal-punti i { width: 6px; height: 6px; border-radius: 50%; background: #9aa3b2; }
+    .cal-punti i.mio { background: var(--accent); }
     .griglia-form { grid-template-columns: 1fr; }
+    .griglia-form .col-prev { grid-column: 1 / -1; }
+    .cal-modale { padding: 0; }
+    .cal-modale-box { border-radius: 0; min-height: 100%; }
     .evento { flex-direction: column; gap: 2px; }
 }
 </style>

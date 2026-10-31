@@ -9025,13 +9025,19 @@ def calendario_page():
     try:
         clienti = [{"id": c.id_cliente, "nome": c.cliente or c.rag_sociale or ""}
                    for c in db.query(_Cliente).all() if (c.cliente or c.rag_sociale)]
+        # Preventivi da scegliere nell'appuntamento (senza importi), i piu' recenti prima
+        preventivi = [{"numero": p.numero, "data": p.data or "", "stato": p.stato or "",
+                       "cliente_id": p.id_cliente or "", "cliente": p.cliente or p.rag_sociale or ""}
+                      for p in db.query(_Preventivo).all()]
     finally:
         db.close()
     clienti.sort(key=lambda c: c["nome"].lower())
+    preventivi.sort(key=lambda p: _data_ordinabile(p["data"]) + p["numero"], reverse=True)
     utenti = sorted(({"username": u["username"], "nome": u.get("full_name") or u["username"]} for u in load_users()),
                     key=lambda u: u["nome"].lower())
     return render_template("calendario.html", title="Calendario", active_page="calendario",
                            collegato=integrazioni_google.calendar_collegato(), clienti=clienti, utenti=utenti,
+                           preventivi=preventivi[:3000],
                            io=session.get("user_id"),
                            precompila={k: request.args.get(k, "") for k in ("cliente", "cliente_id", "preventivo", "task")})
 
@@ -9098,6 +9104,15 @@ def api_calendario_assegna(evento_id):
     _EVENTI_CACHE["quando"] = 0
     _avvisa_assegnati(ev, [u for u in assegnati if u not in prima])
     return jsonify({"ok": True, "evento": _con_nomi_assegnati(ev)})
+
+
+def _data_ordinabile(testo):
+    """'31/10/2026' o '2026-10-31' -> '2026-10-31' per ordinare; vuoto se non si capisce."""
+    testo = (testo or "").strip()[:10]
+    m = re.match(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$", testo)
+    if m:
+        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    return testo if re.match(r"\d{4}-\d{2}-\d{2}$", testo) else ""
 
 
 def _assegnati_validi(valore):
