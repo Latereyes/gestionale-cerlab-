@@ -26,7 +26,7 @@ _LOCK_FILE = threading.Lock()
 
 _PREDEFINITA = {
     "attivo": False,
-    "url": "http://100.64.0.1:11434",   # indirizzo Tailscale del PC con Ollama
+    "url": "",                          # indirizzo Tailscale del PC con Ollama, es. http://100.x.y.z:11434
     "modello": "",
     "contemporanee": 1,                 # richieste elaborate insieme: con una GPU da 10 GB conviene 1
     "timeout": 300,
@@ -91,18 +91,27 @@ def attivo(cfg=None):
 
 # --- Ollama ---
 
-def _http(metodo, percorso, corpo=None, timeout=10):
-    cfg = leggi_config()
-    req = urllib.request.Request(cfg["url"].rstrip("/") + percorso, method=metodo,
+def _http(metodo, percorso, corpo=None, timeout=10, url=None):
+    url = url or leggi_config()["url"]
+    if not url:
+        raise RuntimeError("indirizzo di Ollama non impostato")
+    req = urllib.request.Request(url.rstrip("/") + percorso, method=metodo,
                                  data=json.dumps(corpo).encode() if corpo is not None else None,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
 
-def modelli_disponibili():
-    """Prova la connessione: restituisce i modelli installati su Ollama."""
-    return sorted(m["name"] for m in _http("GET", "/api/tags").get("models", []))
+def normalizza_url(url):
+    url = (url or "").strip().rstrip("/")
+    if url and not url.lower().startswith(("http://", "https://")):
+        url = "http://" + url
+    return url
+
+
+def modelli_disponibili(url=None):
+    """Prova la connessione (all'indirizzo dato o a quello salvato): restituisce i modelli installati su Ollama."""
+    return sorted(m["name"] for m in _http("GET", "/api/tags", url=normalizza_url(url) or None).get("models", []))
 
 
 def chat_ollama(messaggi):

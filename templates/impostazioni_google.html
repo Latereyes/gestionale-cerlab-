@@ -177,20 +177,9 @@ document.getElementById('ceerlo-prova').onclick = async () => {
     const esito = document.getElementById('ceerlo-esito');
     esito.textContent = 'Provo...';
     try {
-        const r = await fetch('{{ url_for("impostazioni_ceerlo_prova") }}', {method: 'POST'});
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.error);
-        document.getElementById('ceerlo-modelli').innerHTML = d.modelli.map(m => `<option value="${m.replace(/"/g, '')}">`).join('');
-        esito.textContent = `Collegato. Modelli disponibili: ${d.modelli.join(', ') || 'nessuno'}`;
-    } catch (e) { esito.textContent = e.message; }
-};
-</script>
-<script>
-document.getElementById('ceerlo-prova').onclick = async () => {
-    const esito = document.getElementById('ceerlo-esito');
-    esito.textContent = 'Provo...';
-    try {
-        const r = await fetch('{{ url_for("impostazioni_ceerlo_prova") }}', {method: 'POST'});
+        const dati = new FormData();
+        dati.append('url', document.querySelector('#ceerlo input[name=url]').value);
+        const r = await fetch('{{ url_for("impostazioni_ceerlo_prova") }}', {method: 'POST', body: dati});
         const d = await r.json();
         if (!d.ok) throw new Error(d.error);
         document.getElementById('ceerlo-modelli').innerHTML = d.modelli.map(m => `<option value="${m.replace(/"/g, '')}">`).join('');

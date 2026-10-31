@@ -9241,8 +9241,7 @@ def impostazioni_ceerlo():
             valori[k] = max(minimo, min(massimo, int(f.get(k))))
         except (TypeError, ValueError):
             pass
-    if valori["url"] and not re.match(r"^https?://", valori["url"]):
-        valori["url"] = "http://" + valori["url"]
+    valori["url"] = ceerlo.normalizza_url(valori["url"])
     ceerlo.salva_config(valori)
     flash("Impostazioni di Ceerlo salvate.", "success")
     return redirect(url_for("impostazioni_google") + "#ceerlo")
@@ -9253,7 +9252,8 @@ def impostazioni_ceerlo():
 @role_required("amministratore")
 def impostazioni_ceerlo_prova():
     try:
-        return jsonify({"ok": True, "modelli": ceerlo.modelli_disponibili()})
+        # prova l'indirizzo scritto nel campo, anche se non ancora salvato
+        return jsonify({"ok": True, "modelli": ceerlo.modelli_disponibili(request.form.get("url"))})
     except Exception as e:
         return jsonify({"ok": False, "error": f"Ollama non raggiungibile: {e}"}), 502
 
