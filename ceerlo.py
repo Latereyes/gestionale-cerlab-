@@ -30,7 +30,7 @@ _PREDEFINITA = {
     "modello": "",
     "contemporanee": 1,                 # richieste elaborate insieme: con una GPU da 10 GB conviene 1
     "timeout": 300,
-    "num_ctx": 8192,
+    "num_ctx": 32768,                   # misurato 31/10 con gemma4-12b: ~8 GB di VRAM, sta nella 3070 Ti da 10 GB
     "riassunti_auto": True,
     "ore_anticipo": 48,                 # riassunti automatici per gli appuntamenti delle prossime N ore
 }
@@ -108,7 +108,7 @@ def modelli_disponibili():
 def chat_ollama(messaggi):
     cfg = leggi_config()
     corpo = {"model": cfg["modello"], "messages": messaggi, "stream": False, "think": False,
-             "options": {"num_ctx": int(cfg["num_ctx"] or 8192)}}
+             "options": {"num_ctx": int(cfg["num_ctx"] or 32768)}}
     try:
         r = _http("POST", "/api/chat", corpo, timeout=int(cfg["timeout"] or 300))
     except urllib.error.HTTPError as e:

@@ -9236,7 +9236,7 @@ def impostazioni_ceerlo():
     f = request.form
     valori = {"attivo": bool(f.get("attivo")), "riassunti_auto": bool(f.get("riassunti_auto")),
               "url": (f.get("url") or "").strip().rstrip("/"), "modello": (f.get("modello") or "").strip()}
-    for k, minimo, massimo in (("contemporanee", 1, 4), ("ore_anticipo", 1, 168), ("num_ctx", 2048, 65536), ("timeout", 30, 1800)):
+    for k, minimo, massimo in (("contemporanee", 1, 4), ("ore_anticipo", 1, 168), ("num_ctx", 2048, 131072), ("timeout", 30, 1800)):
         try:
             valori[k] = max(minimo, min(massimo, int(f.get(k))))
         except (TypeError, ValueError):
