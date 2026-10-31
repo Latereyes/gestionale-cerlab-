@@ -1,4 +1,4 @@
-#define MyAppVersion "3.3.1"
+#define MyAppVersion "3.4.0"
 ; Script Inno Setup per Gestionale Preventivi
 
 [Setup]
