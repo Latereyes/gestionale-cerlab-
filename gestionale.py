@@ -10558,13 +10558,22 @@ def api_ceerlo_riassunto():
     return jsonify({"ok": True, "job": jid, "posizione": ceerlo._CODA.posizione(jid)})
 
 
+def _testo_indirizzo(a):
+    luogo = " ".join(x for x in (a.get("cap"), a.get("comune"), f"({a['provincia']})" if a.get("provincia") else "") if x)
+    testo = ", ".join(x for x in ((a.get("indirizzo") or "").strip(), luogo) if x)
+    return f"{a['descrizione']}: {testo}" if a.get("descrizione") and testo else (testo or a.get("descrizione") or "")
+
+
 @app.route("/api/ceerlo/note-cliente/<client_id>")
 @login_required
 def api_ceerlo_note_cliente(client_id):
-    """Riassunto delle note interne del cliente per chi sta facendo un suo preventivo (fumetto di Ceerlo).
-    stato: 'nessuna' (nessuna nota), 'pronto' (con testo), 'in_coda' (con job: Ceerlo lo sta scrivendo)."""
+    """Riassunto delle note interne del cliente per il fumetto di Ceerlo.
+    ?per=preventivo (chi fa il preventivo) oppure ?per=consegna (quando serve il materiale, fretta, dove consegnare;
+    in piu' gli indirizzi di cantiere salvati sul cliente).
+    stato: 'nessuna' (niente da dire), 'pronto' (testo e/o cantieri), 'in_coda' (con job: Ceerlo lo sta scrivendo)."""
     if not ceerlo.attivo():
         return jsonify({"ok": False, "error": "Ceerlo non e' attivo."}), 503
+    scopo = "consegna" if request.args.get("per") == "consegna" else "preventivo"
     db = _DBSession()
     try:
         cli = db.query(_Cliente).filter_by(id_cliente=client_id).first()
@@ -10574,19 +10583,26 @@ def api_ceerlo_note_cliente(client_id):
         nome = cli.cliente or cli.rag_sociale or client_id
     finally:
         db.close()
+    cantieri = []
+    if scopo == "consegna":
+        cantieri = [t for t in (_testo_indirizzo(a) for a in (load_client(client_id) or {}).get("indirizzi_cantiere") or []) if t]
+    base = {"ok": True, "cliente": nome, "voci": len(voci), "cantieri": cantieri, "per": scopo}
     if not voci:
-        return jsonify({"ok": True, "stato": "nessuna"})
+        return jsonify(dict(base, stato="pronto" if cantieri else "nessuna", testo="",
+                            impronta=hashlib.sha1("|".join(cantieri).encode("utf-8")).hexdigest()[:16]))
     note = "\n".join(f"- {v['testo']}" + (f" ({v['autore_nome']}, {v['quando'][:10]})" if v.get("autore_nome") else "")
                      for v in voci)
-    impronta = hashlib.sha1(note.encode("utf-8")).hexdigest()[:16]
-    pronto = ceerlo.riassunto_note(client_id, impronta)
+    impronta = hashlib.sha1((note + "|" + "|".join(cantieri)).encode("utf-8")).hexdigest()[:16]
+    pronto = ceerlo.riassunto_note(client_id, impronta, scopo)
     if pronto:
-        return jsonify({"ok": True, "stato": "pronto", "testo": pronto, "cliente": nome, "impronta": impronta, "voci": len(voci)})
+        niente = pronto.strip().strip(".").upper() == ceerlo.NIENTE_DA_SEGNALARE
+        testo = "" if niente else pronto
+        return jsonify(dict(base, stato="pronto" if (testo or cantieri) else "nessuna", testo=testo, impronta=impronta))
     try:
-        jid = ceerlo.chiedi_riassunto_note(client_id, nome, note, impronta, session["user_id"])
+        jid = ceerlo.chiedi_riassunto_note(client_id, nome, note, impronta, session["user_id"], scopo)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 503
-    return jsonify({"ok": True, "stato": "in_coda", "job": jid, "cliente": nome, "impronta": impronta, "voci": len(voci)})
+    return jsonify(dict(base, stato="in_coda", job=jid, impronta=impronta))
 
 
 @app.route("/api/ceerlo/riassunti")

@@ -170,7 +170,27 @@ anna.post(f"/api/cliente/{cliente_id}/note", json={"voci": [{"testo": "Nuova not
 anna.get(f"/api/ceerlo/note-cliente/{cliente_id}")
 verifica(len(chiamate) == 2, "se le note cambiano il riassunto si rifa'")
 html = anna.get(f"/preventivo/edit/{quote_id}").get_data(as_text=True)
-verifica('data-editor="1"' in html and f'data-cliente="{cliente_id}"' in html, "nell'editor del preventivo Ceerlo sa di quale cliente si tratta")
+verifica('data-note-per="preventivo"' in html and f'data-cliente="{cliente_id}"' in html, "nell'editor del preventivo Ceerlo sa di quale cliente si tratta")
+
+print("7. Note e cantieri nella pagina di consegna")
+anna.post(f"/api/cliente/{cliente_id}/note", json={"voci": [{"testo": "Fa il rogito a febbraio, prima non puo' ricevere"}]})
+risposte = {"consegna": "- Il materiale serve dopo il rogito di febbraio"}
+def finto_consegna(utente, messaggi, priorita, tipo, al_termine=None, chiave=""):
+    chiamate.append(chiave)
+    al_termine(risposte["consegna"])
+    return "job-consegna"
+g.ceerlo.aggiungi = finto_consegna
+anna.get(f"/api/ceerlo/note-cliente/{cliente_id}?per=consegna")
+d = anna.get(f"/api/ceerlo/note-cliente/{cliente_id}?per=consegna").get_json()
+verifica(d["stato"] == "pronto" and "febbraio" in d["testo"] and ":consegna:" in chiamate[-1], "per la consegna Ceerlo cerca quando serve il materiale")
+anna.post(f"/cliente/{cliente_id}/salva-indirizzo-cantiere", data={"descrizione": "Casa al mare", "indirizzo": "Via del Porto 3", "comune": "Rimini", "provincia": "RN", "cap": "47921"})
+risposte["consegna"] = "NIENTE"
+anna.post(f"/api/cliente/{cliente_id}/note", json={"voci": [{"testo": "Cliente simpatico"}]})
+anna.get(f"/api/ceerlo/note-cliente/{cliente_id}?per=consegna")
+d = anna.get(f"/api/ceerlo/note-cliente/{cliente_id}?per=consegna").get_json()
+verifica(d["stato"] == "pronto" and d["testo"] == "" and "Via del Porto 3" in d["cantieri"][0], "niente nelle note ma il cantiere salvato si segnala lo stesso")
+html = anna.get(f"/consegna/{quote_id}").get_data(as_text=True)
+verifica('data-note-per="consegna"' in html, "nella pagina di consegna il fumetto parla della consegna")
 
 print("\nCartella di prova:", TMP)
 print("ERRORI:" if ERRORI else "Tutto ok.", *ERRORI, sep="\n  ")

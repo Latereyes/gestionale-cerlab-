@@ -304,19 +304,35 @@ def chiedi_titolo(testo, al_termine, chiave=""):
 
 # --- Riassunto delle note del cliente (per chi apre un suo preventivo) ---
 
-def riassunto_note(client_id, impronta):
+NIENTE_DA_SEGNALARE = "NIENTE"
+
+# per chi lavora: cosa cercare nelle note del cliente
+_SCOPO_NOTE = {
+    "preventivo": ("sta preparando un preventivo per {cliente}",
+                   "le cose da tenere presenti mentre fa il preventivo: preferenze, richieste, problemi, accordi, avvertenze"),
+    "consegna": ("sta organizzando la consegna del materiale a {cliente}",
+                 "solo quello che conta per la consegna: QUANDO gli serve il materiale (date, mesi, scadenze come rogito, "
+                 "trasloco, fine lavori, inizio cantiere), se ha FRETTA o se invece puo' aspettare, DOVE consegnare "
+                 "(indirizzi di cantiere o di consegna scritti nelle note), orari, accessi, scale, piani, chi riceve la merce. "
+                 f"Se nelle note non c'e' nulla di questo, rispondi esattamente {NIENTE_DA_SEGNALARE}"),
+}
+
+
+def riassunto_note(client_id, impronta, scopo="preventivo"):
     """Il riassunto gia' fatto, se le note non sono cambiate da allora."""
-    r = _leggi_json("riassunti_note.json", {}).get(client_id) or {}
+    r = _leggi_json("riassunti_note.json", {}).get(f"{client_id}:{scopo}") or {}
     return r.get("testo", "") if r.get("impronta") == impronta else ""
 
 
-def chiedi_riassunto_note(client_id, nome_cliente, note, impronta, utente):
-    """Chiede in sottofondo le cose da ricordare delle note interne; il risultato resta in cache per il cliente."""
+def chiedi_riassunto_note(client_id, nome_cliente, note, impronta, utente, scopo="preventivo"):
+    """Chiede in sottofondo cosa ricordare delle note interne (per il preventivo o per la consegna);
+    il risultato resta in cache per il cliente finche' le note non cambiano."""
+    chi_fa, cosa = _SCOPO_NOTE.get(scopo, _SCOPO_NOTE["preventivo"])
     messaggi = [{"role": "system", "content": (
-                    f"Sei {NOME}, l'assistente del gestionale di CERLAB. Un collega sta preparando un preventivo per "
-                    f"{nome_cliente}. Leggi le note interne sul cliente e scrivi in italiano le cose da tenere presenti "
-                    "mentre fa il preventivo: preferenze, richieste, problemi, accordi, avvertenze. Massimo 4 righe che "
-                    "iniziano con '- ', frasi brevi. Usa solo le note, non inventare nulla. Niente titoli o introduzioni.")},
+                    f"Sei {NOME}, l'assistente del gestionale di CERLAB. Un collega {chi_fa.format(cliente=nome_cliente)}. "
+                    f"Leggi le note interne sul cliente e scrivi in italiano {cosa}. Massimo 4 righe che "
+                    "iniziano con '- ', frasi brevi, con le date e gli indirizzi come sono scritti. "
+                    "Usa solo le note, non inventare nulla. Niente titoli o introduzioni.")},
                 {"role": "user", "content": "NOTE INTERNE:\n" + (note or "")[:6000]}]
 
     def salva(testo):
@@ -324,11 +340,11 @@ def chiedi_riassunto_note(client_id, nome_cliente, note, impronta, utente):
         if not testo:
             return
         tutti = _leggi_json("riassunti_note.json", {})
-        tutti[client_id] = {"impronta": impronta, "testo": testo,
-                            "creato_il": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+        tutti[f"{client_id}:{scopo}"] = {"impronta": impronta, "testo": testo,
+                                         "creato_il": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
         _scrivi_json("riassunti_note.json", tutti)
     return aggiungi(utente, messaggi, PRIO_RICHIESTA, "note_cliente", al_termine=salva,
-                    chiave=f"note:{client_id}:{impronta}")
+                    chiave=f"note:{client_id}:{scopo}:{impronta}")
 
 
 # --- Riassunti degli appuntamenti ---

@@ -2,7 +2,7 @@
    L'avatar si sostituisce mettendo un'immagine in static/ceerlo/ (avatar.gif, avatar.png o avatar.webp). #}
 <div id="ceerlo" class="ceerlo" data-cliente="{{ current_client_id or (request.view_args or {}).get('client_id', '') }}"
      data-preventivo="{{ current_quote_id or (request.view_args or {}).get('quote_id', '') }}"
-     data-editor="{{ '1' if request.endpoint in ('editor_preventivo', 'editor_preventivo_edile') else '' }}">
+     data-note-per="{{ 'preventivo' if request.endpoint in ('editor_preventivo', 'editor_preventivo_edile') else ('consegna' if request.endpoint == 'gestione_consegna' else '') }}">
     <div class="ceerlo-fumetto" id="ceerlo-fumetto" hidden>
         <button type="button" class="ceerlo-chiudi-fumetto" title="Chiudi">&times;</button>
         <div id="ceerlo-fumetto-testo"></div>
@@ -253,15 +253,16 @@
         } catch (e) {}
     }
 
-    // Chi apre un preventivo riceve dalle note interne del cliente le cose da ricordare (una volta per sessione,
-    // e di nuovo se le note cambiano). Ceerlo le riassume in sottofondo e le tiene da parte finche' non cambiano.
+    // Chi apre un preventivo riceve dalle note interne del cliente le cose da ricordare; chi apre la consegna
+    // quando serve il materiale, se c'e' fretta, dove consegnare e gli indirizzi di cantiere salvati.
+    // Una volta per sessione (e di nuovo se le note cambiano); Ceerlo riassume in sottofondo e tiene da parte.
     async function controllaNoteCliente(tentativi = 0) {
-        const cliente = box.dataset.cliente;
-        if (!cliente || !box.dataset.editor) return;
+        const cliente = box.dataset.cliente, per = box.dataset.notePer;
+        if (!cliente || !per) return;
         let d = {};
-        try { d = await (await fetch('/api/ceerlo/note-cliente/' + encodeURIComponent(cliente))).json(); } catch (e) { return; }
+        try { d = await (await fetch(`/api/ceerlo/note-cliente/${encodeURIComponent(cliente)}?per=${per}`)).json(); } catch (e) { return; }
         if (!d.ok || d.stato === 'nessuna') return;
-        const chiave = 'note:' + cliente + ':' + d.impronta;
+        const chiave = `note:${per}:${cliente}:${d.impronta}`;
         const visti = leggi('ceerlo-note-viste', []);
         if (visti.includes(chiave)) return;
         if (d.stato === 'in_coda') {
@@ -270,7 +271,18 @@
             return;
         }
         visti.push(chiave); scrivi('ceerlo-note-viste', visti);
-        const righe = d.testo.split('\n').map(r => r.replace(/^\s*[-*•]\s*/, '').trim()).filter(Boolean);
+        const righe = (d.testo || '').split('\n').map(r => r.replace(/^\s*[-*•]\s*/, '').trim()).filter(Boolean);
+        const cantieri = d.cantieri || [];
+        if (per === 'consegna') {
+            const prima = righe[0] ? `Attenzione per la consegna a ${d.cliente}: ${righe[0]}`
+                                   : `${d.cliente} ha ${cantieri.length === 1 ? 'un indirizzo' : cantieri.length + ' indirizzi'} di cantiere: ${cantieri[0]}`;
+            const altro = righe.length + cantieri.length - 1;
+            const completo = (righe.length ? `Dalle note su ${d.cliente}, per la consegna:\n\n${d.testo}` : '') +
+                (cantieri.length ? `${righe.length ? '\n\n' : ''}Indirizzi di cantiere salvati (controlla dove va il materiale):\n` +
+                                   cantieri.map(c => '- ' + c).join('\n') : '');
+            mostraFumetto(prima + (altro > 0 ? ` (+${altro}). Cliccami per vedere tutto.` : ''), completo);
+            return;
+        }
         mostraFumetto(`Note su ${d.cliente}: ${righe[0] || ''}${righe.length > 1 ? ` (+${righe.length - 1}). Cliccami per leggerle tutte.` : ''}`,
             `Dalle note interne su ${d.cliente} (${d.voci} ${d.voci === 1 ? 'nota' : 'note'}), da tenere presente per questo preventivo:\n\n${d.testo}`);
     }
