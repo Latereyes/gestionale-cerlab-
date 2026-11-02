@@ -1032,6 +1032,7 @@ from models import (
     Cliente as _Cliente,
     Utente as _Utente,
     Task as _Task, AdminTask as _AdminTask, Report as _Report, Promemoria as _Promemoria,
+    RegistroAttivita as _RegistroAttivita,
     Message as _Message, TagboxEntry as _TagboxEntry,
     Notification as _Notification, ConfigMargini as _ConfigMargini,
     ArticoloMagazzino as _ArticoloMagazzino, MovimentoMagazzino as _MovimentoMagazzino,
@@ -1942,6 +1943,131 @@ def notifica_attivita_nel_widget(response):
         annuncia(testo.format(chi=_chi(), q=q, cliente=cliente, importo=f" di {importo} €" if importo else ""), link=link)
     except Exception as e:
         print(f"[tray] Errore notifica attività: {e}")
+    return response
+
+# --- Registro attivita' per utente (SQLite): diventa la bozza del report di Ceerlo e, se il report non arriva, il report ---
+# endpoint -> (tipo, voce del report). {rif} e' il preventivo o il cliente nella forma #CODICE[nome] (link nel gestionale)
+_REGISTRO_ATTIVITA = {
+    "nuovo_preventivo":        ("preventivo_nuovo", "Creato il preventivo {rif}"),
+    "nuovo_preventivo_edile":  ("preventivo_nuovo", "Creato il preventivo edile {rif}"),
+    "clona_preventivo":        ("preventivo_nuovo", "Creato il preventivo {rif} (clonato da {q})"),
+    "salva_righe":             ("preventivo_modificato", "Modificato il preventivo {rif}"),
+    "salva_righe_edili":       ("preventivo_modificato", "Modificato il preventivo edile {rif}"),
+    "invia_preventivo":        ("preventivo_inviato", "Inviato al cliente il preventivo {rif}"),
+    "conferma_preventivo":     ("preventivo_confermato", "Confermato il preventivo {rif}"),
+    "annulla_preventivo":      ("preventivo_annullato", "Annullato il preventivo {rif}"),
+    "sblocca_preventivo":      ("preventivo_modificato", "Riportato in bozza il preventivo {rif}"),
+    "aggiungi_pagamento":      ("incasso", "Registrato un pagamento{importo} sul preventivo {rif}"),
+    "conferma_incasso":        ("incasso", "Confermato un incasso sul preventivo {rif}"),
+    "rettifica_pagamento":     ("incasso", "Rettificato un pagamento sul preventivo {rif}"),
+    "crea_bolla":              ("consegna", "Creata la bolla del preventivo {rif}"),
+    "marca_pronto":            ("consegna", "Segnata la merce pronta per la consegna ({rif})"),
+    "marca_consegnato":        ("consegna", "Segnata la merce consegnata ({rif})"),
+    "salva_ordine":            ("ordine", "Creato un ordine fornitore per il preventivo {rif}"),
+    "aggiungi_a_ordine":       ("ordine", "Aggiunti articoli a un ordine fornitore ({rif})"),
+    "allega_fattura":          ("fattura", "Allegata una fattura al preventivo {rif}"),
+    "crea_cliente":            ("cliente_nuovo", "Creato il cliente {rif}"),
+    "modifica_cliente":        ("cliente_modificato", "Aggiornata l'anagrafica del cliente {rif}"),
+    "api_note_cliente":        ("cliente_modificato", "Aggiornate le note del cliente {rif}"),
+}
+# attivita' che si ripetono (salvataggi automatici): una sola voce al giorno per utente e riferimento
+_REGISTRO_UNA_AL_GIORNO = {"preventivo_modificato", "cliente_modificato"}
+
+
+def _tag_codice(codice, nome):
+    """#CODICE[nome] come lo scrive Ceerlo: nelle pagine e nelle email diventa un link."""
+    nome = re.sub(r"[\[\]\n]", " ", nome or "").strip()
+    return f"#{codice}[{nome}]" if nome else f"#{codice}"
+
+
+def scrivi_registro(utente, utente_nome, tipo, testo, riferimento="", quando=None):
+    """Aggiunge un'attivita' al registro dell'utente (non solleva mai: il registro non deve bloccare il lavoro)."""
+    quando = quando or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db = _DBSession()
+    try:
+        riga = None
+        if tipo in _REGISTRO_UNA_AL_GIORNO and riferimento:
+            riga = db.query(_RegistroAttivita).filter(
+                _RegistroAttivita.utente == utente, _RegistroAttivita.tipo == tipo,
+                _RegistroAttivita.riferimento == riferimento, _RegistroAttivita.quando >= quando[:10] + " 00:00:00").first()
+        if riga:
+            riga.quando, riga.volte, riga.testo = quando, (riga.volte or 1) + 1, testo
+        else:
+            db.add(_RegistroAttivita(utente=utente, utente_nome=utente_nome or utente, quando=quando, tipo=tipo,
+                                     riferimento=riferimento or "", testo=testo[:500], volte=1))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[registro attivita'] {e}")
+    finally:
+        db.close()
+
+
+def registro_attivita(utente, dal, al=None):
+    """Attivita' dell'utente dopo `dal` (e fino ad `al`), dalla piu' vecchia."""
+    db = _DBSession()
+    try:
+        q = db.query(_RegistroAttivita).filter(_RegistroAttivita.utente == utente, _RegistroAttivita.quando > dal)
+        if al:
+            q = q.filter(_RegistroAttivita.quando <= al)
+        return [r.to_dict() for r in q.order_by(_RegistroAttivita.quando, _RegistroAttivita.id).all()]
+    finally:
+        db.close()
+
+
+@app.after_request
+def registra_attivita_utente(response):
+    """Scrive nel registro dell'utente le azioni andate a buon fine (stessi criteri delle notifiche attivita')."""
+    try:
+        voce = _REGISTRO_ATTIVITA.get(request.endpoint)
+        if not voce or response.status_code >= 400 or "user_id" not in session:
+            return response
+        ep = request.endpoint
+        if request.method != "POST" and ep not in ("nuovo_preventivo", "nuovo_preventivo_edile", "clona_preventivo"):
+            return response
+        if response.is_json:
+            dati = response.get_json(silent=True) or {}
+            if dati.get("success") is False or dati.get("ok") is False or dati.get("error"):
+                return response
+        if any(cat == "error" for cat, _ in session.get("_flashes", [])):
+            return response
+        args = request.view_args or {}
+        q = args.get("quote_id", "")
+        tipo, testo = voce
+        if ep == "clona_preventivo":
+            codice = (response.get_json(silent=True) or {}).get("nuovo_id", "") if response.is_json else ""
+        elif ep in ("nuovo_preventivo", "nuovo_preventivo_edile"):
+            # il numero nuovo e' nell'indirizzo dell'editor a cui si viene mandati
+            m = re.search(r"/edit/([^/?#]+)", response.location or "") if response.status_code in (301, 302, 303) else None
+            if not m:
+                return response
+            codice = urllib.parse.unquote(m.group(1))
+        elif ep == "crea_cliente":
+            m = re.search(r"/nuovo/([^/?#]+)", response.location or "") if response.status_code in (301, 302, 303) else None
+            if not m:
+                return response
+            codice = urllib.parse.unquote(m.group(1))
+        else:
+            codice = q or args.get("client_id", "")
+        if not codice:
+            return response
+        nome = ""
+        db = _DBSession()
+        try:
+            if tipo.startswith("cliente"):
+                c = db.query(_Cliente).filter_by(id_cliente=codice).first()
+                nome = (c.cliente or c.rag_sociale) if c else ""
+            else:
+                prev = db.query(_Preventivo).filter_by(numero=codice).first()
+                nome = (prev.cliente or "") if prev else ""
+        finally:
+            db.close()
+        importo = request.form.get("importo", "").strip() if ep == "aggiungi_pagamento" else ""
+        scrivi_registro(session["user_id"], session.get("user_name"), tipo,
+                        testo.format(rif=_tag_codice(codice, nome), q=q, importo=f" di {importo} €" if importo else ""),
+                        riferimento=codice)
+    except Exception as e:
+        print(f"[registro attivita'] Errore: {e}")
     return response
 
 _RETE_TAILSCALE = ipaddress.ip_network("100.64.0.0/10")  # indirizzi che Tailscale dà ai dispositivi della VPN
@@ -7786,8 +7912,9 @@ def run_server():
     is_debug_mode = "--debug" in sys.argv
     if not is_debug_mode or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         threading.Thread(target=sincronizza_stati_tutti_preventivi, daemon=True).start()
-        integrazioni_google.avvia_riepilogo_giornaliero(report_inviati_dal, lambda: indirizzi_email("email_report"),
+        integrazioni_google.avvia_riepilogo_giornaliero(report_per_riepilogo, lambda: indirizzi_email("email_report"),
                                                         componi=componi_riepilogo)
+        avvia_chiusura_report()
         ceerlo.avvia_riassunti_automatici(prossimi_eventi, contesto_evento, dopo=_riassunto_pronto)
         threading.Timer(90, titoli_mancanti).start()  # le task aperte senza titolo lo ricevono da Ceerlo
     
@@ -8625,6 +8752,11 @@ def ultimi_report_per_autore(reports):
     return sorted(migliori.values(), key=lambda x: x.get("creato_il", ""), reverse=True)
 
 
+def _bozza_di(db, autore):
+    return db.query(_Report).filter(_Report.autore == autore, _Report.stato == "bozza").order_by(
+        _Report.creato_il.desc()).first()
+
+
 def _ultimo_inviato(db, autore):
     return db.query(_Report).filter(_Report.autore == autore, _Report.stato != "bozza").order_by(
         _Report.creato_il.desc(), _Report.id.desc()).first()
@@ -8638,6 +8770,8 @@ def voci_report(dati, me, vecchie=None):
     if not isinstance(grezze, list):
         return None, "Voci del report non valide."
     task_esistenti = {v.get("task_id") for v in (vecchie or []) if v.get("task_id")}
+    # voci scritte da Ceerlo (robottino) o prese dal registro: il segno resta solo se il testo non e' stato toccato
+    generate = {v.get("testo"): ("ai" if v.get("ai") else "registro") for v in (vecchie or []) if v.get("ai") or v.get("registro")}
     prom_esistenti = {v.get("promemoria_id") for v in (vecchie or []) if v.get("promemoria_id")}
     all_users = load_users()
     ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
@@ -8661,6 +8795,9 @@ def voci_report(dati, me, vecchie=None):
                      "etc": str(r.get("etc") or "").strip()[:10], "task_id": task_id,
                      "promemoria": promemoria, "prom_data": str(r.get("prom_data") or "").strip()[:10],
                      "prom_ora": str(r.get("prom_ora") or "").strip()[:5], "promemoria_id": prom_id})
+        origine = generate.get(testo)
+        if origine and r.get(origine):
+            voci[-1][origine] = True
     return voci, None
 
 
@@ -8700,6 +8837,195 @@ def _testo_da_voci(voci):
     return "\n".join(f"• {v['testo']}" for v in voci)
 
 
+# --- Bozza di Ceerlo dal registro attivita' e report automatico alla chiusura ---
+# Il registro dell'utente (dall'ultimo report) diventa la bozza del report: la scrive Ceerlo, voce per voce (robottino).
+# Alla chiusura serale chi non ha inviato un report nella giornata riceve un report "automatico":
+# - bozza mai toccata (o nessuna bozza) -> il registro attivita' cosi' com'e' (non il testo di Ceerlo);
+# - bozza modificata dall'utente ma non inviata -> quella bozza.
+# Chi ha gia' inviato un report nella giornata (a qualunque ora, per i turni) non viene toccato.
+
+ORE_MAX_REGISTRO = 48          # il registro piu' vecchio di cosi' non finisce nel report
+MAX_VOCI_CEERLO = 15
+_LOCK_CHIUSURA = threading.Lock()
+
+
+def inizio_periodo_report(db, utente, adesso=None):
+    """Da quando conta il registro per il prossimo report: dall'ultimo report inviato (anche automatico)."""
+    adesso = adesso or datetime.datetime.now()
+    limite = (adesso - datetime.timedelta(hours=ORE_MAX_REGISTRO)).strftime("%Y-%m-%d %H:%M:%S")
+    ultimo = _ultimo_inviato(db, utente)
+    return max(limite, ultimo.creato_il or "") if ultimo else limite
+
+
+def voci_dal_registro(attivita):
+    return [{"testo": a["testo"] + (f" ({a['volte']} salvataggi)" if a.get("volte", 1) > 1 else ""),
+             "task": False, "etc": "", "task_id": "", "promemoria": False, "prom_data": "", "prom_ora": "",
+             "promemoria_id": "", "registro": True} for a in attivita if a.get("testo")]
+
+
+def voci_da_ceerlo(testo):
+    """Le righe '- ...' della risposta di Ceerlo diventano voci col robottino."""
+    voci = []
+    for riga in (testo or "").splitlines():
+        r = riga.strip()
+        if r[:2] in ("- ", "* ", "• "):
+            r = r[2:].strip().replace("**", "")
+            if r:
+                voci.append({"testo": r[:2000], "task": False, "etc": "", "task_id": "", "promemoria": False,
+                             "prom_data": "", "prom_ora": "", "promemoria_id": "", "ai": True})
+    return voci[:MAX_VOCI_CEERLO]
+
+
+def salva_bozza_generata(utente, utente_nome, ruolo, voci):
+    """Mette le voci nella bozza dell'utente, ma solo se non ne ha una o se ha ancora quella preparata (mai toccata)."""
+    if not voci:
+        return False
+    adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db = _DBSession()
+    try:
+        rep = _bozza_di(db, utente)
+        if rep and (rep.origine or "") != "ceerlo":
+            return False  # l'utente ci sta lavorando: non si tocca
+        if not rep:
+            rep = _Report(id="REP-" + uuid.uuid4().hex[:8].upper(), autore=utente, creato_il=adesso, stato="bozza")
+            db.add(rep)
+        rep.autore_nome, rep.ruolo = utente_nome or utente, ruolo or ""
+        rep.righe, rep.testo = voci, _testo_da_voci(voci)
+        rep.modificato_il, rep.origine = adesso, "ceerlo"
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"[bozza ceerlo] {e}")
+        return False
+    finally:
+        db.close()
+
+
+def prepara_bozza_report(utente, utente_nome, ruolo):
+    """Chiede a Ceerlo la bozza del report dal registro. Restituisce (stato, id del lavoro):
+    'niente' (nessuna attivita'), 'occupata' (bozza gia' modificata dall'utente), 'pronta' (senza Ceerlo: voci del registro)
+    oppure 'in_coda' (Ceerlo la scrive in sottofondo e la salva quando ha finito)."""
+    db = _DBSession()
+    try:
+        dal = inizio_periodo_report(db, utente)
+        bozza = _bozza_di(db, utente)
+        if bozza and (bozza.origine or "") != "ceerlo":
+            return "occupata", ""
+    finally:
+        db.close()
+    attivita = registro_attivita(utente, dal)
+    if not attivita:
+        return "niente", ""
+    if not ceerlo.attivo():
+        return ("pronta" if salva_bozza_generata(utente, utente_nome, ruolo, voci_dal_registro(attivita)) else "occupata"), ""
+    elenco = "\n".join(f"- {a['quando'][11:16]} {a['testo']}" + (f" ({a['volte']} volte)" if a.get("volte", 1) > 1 else "")
+                       for a in attivita)
+    messaggi = [{"role": "system", "content": (
+                    f"Sei {ceerlo.NOME}, l'assistente del gestionale di CERLAB. Scrivi in italiano la bozza del report di fine "
+                    f"turno di {utente_nome}, partendo SOLO dal suo registro attivita'. Una voce per riga, ogni riga inizia con '- '. "
+                    "Raggruppa le attivita' sullo stesso preventivo o cliente in una voce sola, in ordine di orario, frasi brevi "
+                    "al passato (es. 'Creato e inviato il preventivo ...'). Lascia i codici esattamente nella forma #CODICE[nome] "
+                    "come nel registro. Niente titoli, introduzioni o commenti, niente cose non presenti nel registro. "
+                    f"Massimo {MAX_VOCI_CEERLO} voci.")},
+                {"role": "user", "content": "REGISTRO ATTIVITA':\n" + elenco[:12000]}]
+
+    def al_termine(risposta):
+        voci = voci_da_ceerlo(risposta) or voci_dal_registro(attivita)
+        salva_bozza_generata(utente, utente_nome, ruolo, voci)
+    try:
+        jid = ceerlo.aggiungi(utente, messaggi, ceerlo.PRIO_RICHIESTA, "bozza_report", al_termine=al_termine,
+                              chiave=f"bozza_report:{utente}")
+    except Exception as e:
+        print(f"[bozza ceerlo] Ceerlo non disponibile: {e}")
+        return ("pronta" if salva_bozza_generata(utente, utente_nome, ruolo, voci_dal_registro(attivita)) else "occupata"), ""
+    return "in_coda", jid
+
+
+def chiudi_report_mancanti(adesso=None):
+    """Alla chiusura serale manda il report di chi ha lavorato ma non l'ha inviato (vedi sopra). Si puo' chiamare
+    piu' volte: chi ha gia' un report della giornata (suo o automatico) viene saltato. Restituisce i report creati."""
+    adesso = adesso or datetime.datetime.now()
+    ora, minuti = integrazioni_google._ora_minuti(integrazioni_google.ora_riepilogo(), "19:00")
+    if adesso < adesso.replace(hour=ora, minute=minuti, second=0, microsecond=0):
+        return []
+    oggi = adesso.strftime("%Y-%m-%d") + " 00:00:00"
+    ts = adesso.strftime("%Y-%m-%d %H:%M:%S")
+    limite = (adesso - datetime.timedelta(hours=ORE_MAX_REGISTRO)).strftime("%Y-%m-%d %H:%M:%S")
+    creati = []
+    with _LOCK_CHIUSURA:
+        db = _DBSession()
+        try:
+            utenti = [u for (u,) in db.query(_RegistroAttivita.utente).filter(
+                _RegistroAttivita.quando > limite, _RegistroAttivita.quando <= ts).distinct().all()]
+            for utente in utenti:
+                if db.query(_Report).filter(_Report.autore == utente, _Report.stato != "bozza",
+                                            _Report.creato_il >= oggi).first():
+                    continue  # ha gia' il report della giornata (inviato da lui a qualunque ora, o automatico)
+                dal = inizio_periodo_report(db, utente, adesso)
+                attivita = registro_attivita(utente, dal, ts)
+                if not attivita:
+                    continue
+                bozza = _bozza_di(db, utente)
+                if bozza and (bozza.origine or "") != "ceerlo" and bozza.righe:
+                    # modificata dall'utente ma non inviata: vale la sua bozza (senza creare task o promemoria non confermati)
+                    rep, voci = bozza, [dict(v, task=bool(v.get("task_id")), promemoria=bool(v.get("promemoria_id")))
+                                        for v in bozza.righe]
+                else:
+                    if bozza:
+                        db.delete(bozza)  # la bozza di Ceerlo non toccata non vale: vale il registro
+                    rep = _Report(id="REP-" + uuid.uuid4().hex[:8].upper(), autore=utente)
+                    db.add(rep)
+                    voci = voci_dal_registro(attivita)
+                    utente_dati = next((u for u in load_users() if u["username"] == utente), {})
+                    rep.autore_nome = utente_dati.get("full_name") or attivita[-1].get("utente_nome") or utente
+                    rep.ruolo = utente_dati.get("role") or ""
+                rep.righe, rep.testo = voci, _testo_da_voci(voci)
+                rep.stato, rep.origine, rep.creato_il, rep.modificato_il = "inviato", "automatico", ts, ""
+                db.commit()
+                creati.append(rep.to_dict())
+        except Exception as e:
+            db.rollback()
+            print(f"[chiusura report] {e}")
+        finally:
+            db.close()
+    for r in creati:
+        integrazioni_google.log(f"Report automatico per {r['autore']} ({len(r['righe'])} voci)")
+    return creati
+
+
+def avvia_chiusura_report():
+    """Ogni minuto: dopo l'ora del riepilogo chiude i report mancanti (anche con le email spente)."""
+    def _giro():
+        while True:
+            try:
+                chiudi_report_mancanti()
+            except Exception as e:
+                print(f"[chiusura report] {e}")
+            time.sleep(60)
+    threading.Thread(target=_giro, daemon=True, name="ChiusuraReport").start()
+
+
+def report_per_riepilogo(quando):
+    """Per il riepilogo serale: prima si chiudono i report mancanti, poi si prendono tutti quelli inviati."""
+    chiudi_report_mancanti()
+    return report_inviati_dal(quando)
+
+
+@app.route("/api/report/bozza-ceerlo", methods=["POST"])
+@login_required
+def api_report_bozza_ceerlo():
+    stato, jid = prepara_bozza_report(session["user_id"], session["user_name"], session.get("user_role", ""))
+    return jsonify({"ok": True, "stato": stato, "job": jid})
+
+
+@app.route("/api/report/bozza-ceerlo/<jid>", methods=["GET"])
+@login_required
+def api_report_bozza_ceerlo_stato(jid):
+    st = ceerlo.stato_job(jid, session["user_id"]) or {}
+    return jsonify({"ok": True, "stato": st.get("stato") or "perso", "posizione": st.get("posizione", 0)})
+
+
 @app.route("/report")
 @login_required
 def report_page():
@@ -8717,13 +9043,21 @@ def api_report_lista():
         inviati = [r for r in tutti_dicts if r.get("stato") != "bozza"]
         # Escludi i report dell'utente collegato dalla lista "ultimi"
         altri = [r for r in inviati if r.get("autore") != me]
-        # I tuoi report inviati, dal più recente, max 20; il primo si puo' ancora modificare
-        miei = sorted((r for r in inviati if r.get("autore") == me), key=lambda x: x.get("creato_il", ""), reverse=True)[:20]
+        # Dei tuoi report inviati si mostra solo l'ultimo (quello che vedono gli altri e che si puo' modificare):
+        # i precedenti sono archiviati e stanno nella scheda Archivio
+        miei = sorted((r for r in inviati if r.get("autore") == me), key=lambda x: x.get("creato_il", ""), reverse=True)
         bozze = sorted((r for r in tutti_dicts if r.get("stato") == "bozza" and r.get("autore") == me),
                        key=lambda x: x.get("modificato_il") or x.get("creato_il", ""), reverse=True)
-        return jsonify({"ok": True, "ultimi": ultimi_report_per_autore(altri), "miei": miei,
-                        "bozza": bozze[0] if bozze else None,
-                        "modificabile": miei[0]["id"] if miei else None})
+        bozza = bozze[0] if bozze else None
+        registro = registro_attivita(me, inizio_periodo_report(db, me))
+        di_ceerlo = bool(bozza and bozza.get("origine") == "ceerlo")
+        return jsonify({"ok": True, "ultimi": ultimi_report_per_autore(altri), "miei": miei[:1],
+                        "miei_archiviati": max(0, len(miei) - 1),
+                        "bozza": bozza, "modificabile": miei[0]["id"] if miei else None,
+                        "registro": registro,
+                        # attivita' arrivate dopo che Ceerlo ha preparato la bozza (si puo' rifarla)
+                        "registro_nuove": sum(1 for a in registro if di_ceerlo and a["quando"] > (bozza.get("modificato_il") or "")),
+                        "ora_chiusura": integrazioni_google.ora_riepilogo(), "ceerlo": ceerlo.attivo()})
     except Exception as e:
         print(f"[api_report_lista] Errore: {e}")
         return jsonify({"ok": False, "error": "Errore nel caricamento."}), 500
@@ -8740,7 +9074,13 @@ def api_report_salva():
     azione = "bozza" if dati.get("azione") == "bozza" else "invia"
     if "righe" not in dati and dati.get("testo"):
         dati["righe"] = [{"testo": t} for t in str(dati["testo"]).splitlines()]  # vecchio formato: una voce per riga
-    voci, err = voci_report(dati, me)
+    db = _DBSession()
+    try:
+        bozza = _bozza_di(db, me)
+        vecchie, origine_bozza = (list(bozza.righe or []), bozza.origine or "") if bozza else ([], "")
+    finally:
+        db.close()
+    voci, err = voci_report(dati, me, vecchie)
     if err:
         return jsonify({"ok": False, "error": err}), 400
     if not voci:
@@ -8755,8 +9095,7 @@ def api_report_salva():
     adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db = _DBSession()
     try:
-        rep = db.query(_Report).filter(_Report.autore == me, _Report.stato == "bozza").order_by(
-            _Report.creato_il.desc()).first()
+        rep = _bozza_di(db, me)
         if not rep:
             rep = _Report(id="REP-" + uuid.uuid4().hex[:8].upper(), autore=me, creato_il=adesso)
             db.add(rep)
@@ -8766,6 +9105,9 @@ def api_report_salva():
         rep.testo = _testo_da_voci(voci)
         rep.modificato_il = adesso
         rep.stato = "bozza"
+        # resta "di Ceerlo" (e quindi alla chiusura vale il registro) solo se le voci sono ancora quelle preparate
+        intatta = origine_bozza == "ceerlo" and [v["testo"] for v in voci] == [v.get("testo") for v in vecchie]
+        rep.origine = "ceerlo" if azione == "bozza" and intatta else ""
         if azione == "invia":
             rep.creato_il = adesso  # la data del report e' quella dell'invio
             rep.modificato_il = ""
@@ -9019,9 +9361,12 @@ def dati_riepilogo(reports, oggi=None):
         return integrazioni_google.togli_importi(t)
     d = {"oggi": oggi, "domani": domani, "errori": [],
          "report": [{"autore": r.get("autore_nome") or r.get("autore"), "ora": (r.get("creato_il") or "")[11:16],
+                     # automatico = l'utente non l'ha inviato: e' il suo registro attivita'
+                     "automatico": r.get("origine") == "automatico",
                      "voci": [{"testo": pulisci(v.get("testo")), "task": bool(v.get("task_id")),
-                               "promemoria": bool(v.get("promemoria_id"))} for v in (r.get("righe") or [])]
-                     or [{"testo": pulisci(t), "task": False, "promemoria": False}
+                               "promemoria": bool(v.get("promemoria_id")), "ai": bool(v.get("ai"))}
+                              for v in (r.get("righe") or [])]
+                     or [{"testo": pulisci(t), "task": False, "promemoria": False, "ai": False}
                          for t in (r.get("testo") or "").splitlines() if t.strip()]}
                     for r in reports],
          "agenda": {oggi.isoformat(): [], domani.isoformat(): []}, "promemoria": [], "incassi": [], "task": []}
@@ -9061,7 +9406,7 @@ def dati_riepilogo(reports, oggi=None):
 def _contesto_riepilogo(d):
     righe = [f"OGGI: {_giorno_lungo(d['oggi'])}. DOMANI: {_giorno_lungo(d['domani'])}.", "", "REPORT DI OGGI:"]
     for r in d["report"]:
-        righe.append(f"{r['autore']} ({r['ora']}):")
+        righe.append(f"{r['autore']} ({r['ora']})" + (" [report non inviato: registro attivita' del gestionale]" if r["automatico"] else "") + ":")
         righe += [f"  - {v['testo']}" + (" [diventata task]" if v["task"] else "") + (" [promemoria]" if v["promemoria"] else "")
                   for v in r["voci"]]
     if not d["report"]:
@@ -9175,7 +9520,8 @@ def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
         t += ["IL PUNTO DI CEERLO", ai, ""]
     t.append(f"REPORT DI OGGI ({len(d['report'])}):")
     for r in d["report"]:
-        t += ["", f"Report di {r['autore']} ({r['ora']})"] + [f"- {v['testo']}" for v in r["voci"]]
+        t += ["", f"Report di {r['autore']} ({r['ora']})" + (" - dal registro attivita'" if r["automatico"] else "")] + \
+             [f"- {'[AI] ' if v['ai'] else ''}{v['testo']}" for v in r["voci"]]
     if not d["report"]:
         t.append("Nessun report inviato.")
     t.append("")
@@ -9224,7 +9570,7 @@ def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
     # I programmi di posta che non gestiscono le tendine (es. Gmail sul web) li mostrano gia' aperti.
     rep_html = []
     for r in d["report"]:
-        voci = "".join(f'<li style="margin:3px 0;">{esc(v["testo"])}'
+        voci = "".join(f'<li style="margin:3px 0;">' + ('<span title="Scritta da Ceerlo">🤖</span> ' if v["ai"] else "") + f'{esc(v["testo"])}'
                        + (' <span style="font-size:11px;background:#eef1fd;color:#3b4fe4;border-radius:8px;padding:1px 7px;">task</span>' if v["task"] else "")
                        + (' <span style="font-size:11px;background:#fff4d6;color:#b45309;border-radius:8px;padding:1px 7px;">promemoria</span>' if v["promemoria"] else "")
                        + "</li>" for v in r["voci"])
@@ -9233,6 +9579,7 @@ def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
                         f'<summary style="display:block;list-style:none;cursor:pointer;padding:11px 14px;font-weight:700;font-size:14px;color:#111827;">'
                         f'<span style="color:{blu};">&#9656;</span> Report di {_h.escape(r["autore"] or "")}'
                         f'<span style="font-weight:400;color:{grigio};font-size:12.5px;"> · {esc(r["ora"])} · '
+                        + ("dal registro attività · " if r["automatico"] else "") +
                         f'{n} {"voce" if n == 1 else "voci"}</span></summary>'
                         f'<ul style="margin:0;padding:0 14px 12px 34px;font-size:14px;line-height:1.5;color:#1f2937;">{voci}</ul></details>')
     blocchi.append(sezione(f"Report di oggi ({len(d['report'])})", "📝",

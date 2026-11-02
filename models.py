@@ -374,6 +374,9 @@ class Report(Base):
     righe = Column(JSON, default=list)
     stato = Column(String, default="inviato")  # bozza (la vede solo l'autore) | inviato
     modificato_il = Column(String, default="")
+    # "" scritto dall'utente | "ceerlo" bozza preparata da Ceerlo (o dal registro) e non ancora toccata
+    # | "automatico" inviato da solo alla chiusura serale perche' l'utente non l'ha mandato
+    origine = Column(String, default="")
 
     def to_dict(self):
         return {
@@ -386,7 +389,28 @@ class Report(Base):
             "righe": self.righe or [],
             "stato": self.stato or "inviato",
             "modificato_il": self.modificato_il or "",
+            "origine": self.origine or "",
         }
+
+
+class RegistroAttivita(Base):
+    """Registro delle attivita' di ogni utente (preventivi, incassi, clienti, consegne, ...).
+    Ceerlo lo trasforma nella bozza del report; se l'utente non manda il report, vale come report della giornata."""
+    __tablename__ = "registro_attivita"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    utente = Column(String, index=True)        # username
+    utente_nome = Column(String, default="")
+    quando = Column(String, index=True)        # "YYYY-MM-DD HH:MM:SS" (l'ultima volta, per le attivita' ripetute)
+    tipo = Column(String, default="")          # es. preventivo_nuovo, preventivo_modificato, incasso, cliente_nuovo
+    riferimento = Column(String, default="")   # numero del preventivo o codice cliente
+    testo = Column(Text, default="")           # la voce gia' pronta per il report, con #CODICE[nome]
+    volte = Column(Integer, default=1)         # quante volte nella giornata (es. salvataggi dello stesso preventivo)
+
+    def to_dict(self):
+        return {"id": self.id, "utente": self.utente or "", "utente_nome": self.utente_nome or "",
+                "quando": self.quando or "", "tipo": self.tipo or "", "riferimento": self.riferimento or "",
+                "testo": self.testo or "", "volte": self.volte or 1}
 
 
 class Promemoria(Base):
@@ -719,7 +743,8 @@ def _apply_schema_migrations():
         "tasks": [("tipo", "TEXT DEFAULT ''"), ("gruppo", "TEXT DEFAULT ''"), ("report_id", "TEXT DEFAULT ''"),
                   ("etc", "TEXT DEFAULT ''"), ("etc_avvisata", "TEXT DEFAULT ''"), ("titolo", "TEXT DEFAULT ''"),
                   ("concluso_il", "TEXT DEFAULT ''")],
-        "reports": [("righe", "TEXT DEFAULT '[]'"), ("stato", "TEXT DEFAULT 'inviato'"), ("modificato_il", "TEXT DEFAULT ''")],
+        "reports": [("righe", "TEXT DEFAULT '[]'"), ("stato", "TEXT DEFAULT 'inviato'"), ("modificato_il", "TEXT DEFAULT ''"),
+                    ("origine", "TEXT DEFAULT ''")],
         "utenti": [("email", "TEXT DEFAULT ''"), ("email_report", "INTEGER DEFAULT 0"), ("email_admin", "INTEGER DEFAULT 0")],
     }
 

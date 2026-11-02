@@ -23,10 +23,18 @@
 
         <div id="rpErrore" class="rp-errore" style="display: none;"></div>
         <div id="rpAvviso" class="rp-avviso" style="display: none;"></div>
+        <div id="rpNotaCeerlo" class="rp-nota-ceerlo" style="display: none;"></div>
+
+        <details id="rpRegistro" class="rp-registro" style="display: none;">
+            <summary><i class="fas fa-stream"></i> Il tuo registro attività <span id="rpRegistroConta"></span></summary>
+            <p class="rp-registro-info">Quello che hai fatto nel gestionale dal tuo ultimo report. Se a fine giornata non invii il report, vale questo registro.</p>
+            <ul id="rpRegistroLista"></ul>
+        </details>
 
         <div class="rp-azioni">
             <button type="button" id="rpScarta" class="btn rp-link-danger" style="display: none;"><i class="fas fa-trash-alt"></i> Scarta bozza</button>
             <span class="rp-spazio"></span>
+            <button type="button" id="rpCeerlo" class="btn btn-outline" style="display: none;" title="Ceerlo scrive la bozza del report partendo dal tuo registro attività"><i class="fas fa-robot"></i> Prepara con Ceerlo</button>
             <button type="button" id="rpAnnulla" class="btn" style="display: none;">Annulla</button>
             <button type="button" id="rpBozza" class="btn btn-outline"><i class="far fa-save"></i> Salva bozza</button>
             <button type="button" id="rpInvia" class="btn primary"><i class="fas fa-paper-plane"></i> Invia report</button>
@@ -43,9 +51,10 @@
         <div id="reportUltimi" class="report-lista"></div>
         <div id="reportVuoto" class="report-vuoto" style="display: none;">Nessun collega ha ancora inviato un report.</div>
 
-        <h3 class="section-label">I miei report</h3>
+        <h3 class="section-label">Il mio ultimo report</h3>
         <div id="reportMiei" class="report-lista"></div>
         <div id="reportMieiVuoto" class="report-vuoto" style="display: none;">Non hai ancora inviato report.</div>
+        <button type="button" id="reportMieiArchivio" class="rp-link-archivio" style="display: none;"><i class="fas fa-archive"></i> <span></span></button>
     </div>
 
     <div id="schedaArchivio" style="display: none;">
@@ -87,7 +96,21 @@
     .rp-check i, .rp-togli i { pointer-events: none; }
     .rp-voce.is-task .rp-check { color: var(--accent); }
     .rp-check:disabled { cursor: default; opacity: 0.9; }
-    .rp-campo { position: relative; min-width: 0; }
+    .rp-campo { position: relative; min-width: 0; display: flex; align-items: flex-start; gap: 6px; }
+    .rp-origine { flex-shrink: 0; margin-top: 7px; font-size: 13px; color: hsl(262, 60%, 52%); }
+    .rp-origine.registro { color: var(--text-subtle); }
+    .rp-nota-ceerlo { margin-top: 12px; font-size: 12.5px; color: var(--text-muted); background: var(--surface-2); border-radius: var(--radius); padding: 8px 12px; }
+    .rp-nota-ceerlo i { color: hsl(262, 60%, 52%); margin-right: 4px; }
+    .rp-registro { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 12px; font-size: 13px; }
+    .rp-registro summary { cursor: pointer; font-weight: 600; color: var(--text-muted); }
+    .rp-registro-info { margin: 8px 0 6px; color: var(--text-subtle); font-size: 12px; }
+    .rp-registro ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+    .rp-registro li { display: flex; gap: 10px; overflow-wrap: anywhere; }
+    .rp-registro li time { color: var(--text-subtle); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .rp-registro .shout-link { color: var(--accent); font-weight: 600; text-decoration: underline; }
+    .rp-link-archivio { margin-top: 10px; width: auto; border: none; background: none; font: inherit; font-size: 13px; font-weight: 600; color: var(--accent); cursor: pointer; padding: 4px 0; }
+    .report-voci li.voce-ai > i { color: hsl(262, 60%, 52%); font-size: 12px; margin-top: 4px; }
+    .report-etichetta.automatico { background: var(--surface-2); color: var(--text-muted); }
     .rp-campo textarea { width: 100%; box-sizing: border-box; border: none; outline: none; resize: none; background: transparent; font: inherit; font-size: 15px; line-height: 1.5; padding: 5px 2px; min-height: 34px; overflow: hidden; box-shadow: none; }
     .rp-campo .mention-list { top: 100%; bottom: auto; left: 0; right: 0; margin-top: 4px; max-height: 220px; }
     .rp-togli { width: 30px; height: 30px; margin-top: 2px; border: none; background: none; color: var(--text-subtle); font-size: 15px; cursor: pointer; border-radius: 8px; padding: 0; }
@@ -286,9 +309,12 @@ document.addEventListener('DOMContentLoaded', () => {
     riga.dataset.promemoriaId = dati.promemoria_id || '';
     riga.dataset.promData = dati.prom_data || '';
     riga.dataset.promOra = dati.prom_ora || '';
+    riga.dataset.origine = dati.ai ? 'ai' : (dati.registro ? 'registro' : '');
     riga.innerHTML = `
       <button type="button" class="rp-check"></button>
       <div class="rp-campo">
+        ${riga.dataset.origine === 'ai' ? '<span class="rp-origine" title="Voce scritta da Ceerlo: cambiala come vuoi"><i class="fas fa-robot"></i></span>' : ''}
+        ${riga.dataset.origine === 'registro' ? '<span class="rp-origine registro" title="Voce presa dal registro attività"><i class="fas fa-stream"></i></span>' : ''}
         <textarea class="con-badge" rows="1" placeholder="Scrivi una voce… (@ collega o gruppo, # preventivo o cliente)"></textarea>
         <div class="mention-list"></div>
       </div>
@@ -298,7 +324,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const ta = riga.querySelector('textarea');
     const lista = riga.querySelector('.mention-list');
     ta.value = dati.testo || '';
-    ta.addEventListener('input', () => { autoGrow(ta); aggiornaVoce(riga); window.handleAutocomplete(ta, lista); });
+    const testoGenerato = ta.value;
+    ta.addEventListener('input', () => {
+      autoGrow(ta); aggiornaVoce(riga); window.handleAutocomplete(ta, lista);
+      // appena la cambi la voce e' tua: il robottino resta solo sulle voci di Ceerlo non toccate
+      const icona = riga.querySelector('.rp-origine');
+      if (icona) icona.style.display = ta.value.trim() === testoGenerato.trim() ? '' : 'none';
+    });
     ta.addEventListener('change', () => aggiornaVoce(riga));
     ta.addEventListener('keydown', (e) => {
       // Invio = nuova voce (se non si sta scegliendo un suggerimento); Maiusc+Invio va a capo
@@ -346,7 +378,8 @@ document.addEventListener('DOMContentLoaded', () => {
     return { testo: r.querySelector('textarea').value.trim(), task: r.classList.contains('is-task'),
              etc: etc ? etc.value : (r.dataset.etc || ''), task_id: r.dataset.taskId || '',
              promemoria: r.classList.contains('is-promemoria'), prom_data: r.dataset.promData || '',
-             prom_ora: r.dataset.promOra || '', promemoria_id: r.dataset.promemoriaId || '' };
+             prom_ora: r.dataset.promOra || '', promemoria_id: r.dataset.promemoriaId || '',
+             ai: r.dataset.origine === 'ai', registro: r.dataset.origine === 'registro' };
   }).filter(v => v.testo);
 
   const impronta = () => JSON.stringify(leggiVoci());
@@ -428,7 +461,7 @@ document.addEventListener('DOMContentLoaded', () => {
         else mostraAvviso('Report inviato' + frase);
         if (dati.avviso) mostraErrore(dati.avviso);
         bozzaId = null; modificaId = null;
-        stato('');
+        stato(''); notaCeerlo('');
         impostaModo('nuovo');
         riempi([]);
         await carica();
@@ -452,6 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!bozzaId || !confirm('Scartare la bozza? Le voci scritte si perdono.')) return;
     await fetch(`/api/report/${encodeURIComponent(bozzaId)}`, { method: 'DELETE' });
     bozzaId = null; stato(''); impostaModo('nuovo'); riempi([]);
+    await carica(); notaCeerlo('');
   });
   window.addEventListener('beforeunload', (e) => {
     if (impronta() !== ultimoSalvato && leggiVoci().length) { e.preventDefault(); e.returnValue = ''; }
@@ -463,10 +497,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return `<div class="report-corpo">${window.parseMessage(escapeHtml(r.testo || '')).replace(/\n/g, '<br>')}</div>`;
     }
     return '<ul class="report-voci">' + r.righe.map(v => {
-      const isTask = !!v.task_id, isProm = !isTask && !!v.promemoria_id;
+      const isTask = !!v.task_id, isProm = !isTask && !!v.promemoria_id, isAi = !isTask && !isProm && !!v.ai;
       const link = isTask ? `<a class="voce-task-link" href="/tasks#${escapeHtml(v.task_id)}"><i class="fas fa-tasks"></i> Task</a>`
         : (isProm ? `<a class="voce-prom-link" href="/calendario?giorno=${escapeHtml(v.prom_data || '')}"><i class="fas fa-bell"></i> ${escapeHtml(dataIt(v.prom_data))}${v.prom_ora ? ' ' + escapeHtml(v.prom_ora) : ''}</a>` : '');
-      return `<li class="${isTask ? 'voce-task' : (isProm ? 'voce-promemoria' : '')}"><i class="fas ${isTask ? 'fa-check-square' : (isProm ? 'fa-bell' : 'fa-circle')}"></i><span class="voce-testo">${window.parseMessage(escapeHtml(v.testo)).replace(/\n/g, '<br>')}${link}</span></li>`;
+      return `<li class="${isTask ? 'voce-task' : (isProm ? 'voce-promemoria' : (isAi ? 'voce-ai' : ''))}"${isAi ? ' title="Voce scritta da Ceerlo"' : ''}><i class="fas ${isTask ? 'fa-check-square' : (isProm ? 'fa-bell' : (isAi ? 'fa-robot' : 'fa-circle'))}"></i><span class="voce-testo">${window.parseMessage(escapeHtml(v.testo)).replace(/\n/g, '<br>')}${link}</span></li>`;
     }).join('') + '</ul>';
   };
 
@@ -478,6 +512,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="report-head">
         <span class="report-avatar">${escapeHtml(initials(nome))}</span>
         <div class="report-chi"><strong>${escapeHtml(nome)}</strong><small>${escapeHtml(formatData(r.creato_il))}</small></div>
+        ${r.origine === 'automatico' ? '<span class="report-etichetta automatico" title="Il report non è stato inviato: alla chiusura vale il registro attività">automatico · dal registro</span>' : ''}
         ${opzioni.etichetta ? `<span class="report-etichetta">${escapeHtml(opzioni.etichetta)}</span>` : ''}
         ${opzioni.modificabile ? `<span class="report-card-azioni">
             <button type="button" class="modifica" title="Modifica"><i class="fas fa-pen"></i></button>
@@ -496,6 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (impronta() !== ultimoSalvato && leggiVoci().length && !confirm('Hai voci non salvate nel report: lasciarle?')) return;
     modificaId = r.id;
     impostaModo('modifica', r);
+    notaCeerlo('');
     riempi(r.righe && r.righe.length ? r.righe : (r.testo || '').split('\n').map(t => ({ testo: t })));
     $('rpComposer').scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
@@ -529,8 +565,13 @@ document.addEventListener('DOMContentLoaded', () => {
     $('reportVuoto').style.display = ultimi.length ? 'none' : '';
     ultimi.forEach(r => boxUltimi.appendChild(creaCard(r)));
     $('reportMieiVuoto').style.display = mieiReport.length ? 'none' : '';
-    mieiReport.forEach((r, i) => boxMiei.appendChild(creaCard(r, {
-      attuale: i === 0, etichetta: i === 0 ? 'visibile agli altri' : 'archiviato', modificabile: r.id === ultimoModificabile })));
+    mieiReport.slice(0, 1).forEach(r => boxMiei.appendChild(creaCard(r, {
+      attuale: true, etichetta: 'visibile agli altri', modificabile: r.id === ultimoModificabile })));
+    const nArch = datiLista.miei_archiviati || 0;
+    const linkArch = $('reportMieiArchivio');
+    linkArch.style.display = nArch ? '' : 'none';
+    linkArch.querySelector('span').textContent = `I miei report archiviati (${nArch})`;
+    mostraRegistro(datiLista);
     return datiLista;
   };
 
@@ -539,12 +580,82 @@ document.addEventListener('DOMContentLoaded', () => {
     bozzaId = bozza ? bozza.id : null;
     if (bozza) {
       riempi(bozza.righe && bozza.righe.length ? bozza.righe : [{ testo: bozza.testo }]);
-      stato(`Bozza del ${formatData(bozza.modificato_il || bozza.creato_il)} · la vedi solo tu`, 'bozza');
+      stato(bozza.origine === 'ceerlo' ? `Bozza preparata da Ceerlo · la vedi solo tu`
+                                       : `Bozza del ${formatData(bozza.modificato_il || bozza.creato_il)} · la vedi solo tu`, 'bozza');
     } else {
       riempi([]);
     }
     impostaModo('nuovo');
+    notaCeerlo();
   };
+
+  // --- Registro attivita' e bozza di Ceerlo ---
+  const mostraRegistro = (d) => {
+    const reg = (d && d.registro) || [];
+    $('rpRegistro').style.display = reg.length ? '' : 'none';
+    $('rpRegistroConta').textContent = reg.length ? `(${reg.length})` : '';
+    $('rpRegistroLista').innerHTML = reg.map(a => `<li><time>${escapeHtml(formatData(a.quando))}</time><span>${window.parseMessage(escapeHtml(a.testo))}${a.volte > 1 ? ` <small>(${a.volte} volte)</small>` : ''}</span></li>`).join('');
+    // Ceerlo prepara la bozza se c'e' qualcosa nel registro e la bozza non e' gia' dell'utente
+    const bozza = d && d.bozza;
+    const libera = !bozza || bozza.origine === 'ceerlo';
+    $('rpCeerlo').style.display = reg.length && libera ? '' : 'none';
+    $('rpCeerlo').innerHTML = bozza && bozza.origine === 'ceerlo'
+      ? `<i class="fas fa-robot"></i> Rifai con Ceerlo${d.registro_nuove ? ` (+${d.registro_nuove})` : ''}` : '<i class="fas fa-robot"></i> Prepara con Ceerlo';
+  };
+
+  const notaCeerlo = (testo) => {
+    const nota = $('rpNotaCeerlo');
+    const bozza = datiLista && datiLista.bozza;
+    if (!testo && bozza && bozza.id === bozzaId && bozza.origine === 'ceerlo' && modo === 'nuovo') {
+      testo = `Le voci con il robottino le ha scritte Ceerlo dal tuo registro attività: controllale, cambiale e invia. ` +
+              `Se alle ${datiLista.ora_chiusura} non l'hai né modificata né inviata, come report vale il registro attività.`;
+    }
+    nota.innerHTML = testo ? `<i class="fas fa-robot"></i> ${escapeHtml(testo)}` : '';
+    nota.style.display = testo ? '' : 'none';
+  };
+
+  let attesaCeerlo = null;
+  const preparaConCeerlo = async (automatica) => {
+    if (attesaCeerlo) return;
+    if (!automatica && impronta() !== ultimoSalvato && leggiVoci().length && !confirm('Le voci scritte ora verranno sostituite dalla bozza di Ceerlo. Continuare?')) return;
+    $('rpCeerlo').disabled = true;
+    try {
+      const res = await fetch('/api/report/bozza-ceerlo', { method: 'POST' });
+      const d = await res.json();
+      if (d.stato === 'pronta') { await carica(); caricaComposer(); return; }
+      if (d.stato !== 'in_coda') { if (!automatica) notaCeerlo(d.stato === 'niente' ? 'Nel registro non ci sono attività nuove.' : 'Hai già una bozza tua: Ceerlo non la tocca.'); return; }
+      notaCeerlo('Ceerlo sta scrivendo la bozza del report dal tuo registro attività…');
+      const inizio = Date.now();
+      attesaCeerlo = setInterval(async () => {
+        let st = {};
+        try { st = await (await fetch(`/api/report/bozza-ceerlo/${encodeURIComponent(d.job)}`)).json(); } catch (e) {}
+        const finito = ['fatto', 'errore', 'perso'].includes(st.stato) || Date.now() - inizio > 5 * 60 * 1000;
+        if (!finito) return;
+        clearInterval(attesaCeerlo); attesaCeerlo = null; $('rpCeerlo').disabled = false;
+        // non si sostituisce quello che l'utente ha scritto nel frattempo
+        if (impronta() !== ultimoSalvato && leggiVoci().length) { notaCeerlo('La bozza di Ceerlo è pronta: ricarica la pagina per vederla.'); return; }
+        await carica(); caricaComposer();
+        if (st.stato !== 'fatto') notaCeerlo('Ceerlo non ha risposto: la bozza riporta il registro attività.');
+      }, 4000);
+    } catch (e) {
+      notaCeerlo('');
+    } finally {
+      if (!attesaCeerlo) $('rpCeerlo').disabled = false;
+    }
+  };
+  $('rpCeerlo').addEventListener('click', () => preparaConCeerlo(false));
+
+  $('reportMieiArchivio').addEventListener('click', () => {
+    if (![...archFiltroAutore.options].some(o => o.value === window.currentUserId)) {
+      const opt = document.createElement('option');
+      opt.value = window.currentUserId; opt.textContent = 'I miei report';
+      archFiltroAutore.appendChild(opt);
+    }
+    archFiltroAutore.value = window.currentUserId;
+    archivioAperto = true;
+    document.querySelector('.report-scheda[data-scheda="archivio"]').click();
+    caricaArchivio(true);
+  });
 
   // --- Archivio: tutti i report inviati, a pagine da 20 ---
   const archFiltroAutore = $('archFiltroAutore');
@@ -584,6 +695,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (data.autori && !archAutoriCaricati) {
         data.autori.forEach(a => {
+          const gia = [...archFiltroAutore.options].find(o => o.value === a.autore);
+          if (gia) { gia.textContent = a.autore_nome || a.autore; return; }
           const opt = document.createElement('option');
           opt.value = a.autore;
           opt.textContent = a.autore_nome || a.autore;
@@ -635,6 +748,7 @@ document.addEventListener('DOMContentLoaded', () => {
   Promise.all([caricaDestinatari, carica()]).then(() => {
     caricaComposer();
     voci.querySelectorAll('.rp-voce').forEach(aggiornaVoce);
+    if (datiLista && (datiLista.registro || []).length && !datiLista.bozza) preparaConCeerlo(true);
   });
 });
 </script>
