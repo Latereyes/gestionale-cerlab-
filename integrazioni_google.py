@@ -206,7 +206,8 @@ def togli_importi(testo):
     return _IMPORTO.sub("[importo]", testo or "")
 
 
-def _manda(destinatari, oggetto, testo, html=None):
+def _manda(destinatari, oggetto, testo, html=None, allegati=None):
+    """allegati: [(nome_file, testo)] allegati come file di testo (UTF-8), gia' senza importi."""
     cfg = leggi_config()["email"]
     password = svela(cfg["password"])
     if not cfg["mittente"] or not password:
@@ -221,6 +222,9 @@ def _manda(destinatari, oggetto, testo, html=None):
     msg.set_content(togli_importi(testo))
     if html:
         msg.add_alternative(html, subtype="html")  # l'HTML arriva gia' senza importi (lo compone chi lo manda)
+    for nome, contenuto in allegati or []:
+        sottotipo = "csv" if nome.lower().endswith(".csv") else "plain"
+        msg.add_attachment(togli_importi(contenuto).encode("utf-8-sig"), maintype="text", subtype=sottotipo, filename=nome)
     utente, chiave = cfg["mittente"].strip(), password.replace(" ", "").strip()
     errori = []
     # prima SSL sulla 465; se Gmail chiude la connessione (rete, antivirus, errore temporaneo) riprova con STARTTLS sulla 587
@@ -252,9 +256,9 @@ def _manda(destinatari, oggetto, testo, html=None):
                    "per le app. Dettagli: " + "; ".join(errori))
 
 
-def manda_in_background(destinatari, oggetto, testo):
+def manda_in_background(destinatari, oggetto, testo, html=None, allegati=None):
     """Non blocca mai la richiesta: l'invio va in un thread e gli errori finiscono nel log."""
-    threading.Thread(target=_manda, args=(destinatari, oggetto, testo), daemon=True).start()
+    threading.Thread(target=_manda, args=(destinatari, oggetto, testo, html, allegati), daemon=True).start()
 
 
 def email_prova(destinatari):
@@ -283,15 +287,16 @@ def email_report(report, destinatari):
     manda_in_background(destinatari, oggetto, testo)
 
 
-def email_admin_task(richiesta, destinatari):
-    """Una richiesta dal tasto flottante admin: va a chi in gestione utenze ha "riceve le richieste admin"."""
+def email_admin_task(richiesta, destinatari, testo=None, html=None, allegati=None):
+    """Una richiesta dal tasto flottante admin: va a chi in gestione utenze ha "riceve le richieste admin".
+    testo/html gia' composti (codici in chiaro, registro attivita'); allegati: [(nome, testo)]."""
     cfg = leggi_config()
     if not email_attiva(cfg) or not destinatari:
         return
     oggetto = f"Richiesta admin {richiesta.get('id')} da {richiesta.get('user_name')}"
-    testo = (f"{richiesta.get('user_name')} ha inviato una richiesta admin il {richiesta.get('timestamp')}.\n\n"
-             f"{richiesta.get('description')}")
-    manda_in_background(destinatari, oggetto, testo)
+    testo = testo or (f"{richiesta.get('user_name')} ha inviato una richiesta admin il {richiesta.get('timestamp')}.\n\n"
+                      f"{richiesta.get('description')}")
+    manda_in_background(destinatari, oggetto, testo, html, allegati)
 
 
 def avvia_riepilogo_giornaliero(report_dal, destinatari, componi=None):

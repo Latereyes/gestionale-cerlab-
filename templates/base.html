@@ -263,6 +263,8 @@
 .ncp-aggiungi { border: 1px dashed var(--border-strong, #cbd5e1); background: none; border-radius: var(--radius-md, 8px); width: 100%; padding: 8px;
     font: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; }
 .ncp-aggiungi:hover { color: var(--accent); border-color: var(--accent); }
+.admin-support-campo { position: relative; }
+.admin-support-campo .mention-list { top: 100%; bottom: auto; left: 0; right: 0; margin-top: 4px; }
 .ncp-aggiungi .rp-tasto { font-size: 10.5px; font-weight: 600; color: var(--text-subtle); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; margin-left: 6px; }
 .note-cliente-panel .ncp-footer {
     padding: 14px 20px; border-top: 1px solid var(--border, #e2e8f0);
@@ -1716,8 +1718,13 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
         <p class="muted" style="font-size: 12px; margin-bottom: 10px;">
             Segnala un bug o richiedi una modifica tecnica. Questa nota arriverà direttamente all'amministratore.
         </p>
-        <textarea id="adminSupportInput" placeholder="Descrivi qui il problema riscontrato..." 
-                  style="min-height: 120px; padding: 12px; border: 1px solid #fecaca;"></textarea>
+        <div class="admin-support-campo">
+            <textarea id="adminSupportInput" class="con-badge" placeholder="Descrivi qui il problema riscontrato... (@ collega, # preventivo o cliente)"
+                      oninput="window.handleAutocomplete(this, document.getElementById('adminSupportMentions'))"
+                      style="min-height: 120px; padding: 12px; border: 1px solid #fecaca;"></textarea>
+            <div id="adminSupportMentions" class="mention-list"></div>
+        </div>
+        <p class="muted" style="font-size: 11.5px; margin: 6px 0 0;"><i class="fas fa-stream"></i> All'email per l'amministratore si allega il tuo registro attività delle ultime 24 ore.</p>
         <div class="modal-actions">
             <button id="saveAdminSupportBtn" class="btn success" style="background:#da0303; color:white; border:none;">Invia Segnalazione</button>
             <button onclick="document.getElementById('adminSupportModal').style.display='none'" class="btn">Annulla</button>
@@ -2467,18 +2474,18 @@ window.openAdminSupport = function(contextId, contextType, contextLabel) {
     const saveBtn = document.getElementById('saveAdminSupportBtn');
     
     // Pulizia e formattazione tag automatica come nella Task Rapida
+    // Il riferimento alla pagina come nelle task: #CODICE[nome] (si vede come badge, nell'email diventa "nome (CODICE)")
     let tagValue = "";
     if (contextId && contextId !== "") {
         const cleanId = contextId.toString().replace('#', '');
-        if (contextType === 'client') {
-            tagValue = `[${contextLabel}] `;
-        } else {
-            tagValue = `[#${cleanId} (${contextLabel})] `;
-        }
+        const nome = (contextLabel || '').replace(/[\[\]]/g, ' ').trim();
+        tagValue = nome ? `#${cleanId}[${nome}] ` : `#${cleanId} `;
     }
 
     input.value = tagValue;
     modal.style.display = 'flex';
+    if (window.attivaBadge) window.attivaBadge(input);
+    input.dispatchEvent(new Event('input'));
     input.focus();
 
     saveBtn.onclick = async () => {
@@ -2492,7 +2499,7 @@ window.openAdminSupport = function(contextId, contextType, contextLabel) {
             const response = await fetch('/api/admin-support', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ description: text })
+                body: JSON.stringify({ description: text, pagina: window.location.pathname + window.location.search })
             });
             
             if(response.ok) {

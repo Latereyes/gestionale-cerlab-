@@ -1,4 +1,71 @@
-{
+[
+  {
+    "version": "3.5.0",
+    "date": "02/11/2026",
+    "title": "Registro attività, report scritti da Ceerlo e nuova dashboard",
+    "changes": [
+      "<b>Registro attività:</b> il gestionale annota da solo quello che fai (preventivi nuovi e modificati, incassi, clienti, ordini, consegne, fatture).",
+      "<b>Report preparato da Ceerlo:</b> nella pagina Report trovi la bozza scritta da Ceerlo dal tuo registro; le voci col robottino le ha scritte lui. Se a fine giornata non la invii né la modifichi, come report vale il registro attività.",
+      "<b>Turni:</b> il report si può inviare a qualunque ora; quello automatico della sera non tocca mai un report già inviato.",
+      "<b>Dashboard nuova:</b> sotto il flusso di lavoro l'agenda dei prossimi 7 giorni, le tue task in scadenza e l'anteprima del report; poi Prodotti, Clienti e preventivi, Amministrazione.",
+      "<b>Archivi per periodo:</b> task e report archiviati divisi in questa settimana, settimana scorsa, questo mese, mese scorso, quest'anno e molto vecchi. In \"I miei report\" resta solo l'ultimo.",
+      "<b>Conferme d'ordine:</b> gli articoli presi dal magazzino risultano confermati in automatico; il tasto copia crea una tabella da incollare nelle email al fornitore; corretto il trasporto \"a parte\" nei nuovi ordini.",
+      "<b>Note cliente a voci:</b> le note interne si scrivono una per voce, con chi le ha scritte e quando.",
+      "<b>Ceerlo legge le note:</b> aprendo un preventivo ti riassume le note del cliente; nella consegna ti avvisa quando serve il materiale, se c'è fretta e degli indirizzi di cantiere.",
+      "<b>Richieste admin:</b> @ e # si vedono come nelle task e all'email si allega il registro attività delle ultime 24 ore.",
+      "<b>Grafica:</b> tasti laterali con sfumature, Ceerlo sopra la barra in basso, \"Notifiche su questo PC\" solo per l'amministratore."
+    ]
+  },
+  {
+    "version": "3.4.0",
+    "date": "31/10/2026",
+    "title": "Ceerlo, calendario e riepilogo serale",
+    "changes": [
+      "<b>Ceerlo:</b> l'assistente AI del gestionale; capisce @colleghi e #clienti o preventivi, legge report, task, agenda, note e saldi.",
+      "<b>Calendario condiviso:</b> griglia mensile con appuntamenti assegnati ai colleghi, incassi programmati e promemoria.",
+      "<b>Email e riepilogo serale:</b> report via Gmail e riepilogo della giornata impaginato, con il riassunto di Ceerlo.",
+      "<b>Chiusura serale:</b> spegnimento dei PC dell'ufficio all'ora scelta.",
+      "<b>Task:</b> titoli brevi scritti da Ceerlo; le concluse da oltre 7 giorni vanno in archivio (3.4.1 - 3.4.3)."
+    ]
+  },
+  {
+    "version": "3.3.0",
+    "date": "19/10/2026",
+    "title": "Catalogo e pulizia",
+    "changes": [
+      "<b>Catalogo:</b> pagina di consultazione della bozza di catalogo interno (listini, sconti, prezzi dai preventivi).",
+      "<b>Sicurezza:</b> chiave segreta generata al primo avvio; tolti dal programma dati e file che non servivano."
+    ]
+  },
+  {
+    "version": "3.2.0",
+    "date": "17/10/2026",
+    "title": "Campionari",
+    "changes": [
+      "<b>Campionari:</b> catalogo dei campioni in sala e foto dei bagni realizzati, dentro il gestionale."
+    ]
+  },
+  {
+    "version": "3.1.0",
+    "date": "07/10/2026",
+    "title": "Magazzino e telefono",
+    "changes": [
+      "<b>Magazzino:</b> articoli e giacenze, prenotazione dai preventivi e scarico alla consegna, carichi col costo medio.",
+      "<b>Telefono:</b> interfaccia per schermi piccoli, accesso via Tailscale e installazione come app."
+    ]
+  },
+  {
+    "version": "3.0.0",
+    "date": "03/10/2026",
+    "title": "Gestionale V3",
+    "changes": [
+      "<b>Nuovo database:</b> i dati stanno in AppData e non si perdono con gli aggiornamenti.",
+      "<b>Gestionale Notifiche:</b> programma per i PC dell'ufficio con messaggi e avvisi vicino all'orologio.",
+      "<b>Editor:</b> copia di sicurezza locale del preventivo in compilazione.",
+      "<b>CEO:</b> dashboard ed export Excel con regole e numeri coerenti."
+    ]
+  },
+  {
     "version": "2.3.0",
     "date": "05/05/2026",
     "title": "PDF Edili, Allegati Chat e Task Private",
@@ -13,5 +80,6 @@
       "<b>Fix Notifiche Task:</b> Risolto il problema di visibilità delle task taggate come @venditori per il gruppo vendite.",
       "<b>ADMIN SUPPORT:</b> Aggiunto il pulsante ADMIN, utilizzare per chiedere correzione bug e miglioramenti.",
       "<b>BOLLA FIRMATA:</b> Ora per marcare un articolo come consegnato é obbligatorio allegare la bolla firmata, nuova colonna aggiunta nella cartella."
- ]
+    ]
   }
+]

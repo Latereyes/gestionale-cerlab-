@@ -192,6 +192,43 @@ verifica(d["stato"] == "pronto" and d["testo"] == "" and "Via del Porto 3" in d[
 html = anna.get(f"/consegna/{quote_id}").get_data(as_text=True)
 verifica('data-note-per="consegna"' in html, "nella pagina di consegna il fumetto parla della consegna")
 
+print("8. Richiesta admin: codici in chiaro e registro allegato")
+richiesta = {"id": "SOS-1", "user_id": "anna", "user_name": "Anna Prova", "timestamp": "2026-11-02 17:00:00",
+             "pagina": f"/preventivo/edit/{quote_id}",
+             "description": f"Non riesco a salvare #{quote_id}[Mario Test], chiedi a @bruno"}
+testo, html, allegati = g.componi_email_admin(richiesta)
+verifica(f"Mario Test ({quote_id})" in testo and "Bruno Prova" in testo and "#" + quote_id + "[" not in testo,
+         "nell'email codici e @ diventano nomi")
+verifica(len(allegati) == 1 and allegati[0][0].endswith(".csv") and "Creato il preventivo" in allegati[0][1],
+         "il registro attivita' dell'utente e' allegato")
+verifica("500" not in allegati[0][1] or "[importo]" in allegati[0][1], "niente importi nell'allegato")
+inviati = []
+
+
+class FintoSMTP:
+    def __init__(self, *a, **k):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def login(self, *a):
+        pass
+
+    def send_message(self, msg):
+        inviati.append(msg)
+
+
+g.integrazioni_google.smtplib.SMTP_SSL = FintoSMTP
+g.integrazioni_google.leggi_config = lambda: {"email": {"mittente": "prova@example.com", "password": ""}}
+g.integrazioni_google.svela = lambda x: "segreta"
+ok, _ = g.integrazioni_google._manda(["admin@example.com"], "Prova", testo, html, allegati)
+nomi = [part.get_filename() for part in inviati[0].iter_attachments()] if inviati else []
+verifica(ok and nomi == [allegati[0][0]], "l'email parte con il file allegato")
+
 print("\nCartella di prova:", TMP)
 print("ERRORI:" if ERRORI else "Tutto ok.", *ERRORI, sep="\n  ")
 sys.exit(1 if ERRORI else 0)

@@ -1787,6 +1787,9 @@ def changelog():
     """Mostra la pagina con tutte le novità, senza filtri di lettura."""
     # Ordiniamo tutto il changelog per versione decrescente
     updates_to_show = sorted(CHANGELOG_DATA, key=lambda x: parse_version(x['version']), reverse=True)
+    # le novita' scritte prima della build portano il numero previsto: se la build ne ha dato un altro vale quello vero
+    if updates_to_show and parse_version(updates_to_show[0]['version']) > parse_version(APP_VERSION):
+        updates_to_show[0] = dict(updates_to_show[0], version=APP_VERSION)
         
     return render_template("changelog.html", title="Novità", changelog_updates=updates_to_show)
 # --------------------------------------------------
@@ -9354,10 +9357,11 @@ def api_report_archivio():
 @login_required
 def api_admin_support():
     """Salva una richiesta di assistenza direttamente nel file JSON admin."""
-    data = request.json
-    desc = data.get("description", "").strip()
+    data = request.get_json(silent=True) or {}
+    desc = str(data.get("description", "")).strip()[:5000]
     if not desc:
         return jsonify({"error": "Descrizione vuota"}), 400
+    pagina = str(data.get("pagina", "")).strip()[:300]
 
     tasks = []
     if ADMIN_TASKS_FILE.exists():
@@ -9371,7 +9375,8 @@ def api_admin_support():
         "user_name": session["user_name"],
         "description": desc,
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "LOGGED_ONLY"
+        "status": "LOGGED_ONLY",
+        "pagina": pagina,
     }
     # Salva direttamente nel DB
     db = _DBSession()
@@ -9391,8 +9396,58 @@ def api_admin_support():
     finally:
         db.close()
 
-    integrazioni_google.email_admin_task(new_support_request, indirizzi_email("email_admin"))
+    destinatari = indirizzi_email("email_admin")
+    if destinatari:
+        testo, html, allegati = componi_email_admin(new_support_request)
+        integrazioni_google.email_admin_task(new_support_request, destinatari, testo, html, allegati)
     return jsonify({"success": True})
+
+
+ORE_REGISTRO_ADMIN = 24  # nell'email della richiesta admin: cosa ha fatto l'utente nelle ultime 24 ore
+
+
+def _codici_in_chiaro(testo, utenti=None):
+    """#CODICE[nome] -> nome (CODICE) e @username -> nome e cognome, per chi legge l'email."""
+    utenti = utenti if utenti is not None else {u["username"].lower(): u for u in load_users()}
+    testo = _CODICE_TAG.sub(lambda m: f"{m.group(2)} ({m.group(1)})", testo or "")
+    testo = re.sub(r"\[#([A-Z0-9][A-Z0-9-]{2,}) \(([^)\n]*)\)\]", lambda m: f"{m.group(2) or m.group(1)} ({m.group(1)})", testo)  # vecchio formato
+    return re.sub(r"@(\w+)", lambda m: (utenti.get(m.group(1).lower()) or {}).get("full_name") or m.group(1), testo)
+
+
+def componi_email_admin(r):
+    """(testo, html, allegati) della richiesta admin: codici e @ in chiaro, con il registro attivita' dell'utente
+    delle ultime ORE_REGISTRO_ADMIN ore nel corpo (le ultime voci) e allegato per intero (CSV)."""
+    import html as _h
+    utenti = {u["username"].lower(): u for u in load_users()}
+    descrizione = _codici_in_chiaro(r["description"], utenti)
+    dal = (datetime.datetime.now() - datetime.timedelta(hours=ORE_REGISTRO_ADMIN)).strftime("%Y-%m-%d %H:%M:%S")
+    attivita = registro_attivita(r["user_id"], dal)
+    voci = [(a["quando"][:16], _codici_in_chiaro(a["testo"], utenti) + (f" ({a['volte']} volte)" if a.get("volte", 1) > 1 else ""))
+            for a in attivita]
+    testo = [f"{r['user_name']} ha inviato una richiesta admin il {r['timestamp'][:16]}."]
+    if r.get("pagina"):
+        testo.append(f"Pagina: {r['pagina']}")
+    testo += ["", descrizione, "", f"COSA HA FATTO NELLE ULTIME {ORE_REGISTRO_ADMIN} ORE ({len(voci)} attivita'):"]
+    testo += [f"- {q} {t}" for q, t in voci[-15:]] or ["- nessuna attivita' registrata"]
+    if len(voci) > 15:
+        testo.append(f"(le altre {len(voci) - 15} sono nel file allegato)")
+    righe_html = "".join(f'<tr><td style="padding:4px 10px 4px 0;color:#64748b;white-space:nowrap;">{_h.escape(q[11:])}</td>'
+                         f'<td style="padding:4px 0;">{_h.escape(t)}</td></tr>' for q, t in voci[-15:])
+    html = (f'<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">'
+            f'<p><b>{_h.escape(r["user_name"])}</b> ha inviato una richiesta admin il {_h.escape(r["timestamp"][:16])}'
+            + (f' dalla pagina <code>{_h.escape(r["pagina"])}</code>' if r.get("pagina") else "") + '.</p>'
+            f'<div style="background:#fef2f2;border-left:4px solid #da0303;padding:10px 14px;border-radius:6px;white-space:pre-wrap;">'
+            f'{_h.escape(descrizione)}</div>'
+            f'<p style="margin:18px 0 6px;font-weight:700;">Cosa ha fatto nelle ultime {ORE_REGISTRO_ADMIN} ore ({len(voci)} attivit&agrave;)</p>'
+            + (f'<table style="border-collapse:collapse;font-size:13px;">{righe_html}</table>' if voci else
+               '<p style="color:#64748b;">Nessuna attivit&agrave; registrata.</p>')
+            + (f'<p style="color:#64748b;font-size:12px;">Le altre {len(voci) - 15} sono nel file allegato.</p>' if len(voci) > 15 else "")
+            + '</div>')
+    allegati = []
+    if voci:
+        csv = "Quando;Attivita'\n" + "\n".join(f'{q};"{t.replace(chr(34), chr(39))}"' for q, t in voci)
+        allegati.append((f"registro_attivita_{r['user_id']}_{r['timestamp'][:10]}.csv", csv))
+    return integrazioni_google.togli_importi("\n".join(testo)), integrazioni_google.togli_importi(html), allegati
 
 
 # --- Email automatiche e Google Calendar (logica in integrazioni_google.py) ---
