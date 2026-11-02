@@ -37,7 +37,8 @@
 </div>
 
 <style>
-.ceerlo { position: fixed; left: 18px; bottom: 18px; z-index: 9998; font-size: 14px; }
+/* sempre sopra la barra in basso (dashboard, editor): --m-footer-h la misura _mobile.html */
+.ceerlo { position: fixed; left: 18px; bottom: calc(var(--m-footer-h, 0px) + 28px); z-index: 9998; font-size: 14px; }
 .ceerlo-avatar { width: 76px; height: 76px; border: 0; background: transparent; padding: 0; cursor: pointer; position: relative;
     filter: drop-shadow(0 4px 10px rgba(0,0,0,.25)); transition: transform .2s; }
 .ceerlo-avatar:hover { transform: translateY(-3px) rotate(-4deg); }
@@ -80,7 +81,7 @@
 .ceerlo-scrivi textarea { flex: 1; min-width: 0; width: auto; box-sizing: border-box; resize: none; border-radius: 10px; padding: 8px; font: inherit; }
 
 @media (max-width: 768px) {
-    .ceerlo { left: 8px; bottom: calc(var(--m-footer-h, 0px) + 8px); }  /* sopra la barra in basso delle dashboard */
+    .ceerlo { left: 8px; bottom: calc(var(--m-footer-h, 0px) + 16px); }  /* sopra la barra in basso delle dashboard */
     .ceerlo-avatar, .ceerlo-avatar svg, .ceerlo-avatar img { width: 64px; height: 64px; }
     /* la chat occupa la larghezza dello schermo, margini compresi, senza mai sforare ai lati */
     .ceerlo-pannello { position: fixed; left: 8px; right: 8px; bottom: calc(var(--m-footer-h, 0px) + 80px); width: auto;

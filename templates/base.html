@@ -184,31 +184,43 @@
 }
 
 .fab-btn {
+    --fab-a: hsl(244,76%,62%); --fab-b: hsl(262,70%,48%); --fab-glow: hsla(250,76%,52%,.45);
     width: 54px;
     height: 54px;
-    border-radius: var(--radius-xl);
+    border-radius: 18px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-decoration: none;
     color: #fff;
-    font-size: 20px;
-    box-shadow: 0 3px 12px rgba(0,0,0,0.22);
-    transition: transform 0.25s cubic-bezier(.34,1.56,.64,1), box-shadow 0.2s;
+    font-size: 19px;
+    background: linear-gradient(150deg, var(--fab-a) 0%, var(--fab-b) 100%);
+    box-shadow: 0 6px 16px -4px var(--fab-glow), 0 2px 5px rgba(15,23,42,.18), inset 0 1px 0 rgba(255,255,255,.35), inset 0 -2px 6px rgba(0,0,0,.12);
+    transition: transform 0.25s cubic-bezier(.34,1.56,.64,1), box-shadow 0.25s, filter 0.2s;
     position: relative;
-    border: 1.5px solid rgba(255,255,255,0.25);
+    border: 1px solid rgba(255,255,255,0.28);
+    isolation: isolate;
 }
+/* riflesso in alto, come un bottone di vetro */
+.fab-btn::before {
+    content: ""; position: absolute; inset: 1px 1px 50% 1px; border-radius: 17px 17px 40% 40% / 17px 17px 12px 12px;
+    background: linear-gradient(180deg, rgba(255,255,255,.32) 0%, rgba(255,255,255,0) 100%);
+    pointer-events: none; z-index: -1;
+}
+.fab-btn i { filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
 .fab-btn:hover {
-    transform: scale(1.12) translateX(-4px);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    transform: translateX(-5px) scale(1.08);
+    box-shadow: 0 10px 24px -4px var(--fab-glow), 0 3px 8px rgba(15,23,42,.2), inset 0 1px 0 rgba(255,255,255,.4), inset 0 -2px 6px rgba(0,0,0,.12);
+    filter: saturate(1.1) brightness(1.05);
 }
-.alert-fab { background: linear-gradient(135deg, hsl(354,76%,48%) 0%, hsl(354,76%,38%) 100%); }
-.sos-fab { background: linear-gradient(135deg, hsl(220,12%,55%) 0%, hsl(220,12%,44%) 100%); }
-.task-fab { background: linear-gradient(135deg, hsl(244,76%,56%) 0%, hsl(244,76%,46%) 100%); }
-.notify-fab { background: linear-gradient(135deg, hsl(38,92%,52%) 0%, hsl(38,92%,42%) 100%); }
-.message-fab { background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%); }
-.note-fab { background: linear-gradient(135deg, hsl(152,55%,42%) 0%, hsl(152,55%,32%) 100%); }
+.fab-btn:active { transform: translateX(-3px) scale(.98); }
+.alert-fab { --fab-a: hsl(354,85%,62%); --fab-b: hsl(340,75%,42%); --fab-glow: hsla(350,80%,50%,.45); }
+.sos-fab { --fab-a: hsl(215,20%,62%); --fab-b: hsl(222,22%,40%); --fab-glow: hsla(220,20%,40%,.4); }
+.task-fab { --fab-a: hsl(244,80%,66%); --fab-b: hsl(256,70%,46%); --fab-glow: hsla(248,76%,52%,.45); }
+.notify-fab { --fab-a: hsl(44,96%,60%); --fab-b: hsl(24,92%,50%); --fab-glow: hsla(32,92%,50%,.45); }
+.message-fab { --fab-a: hsl(205,90%,58%); --fab-b: hsl(238,74%,54%); --fab-glow: hsla(225,85%,55%,.45); }
+.note-fab { --fab-a: hsl(150,58%,50%); --fab-b: hsl(168,65%,32%); --fab-glow: hsla(155,60%,38%,.45); }
 .note-fab .note-dot {
     position: absolute; top: -3px; right: -3px; width: 12px; height: 12px;
     border-radius: 50%; background: hsl(38,92%,52%); border: 2px solid #fff; display: none;
@@ -267,6 +279,8 @@
 .fab-label {
     font-size: 8px;
     font-weight: 800;
+    opacity: .92;
+    text-shadow: 0 1px 1px rgba(0,0,0,.2);
     margin-top: 2px;
     text-transform: uppercase;
     letter-spacing: 0.3px;
@@ -1510,7 +1524,7 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
     {% endif %}
 
 
-    <a href="#" class="fab-btn notify-fab" id="notifyFab" title="Notifiche" style="background: #f59e0b;">
+    <a href="#" class="fab-btn notify-fab" id="notifyFab" title="Notifiche">
         <div class="unread-badge" id="notifyBadge">0</div>
         <i class="fas fa-bell"></i>
         <span class="fab-label">NOTIFICHE</span>
@@ -1766,6 +1780,22 @@ document.addEventListener('DOMContentLoaded', () => {
     let linkSuggestions = [];
 
     // --- 1. FUNZIONE DI PARSING (VISUALIZZAZIONE) ---
+// Archivi (task e report) divisi per periodo: chiave e titolo del periodo di una data "YYYY-MM-DD..."
+window.periodoArchivio = function (data) {
+    const d = data ? new Date(String(data).slice(0, 10) + 'T12:00:00') : null;
+    if (!d || isNaN(d)) return { chiave: 'vecchie', titolo: 'Molto vecchie' };
+    const oggi = new Date(); oggi.setHours(12, 0, 0, 0);
+    const lunedi = new Date(oggi); lunedi.setDate(oggi.getDate() - ((oggi.getDay() + 6) % 7));
+    const lunediScorso = new Date(lunedi); lunediScorso.setDate(lunedi.getDate() - 7);
+    if (d >= lunedi) return { chiave: 'settimana', titolo: 'Questa settimana' };
+    if (d >= lunediScorso) return { chiave: 'settimana-scorsa', titolo: 'Settimana scorsa' };
+    if (d.getFullYear() === oggi.getFullYear() && d.getMonth() === oggi.getMonth()) return { chiave: 'mese', titolo: 'Questo mese' };
+    const meseScorso = new Date(oggi.getFullYear(), oggi.getMonth() - 1, 1);
+    if (d.getFullYear() === meseScorso.getFullYear() && d.getMonth() === meseScorso.getMonth()) return { chiave: 'mese-scorso', titolo: 'Mese scorso' };
+    if (d.getFullYear() === oggi.getFullYear()) return { chiave: 'anno', titolo: "Quest'anno" };
+    return { chiave: 'vecchie', titolo: 'Molto vecchie' };
+};
+
 window.parseMessage = function(text) {
     if (!text) return "";
     

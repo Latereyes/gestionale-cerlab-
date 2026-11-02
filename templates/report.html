@@ -177,6 +177,9 @@
     .report-corpo { font-size: 14.5px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
     .report-corpo .shout-link, .report-voci .shout-link { color: var(--accent); font-weight: 600; text-decoration: underline; }
     .report-modificato { margin-top: 8px; font-size: 11.5px; color: var(--text-subtle); }
+    .rp-periodo-titolo { margin: 14px 0 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+    .rp-periodo-titolo::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+    .rp-periodo-titolo:first-child { margin-top: 0; }
     .report-vuoto { text-align: center; padding: 28px 20px; color: var(--text-muted); background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius-md); font-size: 13.5px; }
 
     @media (max-width: 600px) {
@@ -666,6 +669,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const archAltri = $('archAltri');
   const archErrore = $('archErrore');
   let archOffset = 0;
+  let archUltimoPeriodo = '';
   let archAutoriCaricati = false;
   let archRichiesta = 0; // le risposte di ricerche superate si ignorano
 
@@ -705,11 +709,22 @@ document.addEventListener('DOMContentLoaded', () => {
         archAutoriCaricati = true;
       }
 
-      if (reset) archLista.innerHTML = '';
-      data.reports.forEach(r => archLista.appendChild(creaCard(r)));
+      if (reset) { archLista.innerHTML = ''; archUltimoPeriodo = ''; }
+      // i report arrivano dal piu' recente: un titolo ogni volta che cambia il periodo
+      data.reports.forEach(r => {
+        const per = window.periodoArchivio(r.creato_il);
+        if (per.chiave !== archUltimoPeriodo) {
+          const h = document.createElement('h4');
+          h.className = 'rp-periodo-titolo';
+          h.textContent = per.titolo;
+          archLista.appendChild(h);
+          archUltimoPeriodo = per.chiave;
+        }
+        archLista.appendChild(creaCard(r));
+      });
       archOffset += data.reports.length;
       archAltri.style.display = data.altri ? '' : 'none';
-      archVuoto.style.display = archLista.children.length === 0 ? '' : 'none';
+      archVuoto.style.display = archLista.querySelector('.report-card') ? 'none' : '';
     } catch (e) {
       if (mia !== archRichiesta) return;
       archErrore.textContent = 'Errore di rete.';

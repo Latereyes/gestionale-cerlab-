@@ -214,6 +214,10 @@
     .tasks-empty p { margin: 0; font-size: 13.5px; }
     .archive-trigger { display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; color: var(--text-muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; padding: 12px; border-top: 1px solid var(--border); }
     .archive-trigger:hover { color: var(--text); }
+    .arch-periodo { display: flex; flex-direction: column; gap: 14px; }
+    .arch-periodo-titolo, .rp-periodo-titolo { margin: 8px 0 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+    .arch-periodo-titolo::after, .rp-periodo-titolo::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+    .arch-periodo-titolo span { font-weight: 600; color: var(--text-subtle); }
 
     @media (max-width: 600px) {
         .tasks-head { padding: 16px 14px; }
@@ -390,11 +394,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusLabel = { open: 'Aperta', support: 'Serve supporto', resolved: 'Risolta', failed: 'Non risolta' };
         window.updateTabCounts(tasks);
         const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        // le archiviate stanno in gruppi per periodo di conclusione (dal piu' recente)
+        const ordinePeriodi = ['settimana', 'settimana-scorsa', 'mese', 'mese-scorso', 'anno', 'vecchie'];
+        const gruppoArchivio = (data) => {
+            const per = window.periodoArchivio(data);
+            let g = archiveContainer.querySelector(`.arch-periodo[data-periodo="${per.chiave}"]`);
+            if (!g) {
+                g = document.createElement('section');
+                g.className = 'arch-periodo';
+                g.dataset.periodo = per.chiave;
+                g.innerHTML = `<h4 class="arch-periodo-titolo">${per.titolo} <span></span></h4><div class="tasks-grid"></div>`;
+                const dopo = [...archiveContainer.children].find(x => ordinePeriodi.indexOf(x.dataset.periodo) > ordinePeriodi.indexOf(per.chiave));
+                archiveContainer.insertBefore(g, dopo || null);
+            }
+            return g.querySelector('.tasks-grid');
+        };
 
         tasks.forEach(t => {
             const conclusa = t.status === 'resolved' || t.status === 'failed';
             const concludedDate = t.concluded_at ? new Date(t.concluded_at) : null;
-            const target = (conclusa && concludedDate && concludedDate < oneWeekAgo) ? archiveContainer : container;
+            const target = (conclusa && concludedDate && concludedDate < oneWeekAgo) ? gruppoArchivio(t.concluded_at) : container;
 
             const card = document.createElement('div');
             card.className = `task-card status-${t.status}${t.scaduta ? ' is-late' : ''}`;
@@ -454,7 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (targetCard && targetCard.dataset.categoria !== window.currentTab) window.setTaskTab(targetCard.dataset.categoria);
         else window.applyTaskFilter();
         if (targetCard) {
-            if (targetCard.parentElement === archiveContainer && archiveContainer.style.display === 'none') window.toggleArchive();
+            if (archiveContainer.contains(targetCard) && archiveContainer.style.display === 'none') window.toggleArchive();
             setTimeout(() => {
                 targetCard.style.display = '';
                 targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -501,10 +520,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (show) visible++;
         });
         let archived = 0;
-        archiveContainer.querySelectorAll('.task-card').forEach(card => {
-            const inTab = card.dataset.categoria === window.currentTab;
-            card.style.display = inTab ? '' : 'none';
-            if (inTab) archived++;
+        archiveContainer.querySelectorAll('.arch-periodo').forEach(g => {
+            let nelGruppo = 0;
+            g.querySelectorAll('.task-card').forEach(card => {
+                const inTab = card.dataset.categoria === window.currentTab;
+                card.style.display = inTab ? '' : 'none';
+                if (inTab) nelGruppo++;
+            });
+            archived += nelGruppo;
+            g.style.display = nelGruppo ? '' : 'none';
+            g.querySelector('.arch-periodo-titolo span').textContent = `(${nelGruppo})`;
         });
         Object.entries(counts).forEach(([k, v]) => { const el = document.getElementById(`count-${k}`); if (el) el.textContent = v; });
         document.getElementById('count-archived').textContent = archived ? `(${archived})` : '';
