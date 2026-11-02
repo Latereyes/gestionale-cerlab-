@@ -1089,7 +1089,9 @@
             <div class="user-info">
                 <span>Ciao, <strong>{{ session.user_name }}</strong></span>
             </div>
+            {% if session.user_role == 'amministratore' %}
             <a href="{{ url_for('scarica_programma_notifiche') }}" class="btn btn-outline" style="font-size:12.5px;" title="Scarica il programma che mostra le notifiche del gestionale vicino all'orologio di questo PC"><i class="fas fa-bell"></i> Notifiche su questo PC</a>
+            {% endif %}
             <a href="{{ url_for('cambia_password') }}" class="btn btn-outline" style="font-size:12.5px;">Password</a>
             <a href="{{ url_for('logout') }}" class="btn" style="font-size:12.5px;">Logout</a>
             {% endif %}
