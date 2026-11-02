@@ -399,7 +399,7 @@
   .prodotto-testo small { font-size: 12.5px; color: var(--text-muted); }
 
   /* --- Clienti e preventivi / amministrazione --- */
-  .home-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; }
+  .home-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 24px; }
   .quick-list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-xs); overflow: hidden; }
   .quick-link { display: flex; align-items: center; gap: 14px; padding: 14px 18px; text-decoration: none; color: var(--text); border-bottom: 1px solid var(--border); transition: background 0.15s; }
   .quick-link:last-child { border-bottom: none; }
@@ -418,10 +418,16 @@
   }
   @media (max-width: 900px) {
     .prodotti-grid { grid-template-columns: 1fr; }
-    .settimana { grid-template-columns: repeat(7, minmax(92px, 1fr)); overflow-x: auto; padding-bottom: 4px; }
+    .settimana { grid-template-columns: repeat(7, minmax(128px, 1fr)); overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x proximity; }
+    .giorno { scroll-snap-align: start; min-height: 120px; }
+    .voce-agenda { -webkit-line-clamp: 3; }
   }
   @media (max-width: 700px) {
     .flow-grid { grid-template-columns: 1fr 1fr; }
+    .home-card { padding: 14px; }
+    .task-testo strong { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .home-task-lista a { flex-wrap: wrap; }
+    .task-quando { width: 100%; padding-left: 19px; }
     .home-hero { padding: 20px; }
     .hero-actions, .hero-btn { width: 100%; justify-content: center; }
   }

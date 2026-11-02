@@ -583,7 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bozzaId = bozza ? bozza.id : null;
     if (bozza) {
       riempi(bozza.righe && bozza.righe.length ? bozza.righe : [{ testo: bozza.testo }]);
-      stato(bozza.origine === 'ceerlo' ? `Bozza preparata da Ceerlo · la vedi solo tu`
+      stato(bozza.origine === 'ceerlo' ? `Bozza preparata ${(bozza.righe || []).some(v => v.ai) ? 'da Ceerlo' : 'dal registro'} · la vedi solo tu`
                                        : `Bozza del ${formatData(bozza.modificato_il || bozza.creato_il)} · la vedi solo tu`, 'bozza');
     } else {
       riempi([]);
@@ -602,15 +602,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const bozza = d && d.bozza;
     const libera = !bozza || bozza.origine === 'ceerlo';
     $('rpCeerlo').style.display = reg.length && libera ? '' : 'none';
+    // senza Ceerlo la bozza si prepara copiando il registro
+    const icona = d.ceerlo ? '<i class="fas fa-robot"></i>' : '<i class="fas fa-stream"></i>';
+    const nuove = d.registro_nuove ? ` (+${d.registro_nuove})` : '';
     $('rpCeerlo').innerHTML = bozza && bozza.origine === 'ceerlo'
-      ? `<i class="fas fa-robot"></i> Rifai con Ceerlo${d.registro_nuove ? ` (+${d.registro_nuove})` : ''}` : '<i class="fas fa-robot"></i> Prepara con Ceerlo';
+      ? `${icona} ${d.ceerlo ? 'Rifai con Ceerlo' : 'Aggiorna dal registro'}${nuove}` : `${icona} ${d.ceerlo ? 'Prepara con Ceerlo' : 'Prepara dal registro'}`;
   };
 
   const notaCeerlo = (testo) => {
     const nota = $('rpNotaCeerlo');
     const bozza = datiLista && datiLista.bozza;
     if (!testo && bozza && bozza.id === bozzaId && bozza.origine === 'ceerlo' && modo === 'nuovo') {
-      testo = `Le voci con il robottino le ha scritte Ceerlo dal tuo registro attività: controllale, cambiale e invia. ` +
+      const daCeerlo = (bozza.righe || []).some(v => v.ai);
+      testo = (daCeerlo ? 'Le voci con il robottino le ha scritte Ceerlo dal tuo registro attività: controllale, cambiale e invia. '
+                        : 'Questa bozza riporta il tuo registro attività: controllala, cambiala e invia. ') +
               `Se alle ${datiLista.ora_chiusura} non l'hai né modificata né inviata, come report vale il registro attività.`;
     }
     nota.innerHTML = testo ? `<i class="fas fa-robot"></i> ${escapeHtml(testo)}` : '';
