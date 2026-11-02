@@ -13,6 +13,7 @@
       "<b>Note cliente a voci:</b> le note interne si scrivono una per voce, con chi le ha scritte e quando.",
       "<b>Ceerlo legge le note:</b> aprendo un preventivo ti riassume le note del cliente; nella consegna ti avvisa quando serve il materiale, se c'è fretta e degli indirizzi di cantiere.",
       "<b>Richieste admin:</b> @ e # si vedono come nelle task e all'email si allega il registro attività delle ultime 24 ore.",
+      "<b>Controllo dei PC alle 9:30:</b> ogni mattina il gestionale verifica per ogni postazione se la sera prima è stata spenta dalla chiusura serale, spenta in altro modo, se è rimasta accesa o si è riaccesa da sola di notte (Impostazioni e notifica all'amministratore).",
       "<b>Grafica:</b> tasti laterali con sfumature, Ceerlo sopra la barra in basso, \"Notifiche su questo PC\" solo per l'amministratore."
     ]
   },

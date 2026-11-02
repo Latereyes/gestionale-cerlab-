@@ -9,6 +9,9 @@ Cliccando un avviso si apre la pagina giusta del gestionale.
 Se nel gestionale è attiva la chiusura serale, all'ora scelta spegne il PC (con avviso
 5 minuti prima, "Rimanda di 30 minuti" e "Non stasera"), dopo che è partito il riepilogo email.
 
+Ogni giorno (e a ogni accensione) dice al gestionale quando si è acceso il PC e come si è spento
+(registro eventi di Windows): alle 9:30 il gestionale controlla com'è andata la notte di ogni postazione.
+
 Trova da solo il PC server sulla rete locale e si avvia con Windows. Al primo avvio chiede
 utente e password del gestionale (una volta sola) per abilitare il PC.
 
@@ -141,6 +144,77 @@ def suono(tipo):
         winsound.PlaySound(alias, winsound.SND_ALIAS | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
     except Exception:
         pass
+
+
+def avvio_pc():
+    """Quando si e' acceso (o riavviato) il PC, dal tempo trascorso dall'avvio di Windows."""
+    try:
+        ms = ctypes.windll.kernel32.GetTickCount64
+        ms.restype = ctypes.c_ulonglong
+        return datetime.datetime.now() - datetime.timedelta(milliseconds=ms())
+    except Exception:
+        return None
+
+
+# Dal registro eventi di Windows: 1074 = spegnimento/riavvio chiesto da un programma o da una persona,
+# 6006 = spegnimento regolare, 6008 = spegnimento improvviso (corrente, blocco), 42 (Kernel-Power) = sospensione;
+# accensioni: 27 (Kernel-Boot) a ogni avvio, anche con l'avvio rapido, e 1 (Power-Troubleshooter) = risveglio dalla sospensione.
+_PS_EVENTI = (
+    "$d=(Get-Date).AddHours(-{ore});"
+    # una ricerca per fonte: l'id 1 (e in parte 42 e 27) lo usano anche altri programmi
+    "@(Get-WinEvent -FilterHashtable @{{LogName='System';Id=1074,6006,6008;StartTime=$d}} -ErrorAction SilentlyContinue)"
+    " + @(Get-WinEvent -FilterHashtable @{{LogName='System';ProviderName='Microsoft-Windows-Kernel-Power';Id=42;StartTime=$d}} -ErrorAction SilentlyContinue)"
+    " + @(Get-WinEvent -FilterHashtable @{{LogName='System';ProviderName='Microsoft-Windows-Kernel-Boot';Id=27;StartTime=$d}} -ErrorAction SilentlyContinue)"
+    " + @(Get-WinEvent -FilterHashtable @{{LogName='System';ProviderName='Microsoft-Windows-Power-Troubleshooter';Id=1;StartTime=$d}} -ErrorAction SilentlyContinue) |"
+    " ForEach-Object {{ [pscustomobject]@{{id=$_.Id; quando=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss');"
+    " p=@($_.Properties | ForEach-Object {{ [string]$_.Value }})}} }} | ConvertTo-Json -Compress"
+)
+
+
+def eventi_spegnimento(ore=40):
+    """Spegnimenti e accensioni delle ultime `ore`, dal piu' recente: [{"quando", "tipo", "riavvio", "da"}].
+    tipo: gestionale (chiusura serale) | utente | windows (aggiornamenti) | programma | improvviso | spento | sospensione
+    | acceso (avvio di Windows, anche rapido) | risveglio (dalla sospensione)."""
+    try:
+        import subprocess
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", _PS_EVENTI.format(ore=ore)],
+                             capture_output=True, text=True, timeout=40,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.strip()
+        grezzi = json.loads(out) if out else []
+    except Exception as e:
+        print(f"Registro eventi non letto: {e}")
+        return None
+    if isinstance(grezzi, dict):
+        grezzi = [grezzi]
+    eventi = []
+    for e in grezzi:
+        p = [str(x or "") for x in (e.get("p") or [])]
+        if e.get("id") == 1074:
+            processo, tipo_arresto, commento, chi = (p[0] if p else ""), (p[4] if len(p) > 4 else ""), \
+                (p[5] if len(p) > 5 else ""), (p[6] if len(p) > 6 else "")
+            testo = (processo + " " + commento).lower()
+            if "gestionale cerlab" in testo:
+                tipo = "gestionale"
+            elif any(x in testo for x in ("trustedinstaller", "musnotification", "mousocoreworker", "wuauclt", "usoclient", "update")):
+                tipo = "windows"
+            elif any(x in testo for x in ("explorer.exe", "winlogon", "startmenuexperiencehost", "shellexperiencehost")):
+                tipo = "utente"
+            else:
+                tipo = "programma"
+            eventi.append({"quando": e.get("quando", ""), "tipo": tipo,
+                           "riavvio": any(x in tipo_arresto.lower() for x in ("riavvi", "restart")),
+                           "da": (processo.split("\\")[-1].split(" ")[0] + (f" ({chi})" if chi else ""))[:80]})
+        elif e.get("id") == 6008:
+            eventi.append({"quando": e.get("quando", ""), "tipo": "improvviso", "riavvio": False, "da": ""})
+        elif e.get("id") == 6006:
+            eventi.append({"quando": e.get("quando", ""), "tipo": "spento", "riavvio": False, "da": ""})
+        elif e.get("id") == 42:
+            eventi.append({"quando": e.get("quando", ""), "tipo": "sospensione", "riavvio": False, "da": ""})
+        elif e.get("id") == 27:
+            eventi.append({"quando": e.get("quando", ""), "tipo": "acceso", "riavvio": False, "da": ""})
+        elif e.get("id") == 1:
+            eventi.append({"quando": e.get("quando", ""), "tipo": "risveglio", "riavvio": False, "da": ""})
+    return sorted(eventi, key=lambda x: x["quando"], reverse=True)
 
 
 def secondi_inattivita():
@@ -776,15 +850,48 @@ class ClientNotifiche:
         adesso = datetime.datetime.now()
         base = max(adesso, self.rimanda_fino or self._ora_spegnimento(adesso) or adesso)
         self.rimanda_fino = base + datetime.timedelta(minutes=MINUTI_RIMANDA)
+        self.cfg["spegnimento_rimandato"] = adesso.strftime("%Y-%m-%d %H:%M")
+        self._salva_config()
         self.avviso("sistema", f"Spegnimento rimandato alle {self.rimanda_fino:%H:%M}", "")
 
     def salta_spegnimento(self):
         self.cfg["spegnimento_fatto"] = datetime.date.today().isoformat()
+        self.cfg["spegnimento_saltato"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         self._salva_config()
         self.avviso("sistema", "Stasera il PC non si spegne da solo", "Ricordati di spegnerlo quando hai finito.")
 
+    def _manda_rapporto_pc(self):
+        """Al gestionale: quando si e' acceso il PC, come si e' spento (registro eventi) e cosa ha fatto
+        la chiusura serale. Una volta per avvio del PC e almeno una volta al giorno."""
+        if not self.token or getattr(self, "_rapporto_in_corso", False):
+            return
+        avvio = avvio_pc()  # con l'avvio rapido di Windows non si azzera: l'accensione vera la dice il registro eventi
+        chiave = f"{datetime.date.today().isoformat()}|{avvio:%Y-%m-%d %H:%M}" if avvio else datetime.date.today().isoformat()
+        if self.cfg.get("rapporto_inviato") == chiave:
+            return
+        self._rapporto_in_corso = True
+
+        def lavora():
+            try:
+                dati = {"pc": socket.gethostname(), "versione": APP_VERSION,
+                        "avvio": f"{avvio:%Y-%m-%d %H:%M:%S}" if avvio else "",
+                        "eventi": eventi_spegnimento(),
+                        "chiusura": {k: self.cfg.get(k, "") for k in ("spegnimento_fatto", "spegnimento_ora",
+                                                                      "spegnimento_saltato", "spegnimento_rimandato")},
+                        "spegni_qui": self.spegni_qui}
+                r = http_json(self.server + "api/widget/postazione", dati, token=self.token, timeout=15)
+                if r.get("ok"):
+                    self.cfg["rapporto_inviato"] = chiave
+                    self._salva_config()
+            except Exception as e:
+                print(f"Rapporto postazione non inviato: {e}")
+            finally:
+                self._rapporto_in_corso = False
+        threading.Thread(target=lavora, daemon=True, name="RapportoPC").start()
+
     def spegni_pc(self):
         self.cfg["spegnimento_fatto"] = datetime.date.today().isoformat()
+        self.cfg["spegnimento_ora"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         self._salva_config()
         try:
             import subprocess
@@ -1010,6 +1117,7 @@ del "%~f0"
                     self._controlla_presenza()
                 self._controlla_personali()
                 self._controlla_aggiornamento()
+                self._manda_rapporto_pc()
             except Exception:
                 fallimenti += 1
                 if self.collegato and fallimenti >= 3:

@@ -223,11 +223,53 @@ class FintoSMTP:
 
 
 g.integrazioni_google.smtplib.SMTP_SSL = FintoSMTP
+leggi_config_vera = g.integrazioni_google.leggi_config
 g.integrazioni_google.leggi_config = lambda: {"email": {"mittente": "prova@example.com", "password": ""}}
 g.integrazioni_google.svela = lambda x: "segreta"
 ok, _ = g.integrazioni_google._manda(["admin@example.com"], "Prova", testo, html, allegati)
 nomi = [part.get_filename() for part in inviati[0].iter_attachments()] if inviati else []
 verifica(ok and nomi == [allegati[0][0]], "l'email parte con il file allegato")
+g.integrazioni_google.leggi_config = leggi_config_vera
+
+print("9. Postazioni: com'e' andata la notte")
+import hashlib  # noqa: E402
+import json  # noqa: E402
+token = "token-di-prova"
+g.WIDGET_TOKENS_FILE.write_text(json.dumps({hashlib.sha256(token.encode()).hexdigest(): {"user": "carla", "pc": "PC-CASSA"},
+                                            hashlib.sha256(b"altro").hexdigest(): {"user": "bruno", "pc": "PC-VECCHIO"}}),
+                                encoding="utf-8")
+ieri, mattina = oggi - datetime.timedelta(days=1), datetime.datetime.combine(oggi, datetime.time(9, 30))
+c = app.test_client()
+r = c.post("/api/widget/postazione", json={"pc": "PC-CASSA", "avvio": f"{oggi} 08:40:00", "versione": "3.5.0",
+                                           "eventi": [{"quando": f"{ieri} 19:31:10", "tipo": "gestionale", "riavvio": False}],
+                                           "chiusura": {"spegnimento_ora": f"{ieri} 19:30"}, "spegni_qui": True},
+           headers={"X-Widget-Token": token})
+verifica(r.get_json().get("ok"), "il PC manda il suo rapporto")
+verifica(c.post("/api/widget/postazione", json={"pc": "X"}).status_code == 401, "senza token il rapporto non si accetta")
+base = {"pc": "P", "ricevuto": f"{oggi} 08:45:00", "chiusura": {}, "spegni_qui": True}
+casi = [
+    ("spento dal gestionale", dict(base, avvio=f"{oggi} 08:40:00", eventi=[{"quando": f"{ieri} 19:31:00", "tipo": "gestionale"}]), "gestionale", False),
+    ("spento a mano", dict(base, avvio=f"{oggi} 08:40:00", eventi=[{"quando": f"{ieri} 18:50:00", "tipo": "utente"}]), "spento", False),
+    ("rimasto acceso", dict(base, avvio=f"{ieri} 08:00:00", eventi=[], chiusura={"spegnimento_saltato": f"{ieri} 19:26"}), "acceso_notte", True),
+    ("riacceso di notte", dict(base, avvio=f"{oggi} 03:12:00", eventi=[{"quando": f"{ieri} 19:31:00", "tipo": "gestionale"}]), "riacceso_notte", True),
+    ("non collegato", dict(base, ricevuto=f"{ieri} 19:00:00", avvio=f"{ieri} 08:00:00", eventi=[]), "non_collegato", False),
+    ("avvio rapido di Windows", dict(base, avvio=f"{ieri} 07:00:00", eventi=[
+        {"quando": f"{ieri} 18:50:00", "tipo": "utente"}, {"quando": f"{oggi} 08:40:00", "tipo": "acceso"}]), "spento", False),
+    ("avvio rapido come su questo PC", dict(base, avvio=f"{ieri} 07:00:00", eventi=[
+        {"quando": f"{ieri} 18:27:00", "tipo": "sospensione"}, {"quando": f"{ieri} 18:27:00", "tipo": "utente"},
+        {"quando": f"{oggi} 08:44:00", "tipo": "risveglio"}, {"quando": f"{oggi} 08:44:00", "tipo": "acceso"}]), "spento", False),
+    ("risvegliato di notte", dict(base, avvio=f"{ieri} 07:00:00", eventi=[
+        {"quando": f"{ieri} 19:00:00", "tipo": "sospensione"}, {"quando": f"{oggi} 02:30:00", "tipo": "risveglio"}]), "riacceso_notte", True),
+]
+for nome, rap, atteso, allarme in casi:
+    e = g.esito_postazione(rap, mattina)
+    verifica(e["esito"] == atteso and e["allarme"] == allarme, f"{nome}: {e['dettaglio']}")
+esiti = {e["pc"]: e for e in g.controllo_postazioni(mattina)}
+verifica(esiti["PC-CASSA"]["esito"] == "gestionale" and esiti["PC-VECCHIO"]["esito"] == "non_collegato",
+         "il controllo del mattino copre tutte le postazioni registrate")
+admin = client_di("bruno", "Bruno Prova", "amministratore")
+html = admin.get("/impostazioni/google").get_data(as_text=True)
+verifica("PC-CASSA" in html and "Postazioni" in html, "l'esito si vede nella pagina Impostazioni")
 
 print("\nCartella di prova:", TMP)
 print("ERRORI:" if ERRORI else "Tutto ok.", *ERRORI, sep="\n  ")

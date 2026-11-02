@@ -81,6 +81,38 @@
         </div>
     </div>
 
+    <div class="card" id="postazioni">
+        <div class="card-header">
+            <h3><i class="fas fa-desktop"></i> Postazioni: com'e' andata la notte</h3>
+            <form method="post" action="{{ url_for('impostazioni_controlla_postazioni') }}" style="margin:0;">
+                <button type="submit" class="btn btn-outline" style="width:auto;"><i class="fas fa-sync-alt"></i> Controlla adesso</button>
+            </form>
+        </div>
+        <div class="card-body">
+            <p class="muted">Ogni mattina alle <strong>{{ ora_controllo_postazioni }}</strong> il gestionale guarda ogni PC con Gestionale Notifiche:
+                se la sera prima l'ha spento la chiusura serale, se e' stato spento in altro modo (a mano, da Windows, per un calo di corrente),
+                se e' rimasto acceso o se si e' riacceso da solo di notte. Gli amministratori ricevono una notifica con l'esito.</p>
+            {% for giorno, controllo in postazioni_log %}
+            <details class="postazioni-giorno" {% if loop.first %}open{% endif %}>
+                <summary>{{ giorno[8:10] }}/{{ giorno[5:7] }}/{{ giorno[:4] }} &middot; controllo delle {{ controllo.ora }}
+                    {% set allarmi = controllo.postazioni | selectattr('allarme') | list %}
+                    {% if allarmi %}<span class="stato-pill err">{{ allarmi | length }} da guardare</span>{% endif %}</summary>
+                <table class="postazioni-tabella">
+                    {% for e in controllo.postazioni %}
+                    <tr class="{{ 'allarme' if e.allarme else '' }}">
+                        <td><i class="fas {{ {'gestionale': 'fa-check-circle', 'spento': 'fa-power-off', 'acceso_notte': 'fa-moon', 'riacceso_notte': 'fa-exclamation-triangle', 'non_collegato': 'fa-question-circle'}[e.esito] }}"></i>
+                            <strong>{{ e.pc }}</strong>{% if e.utente %}<br><small class="muted">{{ e.utente }}</small>{% endif %}</td>
+                        <td>{{ e.dettaglio }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </details>
+            {% else %}
+            <p class="muted">Nessun controllo ancora: il primo parte domattina alle {{ ora_controllo_postazioni }} (o premi "Controlla adesso").</p>
+            {% endfor %}
+        </div>
+    </div>
+
     <div class="card">
         <div class="card-header">
             <h3><i class="fas fa-calendar-alt"></i> Google Calendar condiviso</h3>
@@ -194,6 +226,15 @@
 .riga-check input[type=checkbox] { width: auto; }
 .stato-pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #eee; color: #666; white-space: nowrap; }
 .stato-pill.ok { background: #e3f6e8; color: #1b7a3a; }
+.stato-pill.err { background: #fde4e1; color: #b42318; margin-left: 6px; }
+.postazioni-giorno { border: 1px solid var(--border, #e5e7eb); border-radius: 10px; padding: 8px 12px; margin-top: 10px; }
+.postazioni-giorno summary { cursor: pointer; font-weight: 600; }
+.postazioni-tabella { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13.5px; }
+.postazioni-tabella td { padding: 7px 8px; border-top: 1px solid var(--border, #e5e7eb); vertical-align: top; }
+.postazioni-tabella td:first-child { width: 32%; min-width: 120px; }
+.postazioni-tabella td i { margin-right: 6px; color: #16a34a; }
+.postazioni-tabella tr.allarme td { background: #fff7ed; }
+.postazioni-tabella tr.allarme td i { color: #c2410c; }
 .passi { padding-left: 18px; line-height: 1.6; font-size: 13px; }
 .destinatari { padding-left: 18px; line-height: 1.7; }
 code { word-break: break-all; }

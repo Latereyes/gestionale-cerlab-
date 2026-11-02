@@ -2181,6 +2181,196 @@ def api_widget_login():
     lega_utente_al_pc(request.remote_addr, user["username"], user["full_name"])  # chi accede qui è seduto a quel PC
     return jsonify({"ok": True, "token": token, "username": user["username"], "full_name": user["full_name"]})
 
+# --- Postazioni: ogni Gestionale Notifiche dice quando si e' acceso il PC e come si e' spento;
+# alle ORA_CONTROLLO_POSTAZIONI il gestionale scrive per ogni postazione com'e' andata la notte ---
+POSTAZIONI_FILE = DATA_DIR / "postazioni.json"          # ultimo rapporto di ogni PC
+POSTAZIONI_LOG_FILE = DATA_DIR / "postazioni_log.json"  # il controllo del mattino, ultimi 60 giorni
+ORA_CONTROLLO_POSTAZIONI = "09:30"
+ORA_INIZIO_SERA = "17:00"                               # da quest'ora del giorno prima conta come "la sera"
+_POSTAZIONI_LOCK = threading.Lock()
+
+
+def _leggi_json_file(percorso, predefinito):
+    try:
+        return json.loads(percorso.read_text(encoding="utf-8"))
+    except Exception:
+        return predefinito
+
+
+@app.route("/api/widget/postazione", methods=["POST"])
+def api_widget_postazione():
+    """Rapporto di un PC: avvio di Windows, spegnimenti dal registro eventi, cosa ha fatto la chiusura serale."""
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
+    d = request.get_json(silent=True) or {}
+    pc = str(d.get("pc") or "").strip()[:60]
+    if not pc:
+        return jsonify({"ok": False, "error": "Nome del PC mancante"}), 400
+    info = _widget_tokens().get(hashlib.sha256(request.headers.get("X-Widget-Token", "").encode()).hexdigest(), {})
+    eventi = d.get("eventi")
+    rapporto = {"pc": pc, "ip": request.remote_addr, "abilitato_da": info.get("user", ""),
+                "ricevuto": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "versione": str(d.get("versione") or "")[:20], "avvio": str(d.get("avvio") or "")[:19],
+                "eventi": [{k: str(e.get(k, ""))[:80] for k in ("quando", "tipo", "da")} | {"riavvio": bool(e.get("riavvio"))}
+                           for e in (eventi or [])[:30] if isinstance(e, dict)] if isinstance(eventi, list) else None,
+                "chiusura": {k: str(v)[:20] for k, v in (d.get("chiusura") or {}).items()},
+                "spegni_qui": bool(d.get("spegni_qui", True))}
+    with _POSTAZIONI_LOCK:
+        tutte = _leggi_json_file(POSTAZIONI_FILE, {})
+        tutte[pc] = rapporto
+        POSTAZIONI_FILE.write_text(json.dumps(tutte, indent=1, ensure_ascii=False), encoding="utf-8")
+    return jsonify({"ok": True})
+
+
+_DESCRIZIONE_SPEGNIMENTO = {
+    "gestionale": "spento dal gestionale (chiusura serale)",
+    "utente": "spento a mano",
+    "windows": "spento da Windows (aggiornamenti)",
+    "programma": "spento da un programma",
+    "improvviso": "spegnimento improvviso (corrente staccata o blocco)",
+    "spento": "spento",
+    "sospensione": "messo in sospensione",
+}
+_ACCENSIONI = ("acceso", "risveglio")
+
+
+def esito_postazione(r, adesso):
+    """Com'e' andata la notte per un PC: {"pc", "esito", "dettaglio", "allarme"}.
+    esito: gestionale | spento | acceso_notte | riacceso_notte | non_collegato."""
+    oggi = adesso.date()
+    sera = datetime.datetime.combine(oggi - datetime.timedelta(days=1),
+                                     datetime.time(*map(int, ORA_INIZIO_SERA.split(":"))))
+    fmt = lambda t: t.strftime("%H:%M") if t.date() == oggi else t.strftime("%d/%m %H:%M")
+    def leggi(t):
+        try:
+            return datetime.datetime.strptime(t[:16], "%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            return None
+    base = {"pc": r.get("pc", ""), "utente": r.get("abilitato_da", ""), "versione": r.get("versione", "")}
+    ricevuto, avvio = leggi(r.get("ricevuto")), leggi(r.get("avvio"))
+    # l'ultima accensione: con l'avvio rapido di Windows (o dopo una sospensione) il tempo dall'avvio non si azzera,
+    # quindi vale l'ultimo avvio o risveglio scritto nel registro eventi, se e' piu' recente
+    accensioni = [t for t in (leggi(e.get("quando")) for e in (r.get("eventi") or []) if e.get("tipo") in _ACCENSIONI)
+                  if t and (not ricevuto or t <= ricevuto)]
+    if accensioni and (not avvio or max(accensioni) > avvio):
+        avvio = max(accensioni)
+    # con l'avvio rapido Windows scrive sia l'avvio (27) sia il risveglio (1): e' un risveglio vero solo senza avvio vicino
+    vicino = lambda tipo: any(e.get("tipo") == tipo and leggi(e.get("quando")) and abs(leggi(e.get("quando")) - avvio)
+                              <= datetime.timedelta(minutes=2) for e in (r.get("eventi") or [])) if avvio else False
+    risveglio = vicino("risveglio") and not vicino("acceso")
+    if not ricevuto or ricevuto < datetime.datetime.combine(oggi, datetime.time(0, 0)) or not avvio:
+        quando = f" (ultimo contatto {fmt(ricevuto)})" if ricevuto else ""
+        return dict(base, esito="non_collegato", allarme=False,
+                    dettaglio=f"Non si e' ancora collegato stamattina: spento o Gestionale Notifiche non avviato{quando}.")
+    ch = r.get("chiusura") or {}
+    note = []
+    rimandato, saltato = leggi(ch.get("spegnimento_rimandato")), leggi(ch.get("spegnimento_saltato"))
+    if saltato and saltato >= sera:
+        note.append(f"alle {fmt(saltato)} hanno scelto \"Non stasera\"")
+    elif rimandato and rimandato >= sera:
+        note.append(f"spegnimento rimandato alle {fmt(rimandato)}")
+    if not r.get("spegni_qui", True):
+        note.append("spegnimento serale disattivato su questo PC")
+    extra = (" (" + "; ".join(note) + ")") if note else ""
+    if avvio < sera:
+        return dict(base, esito="acceso_notte", allarme=True,
+                    dettaglio=f"Rimasto acceso tutta la notte: acceso dal {fmt(avvio)}{extra}.")
+    # spento (o riavviato) dopo la sera: come, dal registro eventi; se manca, da quello che ricorda il programma
+    eventi = sorted((e for e in (r.get("eventi") or []) if e.get("tipo") not in _ACCENSIONI
+                     and (leggi(e.get("quando")) or sera) >= sera
+                     and (leggi(e.get("quando")) or adesso) <= avvio + datetime.timedelta(minutes=10)),
+                    key=lambda e: (e.get("quando", ""), e.get("tipo") == "sospensione"))  # a pari ora conta chi ha spento
+    spento_gest = leggi(ch.get("spegnimento_ora"))
+    primo = next((e for e in eventi if e["tipo"] != "improvviso"), None) or (eventi[0] if eventi else None)
+    if primo:
+        come = _DESCRIZIONE_SPEGNIMENTO.get(primo["tipo"], "spento")
+        if primo.get("riavvio"):
+            come = come.replace("spento", "riavviato")
+        if primo["tipo"] == "programma" and primo.get("da"):
+            come += f" ({primo['da']})"
+        quando = leggi(primo.get("quando"))
+        spegnimento = f"{come[0].upper()}{come[1:]}" + (f" alle {fmt(quando)}" if quando and primo["tipo"] != "improvviso" else "")
+        esito = "gestionale" if primo["tipo"] == "gestionale" else "spento"
+    elif spento_gest and spento_gest >= sera:
+        spegnimento, esito = f"Spento dal gestionale (chiusura serale) alle {fmt(spento_gest)}", "gestionale"
+    else:
+        spegnimento, esito = "Spento", "spento"
+    # riacceso di notte (21:00-7:00): e' quello che va guardato (BIOS, Wake-on-LAN, aggiornamenti di Windows...)
+    notturno = avvio.hour >= 21 or avvio.hour < 7
+    verbo = "si e' risvegliato dalla sospensione" if risveglio else "si e' riacceso"
+    riacceso = (f"{verbo} da solo alle {fmt(avvio)}" if notturno else
+                f"{'risvegliato' if risveglio else 'acceso'} {'oggi' if avvio.date() == oggi else 'il'} alle {fmt(avvio)}")
+    return dict(base, esito="riacceso_notte" if notturno else esito, allarme=notturno,
+                dettaglio=f"{spegnimento}; {riacceso}{extra}.")
+
+
+def postazioni_registrate():
+    """I PC abilitati a Gestionale Notifiche (nome del PC), anche quelli che non hanno ancora mandato un rapporto."""
+    nomi = {t.get("pc") for t in _widget_tokens().values() if t.get("pc")}
+    return sorted(nomi | set(_leggi_json_file(POSTAZIONI_FILE, {}).keys()), key=str.lower)
+
+
+def controllo_postazioni(adesso=None):
+    """Il controllo del mattino: un esito per ogni postazione, salvato nel log (ultimi 60 giorni)."""
+    adesso = adesso or datetime.datetime.now()
+    rapporti = _leggi_json_file(POSTAZIONI_FILE, {})
+    esiti = []
+    for pc in postazioni_registrate():
+        r = rapporti.get(pc)
+        if r:
+            esiti.append(esito_postazione(r, adesso))
+        else:
+            esiti.append({"pc": pc, "utente": "", "versione": "", "esito": "non_collegato", "allarme": False,
+                          "dettaglio": "Nessun rapporto: Gestionale Notifiche su questo PC va aggiornato (dalla 3.5)."})
+    with _POSTAZIONI_LOCK:
+        log = _leggi_json_file(POSTAZIONI_LOG_FILE, {})
+        log[adesso.date().isoformat()] = {"ora": adesso.strftime("%H:%M"), "postazioni": esiti}
+        limite = (adesso.date() - datetime.timedelta(days=60)).isoformat()
+        log = {k: v for k, v in log.items() if k >= limite}
+        POSTAZIONI_LOG_FILE.write_text(json.dumps(log, indent=1, ensure_ascii=False), encoding="utf-8")
+    for e in esiti:
+        print(f"[postazioni] {e['pc']}: {e['dettaglio']}")
+    return esiti
+
+
+def avvia_controllo_postazioni():
+    """Ogni minuto: dopo ORA_CONTROLLO_POSTAZIONI, se oggi non e' ancora stato fatto, controlla le postazioni
+    e avvisa gli amministratori (con l'esito in breve)."""
+    def _giro():
+        while True:
+            try:
+                adesso = datetime.datetime.now()
+                ora = datetime.time(*map(int, ORA_CONTROLLO_POSTAZIONI.split(":")))
+                if adesso.time() >= ora and adesso.date().isoformat() not in _leggi_json_file(POSTAZIONI_LOG_FILE, {}):
+                    esiti = controllo_postazioni(adesso)
+                    if esiti:
+                        conta = lambda *k: sum(1 for e in esiti if e["esito"] in k)
+                        parti = [f"{conta('gestionale')} spenti dal gestionale", f"{conta('spento')} spenti in altro modo"]
+                        if conta("acceso_notte"):
+                            parti.append(f"{conta('acceso_notte')} rimasti accesi")
+                        if conta("riacceso_notte"):
+                            parti.append(f"{conta('riacceso_notte')} riaccesi di notte")
+                        if conta("non_collegato"):
+                            parti.append(f"{conta('non_collegato')} non collegati")
+                        testo = ("⚠️ " if any(e["allarme"] for e in esiti) else "🖥️ ") + "PC stanotte: " + ", ".join(parti)
+                        for u in load_users():
+                            if u.get("role") == "amministratore":
+                                add_notification(u["username"], testo, link="/impostazioni/google#postazioni", tipo="info")
+            except Exception as e:
+                print(f"[postazioni] Errore controllo: {e}")
+            time.sleep(60)
+    threading.Thread(target=_giro, daemon=True, name="ControlloPostazioni").start()
+
+
+@app.route("/impostazioni/postazioni/controlla", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_controlla_postazioni():
+    controllo_postazioni()
+    flash("Controllo delle postazioni aggiornato.", "success")
+    return redirect(url_for("impostazioni_google") + "#postazioni")
+
+
 @app.route("/api/widget/feed")
 def api_widget_feed():
     """Novità per l'utente del widget: messaggi chat ricevuti e notifiche non lette.
@@ -7955,6 +8145,7 @@ def run_server():
         integrazioni_google.avvia_riepilogo_giornaliero(report_per_riepilogo, lambda: indirizzi_email("email_report"),
                                                         componi=componi_riepilogo)
         avvia_chiusura_report()
+        avvia_controllo_postazioni()
         ceerlo.avvia_riassunti_automatici(prossimi_eventi, contesto_evento, dopo=_riassunto_pronto)
         threading.Timer(90, titoli_mancanti).start()  # le task aperte senza titolo lo ricevono da Ceerlo
     
@@ -9765,6 +9956,8 @@ def impostazioni_google():
     return render_template("impostazioni_google.html", title="Email e Google Calendar",
                            stato=integrazioni_google.stato_pubblico(),
                            ceerlo_cfg=ceerlo.leggi_config(),
+                           postazioni_log=sorted(_leggi_json_file(POSTAZIONI_LOG_FILE, {}).items(), reverse=True)[:7],
+                           ora_controllo_postazioni=ORA_CONTROLLO_POSTAZIONI,
                            ricevono_report=[u for u in load_users() if u.get("email_report") and u.get("email")],
                            ricevono_admin=[u for u in load_users() if u.get("email_admin") and u.get("email")],
                            redirect_uri=_redirect_uri_google(),
