@@ -141,6 +141,37 @@ verifica(lista["miei_archiviati"] == 3, "gli altri sono contati come archiviati"
 arch = bruno.get("/api/report/archivio?autore=bruno").get_json()
 verifica(len(arch["reports"]) == 4, "gli archiviati sono nell'Archivio")
 
+print("6. Note cliente a voci e riassunto di Ceerlo")
+from models import Cliente  # noqa: E402
+db = SessionLocal()
+c = db.query(Cliente).filter_by(id_cliente=cliente_id).first()
+c.note_voci, c.note_interne = [], "Preferisce il mattino\nHa un cane"
+db.commit()
+db.close()
+d = anna.get(f"/api/cliente/{cliente_id}/note").get_json()
+verifica([v["testo"] for v in d["voci"]] == ["Preferisce il mattino", "Ha un cane"], "le note di prima diventano una voce per riga")
+d = anna.post(f"/api/cliente/{cliente_id}/note", json={"voci": d["voci"] + [{"testo": "Vuole la posa a dicembre"}]}).get_json()
+verifica(d["voci"][-1]["autore"] == "anna" and not d["voci"][0]["autore"], "la voce nuova ha l'autore, le vecchie restano com'erano")
+chiamate = []
+
+
+def finto_aggiungi_note(utente, messaggi, priorita, tipo, al_termine=None, chiave=""):
+    chiamate.append(chiave)
+    al_termine("- Preferisce essere chiamato al mattino\n- Vuole la posa a dicembre")
+    return "job-note"
+
+
+g.ceerlo.aggiungi = finto_aggiungi_note
+d = anna.get(f"/api/ceerlo/note-cliente/{cliente_id}").get_json()
+verifica(d["stato"] == "in_coda" and len(chiamate) == 1, "la prima volta Ceerlo riassume le note")
+d = anna.get(f"/api/ceerlo/note-cliente/{cliente_id}").get_json()
+verifica(d["stato"] == "pronto" and "dicembre" in d["testo"] and len(chiamate) == 1, "poi il riassunto e' pronto senza richiederlo")
+anna.post(f"/api/cliente/{cliente_id}/note", json={"voci": [{"testo": "Nuova nota"}]})
+anna.get(f"/api/ceerlo/note-cliente/{cliente_id}")
+verifica(len(chiamate) == 2, "se le note cambiano il riassunto si rifa'")
+html = anna.get(f"/preventivo/edit/{quote_id}").get_data(as_text=True)
+verifica('data-editor="1"' in html and f'data-cliente="{cliente_id}"' in html, "nell'editor del preventivo Ceerlo sa di quale cliente si tratta")
+
 print("\nCartella di prova:", TMP)
 print("ERRORI:" if ERRORI else "Tutto ok.", *ERRORI, sep="\n  ")
 sys.exit(1 if ERRORI else 0)

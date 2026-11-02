@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, json, re, datetime, uuid, copy, base64
 import urllib.request
+import hashlib
 import urllib.parse
 from pathlib import Path
 from flask import Flask, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, jsonify
@@ -10555,6 +10556,37 @@ def api_ceerlo_riassunto():
         return jsonify({"ok": False, "error": "Appuntamento non trovato (si possono riassumere quelli dei prossimi 30 giorni)."}), 404
     jid = ceerlo.chiedi_riassunto(ev, contesto_evento(ev), utente=session["user_id"])
     return jsonify({"ok": True, "job": jid, "posizione": ceerlo._CODA.posizione(jid)})
+
+
+@app.route("/api/ceerlo/note-cliente/<client_id>")
+@login_required
+def api_ceerlo_note_cliente(client_id):
+    """Riassunto delle note interne del cliente per chi sta facendo un suo preventivo (fumetto di Ceerlo).
+    stato: 'nessuna' (nessuna nota), 'pronto' (con testo), 'in_coda' (con job: Ceerlo lo sta scrivendo)."""
+    if not ceerlo.attivo():
+        return jsonify({"ok": False, "error": "Ceerlo non e' attivo."}), 503
+    db = _DBSession()
+    try:
+        cli = db.query(_Cliente).filter_by(id_cliente=client_id).first()
+        if not cli:
+            return jsonify({"ok": False, "error": "Cliente non trovato"}), 404
+        voci = voci_note_cliente(cli)
+        nome = cli.cliente or cli.rag_sociale or client_id
+    finally:
+        db.close()
+    if not voci:
+        return jsonify({"ok": True, "stato": "nessuna"})
+    note = "\n".join(f"- {v['testo']}" + (f" ({v['autore_nome']}, {v['quando'][:10]})" if v.get("autore_nome") else "")
+                     for v in voci)
+    impronta = hashlib.sha1(note.encode("utf-8")).hexdigest()[:16]
+    pronto = ceerlo.riassunto_note(client_id, impronta)
+    if pronto:
+        return jsonify({"ok": True, "stato": "pronto", "testo": pronto, "cliente": nome, "impronta": impronta, "voci": len(voci)})
+    try:
+        jid = ceerlo.chiedi_riassunto_note(client_id, nome, note, impronta, session["user_id"])
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    return jsonify({"ok": True, "stato": "in_coda", "job": jid, "cliente": nome, "impronta": impronta, "voci": len(voci)})
 
 
 @app.route("/api/ceerlo/riassunti")

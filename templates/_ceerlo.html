@@ -1,7 +1,8 @@
 {# Ceerlo, l'assistente AI: personaggio in basso a sinistra con fumetto e chat, in tutte le pagine (incluso da base.html).
    L'avatar si sostituisce mettendo un'immagine in static/ceerlo/ (avatar.gif, avatar.png o avatar.webp). #}
 <div id="ceerlo" class="ceerlo" data-cliente="{{ current_client_id or (request.view_args or {}).get('client_id', '') }}"
-     data-preventivo="{{ current_quote_id or (request.view_args or {}).get('quote_id', '') }}">
+     data-preventivo="{{ current_quote_id or (request.view_args or {}).get('quote_id', '') }}"
+     data-editor="{{ '1' if request.endpoint in ('editor_preventivo', 'editor_preventivo_edile') else '' }}">
     <div class="ceerlo-fumetto" id="ceerlo-fumetto" hidden>
         <button type="button" class="ceerlo-chiudi-fumetto" title="Chiudi">&times;</button>
         <div id="ceerlo-fumetto-testo"></div>
@@ -252,7 +253,30 @@
         } catch (e) {}
     }
 
+    // Chi apre un preventivo riceve dalle note interne del cliente le cose da ricordare (una volta per sessione,
+    // e di nuovo se le note cambiano). Ceerlo le riassume in sottofondo e le tiene da parte finche' non cambiano.
+    async function controllaNoteCliente(tentativi = 0) {
+        const cliente = box.dataset.cliente;
+        if (!cliente || !box.dataset.editor) return;
+        let d = {};
+        try { d = await (await fetch('/api/ceerlo/note-cliente/' + encodeURIComponent(cliente))).json(); } catch (e) { return; }
+        if (!d.ok || d.stato === 'nessuna') return;
+        const chiave = 'note:' + cliente + ':' + d.impronta;
+        const visti = leggi('ceerlo-note-viste', []);
+        if (visti.includes(chiave)) return;
+        if (d.stato === 'in_coda') {
+            // pronto di solito in pochi secondi: si riprova per qualche minuto, poi si lascia stare
+            if (tentativi < 30) setTimeout(() => controllaNoteCliente(tentativi + 1), tentativi < 3 ? 2500 : 6000);
+            return;
+        }
+        visti.push(chiave); scrivi('ceerlo-note-viste', visti);
+        const righe = d.testo.split('\n').map(r => r.replace(/^\s*[-*•]\s*/, '').trim()).filter(Boolean);
+        mostraFumetto(`Note su ${d.cliente}: ${righe[0] || ''}${righe.length > 1 ? ` (+${righe.length - 1}). Cliccami per leggerle tutte.` : ''}`,
+            `Dalle note interne su ${d.cliente} (${d.voci} ${d.voci === 1 ? 'nota' : 'note'}), da tenere presente per questo preventivo:\n\n${d.testo}`);
+    }
+
     if (inAttesa) aspetta(inAttesa);
+    setTimeout(controllaNoteCliente, 800);
     setTimeout(controllaRiassunti, 1500);
     setInterval(controllaRiassunti, 10 * 60 * 1000);
 })();

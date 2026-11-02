@@ -302,6 +302,35 @@ def chiedi_titolo(testo, al_termine, chiave=""):
                     al_termine=lambda risposta: al_termine(pulisci_titolo(risposta)), chiave=chiave)
 
 
+# --- Riassunto delle note del cliente (per chi apre un suo preventivo) ---
+
+def riassunto_note(client_id, impronta):
+    """Il riassunto gia' fatto, se le note non sono cambiate da allora."""
+    r = _leggi_json("riassunti_note.json", {}).get(client_id) or {}
+    return r.get("testo", "") if r.get("impronta") == impronta else ""
+
+
+def chiedi_riassunto_note(client_id, nome_cliente, note, impronta, utente):
+    """Chiede in sottofondo le cose da ricordare delle note interne; il risultato resta in cache per il cliente."""
+    messaggi = [{"role": "system", "content": (
+                    f"Sei {NOME}, l'assistente del gestionale di CERLAB. Un collega sta preparando un preventivo per "
+                    f"{nome_cliente}. Leggi le note interne sul cliente e scrivi in italiano le cose da tenere presenti "
+                    "mentre fa il preventivo: preferenze, richieste, problemi, accordi, avvertenze. Massimo 4 righe che "
+                    "iniziano con '- ', frasi brevi. Usa solo le note, non inventare nulla. Niente titoli o introduzioni.")},
+                {"role": "user", "content": "NOTE INTERNE:\n" + (note or "")[:6000]}]
+
+    def salva(testo):
+        testo = (testo or "").replace("**", "").strip()
+        if not testo:
+            return
+        tutti = _leggi_json("riassunti_note.json", {})
+        tutti[client_id] = {"impronta": impronta, "testo": testo,
+                            "creato_il": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+        _scrivi_json("riassunti_note.json", tutti)
+    return aggiungi(utente, messaggi, PRIO_RICHIESTA, "note_cliente", al_termine=salva,
+                    chiave=f"note:{client_id}:{impronta}")
+
+
 # --- Riassunti degli appuntamenti ---
 
 def riassunti():
