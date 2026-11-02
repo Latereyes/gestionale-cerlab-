@@ -247,12 +247,23 @@
 }
 .note-cliente-panel .ncp-body { padding: 16px 20px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
 .note-cliente-panel .ncp-hint { font-size: 12px; color: var(--text-muted, #64748b); }
-.note-cliente-panel textarea {
-    flex: 1; min-height: 200px; width: 100%; box-sizing: border-box; resize: none;
-    font-family: var(--font); font-size: 14px; line-height: 1.5; padding: 12px;
-    border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-md, 8px);
-    background: var(--surface, #fff); color: var(--text);
-}
+.note-cliente-panel .ncp-body { overflow-y: auto; }
+/* note a voci, come i report: una voce per riga, con chi l'ha scritta e quando */
+.ncp-voci { display: flex; flex-direction: column; gap: 8px; }
+.ncp-voce { display: grid; grid-template-columns: 14px minmax(0, 1fr) 28px; gap: 2px 8px; align-items: start; padding: 8px 8px 8px 10px;
+    border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-md, 8px); background: var(--surface, #fff); }
+.ncp-voce:focus-within { border-color: var(--accent); }
+.ncp-voce > i { margin-top: 9px; font-size: 7px; color: hsl(152,55%,38%); }
+.ncp-voce textarea { width: 100%; box-sizing: border-box; border: none; outline: none; resize: none; background: transparent; box-shadow: none;
+    font-family: var(--font); font-size: 14px; line-height: 1.5; padding: 3px 0; min-height: 26px; overflow: hidden; color: var(--text); }
+.ncp-voce .ncp-togli { width: 28px; height: 28px; border: none; background: none; color: var(--text-subtle); cursor: pointer; border-radius: 8px; padding: 0; }
+.ncp-voce .ncp-togli:hover { color: var(--danger); background: var(--danger-bg); }
+.ncp-voce .ncp-meta { grid-column: 2 / 4; font-size: 11px; color: var(--text-muted, #64748b); }
+.ncp-voce .ncp-meta:empty { display: none; }
+.ncp-aggiungi { border: 1px dashed var(--border-strong, #cbd5e1); background: none; border-radius: var(--radius-md, 8px); width: 100%; padding: 8px;
+    font: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; }
+.ncp-aggiungi:hover { color: var(--accent); border-color: var(--accent); }
+.ncp-aggiungi .rp-tasto { font-size: 10.5px; font-weight: 600; color: var(--text-subtle); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; margin-left: 6px; }
 .note-cliente-panel .ncp-footer {
     padding: 14px 20px; border-top: 1px solid var(--border, #e2e8f0);
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -1546,8 +1557,9 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
         <span class="ncp-badge">Note interne</span>
     </div>
     <div class="ncp-body">
-        <div class="ncp-hint">Visibili da tutti i preventivi di questo cliente. Non compaiono nelle stampe.</div>
-        <textarea id="noteClienteText" placeholder="Note libere sul cliente..."></textarea>
+        <div class="ncp-hint">Una nota per voce, come nei report. Visibili da tutti i preventivi di questo cliente; non compaiono nelle stampe.</div>
+        <div class="ncp-voci" id="noteClienteVoci"></div>
+        <button type="button" class="ncp-aggiungi" id="noteClienteAggiungi"><i class="fas fa-plus"></i> Aggiungi nota <span class="rp-tasto">Invio</span></button>
     </div>
     <div class="ncp-footer">
         <span class="ncp-status" id="noteClienteStatus"></span>
@@ -1561,41 +1573,94 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
 (function () {
     const url = "{{ url_for('api_note_cliente', client_id=current_client_id) }}";
     const panel = document.getElementById('noteClientePanel');
-    const text = document.getElementById('noteClienteText');
+    const lista = document.getElementById('noteClienteVoci');
     const status = document.getElementById('noteClienteStatus');
     const dot = document.getElementById('noteClienteDot');
-    let saved = '';
+    let salvate = [];   // voci come sono sul server
+    let impronta = '[]';
 
+    const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const dataIt = (q) => q ? q.slice(8, 10) + '/' + q.slice(5, 7) + '/' + q.slice(0, 4) + (q.length > 10 ? ' ' + q.slice(11, 16) : '') : '';
     function setStatus(msg, cls) { status.textContent = msg; status.className = 'ncp-status' + (cls ? ' ' + cls : ''); }
-    function refreshDot() { dot.style.display = saved.trim() ? 'block' : 'none'; }
+    function refreshDot() { dot.style.display = salvate.length ? 'block' : 'none'; }
+    const autoGrow = (ta) => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+    const leggi = () => [...lista.querySelectorAll('.ncp-voce')].map(r => ({ id: r.dataset.id || '', testo: r.querySelector('textarea').value.trim() }))
+                                                                  .filter(v => v.testo);
+    const modificate = () => JSON.stringify(leggi()) !== impronta;
+
+    function nuovaVoce(v = {}, dopo = null) {
+        const r = document.createElement('div');
+        r.className = 'ncp-voce';
+        r.dataset.id = v.id || '';
+        const chi = [v.autore_nome, dataIt(v.quando)].filter(Boolean).join(' · ');
+        r.innerHTML = `<i class="fas fa-circle"></i><textarea rows="1" placeholder="Scrivi una nota…"></textarea>
+            <button type="button" class="ncp-togli" title="Togli nota"><i class="fas fa-times"></i></button>
+            <div class="ncp-meta">${esc(chi)}</div>`;
+        const ta = r.querySelector('textarea');
+        ta.value = v.testo || '';
+        ta.addEventListener('input', () => { autoGrow(ta); setStatus(modificate() ? 'Modifiche non salvate' : ''); });
+        ta.addEventListener('keydown', e => {
+            // Invio = nuova nota; Maiusc+Invio va a capo dentro la nota
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); nuovaVoce({}, r).querySelector('textarea').focus(); }
+            else if (e.key === 'Backspace' && ta.value === '' && lista.children.length > 1) {
+                e.preventDefault();
+                const prima = r.previousElementSibling || r.nextElementSibling;
+                r.remove();
+                const t = prima.querySelector('textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length);
+                setStatus(modificate() ? 'Modifiche non salvate' : '');
+            }
+        });
+        r.querySelector('.ncp-togli').addEventListener('click', () => {
+            r.remove();
+            if (!lista.children.length) nuovaVoce();
+            setStatus(modificate() ? 'Modifiche non salvate' : '');
+        });
+        if (dopo && dopo.nextSibling) lista.insertBefore(r, dopo.nextSibling); else lista.appendChild(r);
+        requestAnimationFrame(() => autoGrow(ta));
+        return r;
+    }
+    function riempi(voci) {
+        lista.innerHTML = '';
+        (voci.length ? voci : [{}]).forEach(v => nuovaVoce(v));
+        impronta = JSON.stringify(leggi());
+    }
 
     function load() {
         return fetch(url).then(r => r.json()).then(d => {
             if (!d.ok) throw new Error(d.error);
-            saved = d.note || '';
-            if (!panel.classList.contains('open') || text.value === '') text.value = saved;
+            salvate = d.voci || [];
+            if (!panel.classList.contains('open') || !modificate()) riempi(salvate);
             refreshDot();
         }).catch(() => setStatus('Impossibile caricare le note', 'err'));
     }
     function save() {
         setStatus('Salvataggio...');
-        return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: text.value }) })
+        return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voci: leggi() }) })
             .then(r => r.json()).then(d => {
                 if (!d.ok) throw new Error(d.error);
-                saved = text.value; refreshDot(); setStatus('Salvato ✓', 'ok');
+                salvate = d.voci || [];
+                riempi(salvate); refreshDot(); setStatus('Salvato ✓', 'ok');
             }).catch(() => setStatus('Errore nel salvataggio', 'err'));
     }
-    function open() { text.value = saved; setStatus(''); panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false'); load().then(() => text.focus()); }
+    function open() {
+        riempi(salvate); setStatus(''); panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false');
+        load().then(() => {
+            // si apre pronto per una nota nuova in fondo (le voci vuote non si salvano)
+            let t = [...lista.querySelectorAll('textarea')].pop();
+            if (t && t.value.trim()) t = nuovaVoce().querySelector('textarea');
+            if (t) t.focus();
+        });
+    }
     function close() {
-        if (text.value !== saved && !confirm('Ci sono modifiche non salvate alle note. Chiudere comunque?')) return;
+        if (modificate() && !confirm('Ci sono modifiche non salvate alle note. Chiudere comunque?')) return;
         panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true');
     }
 
     document.getElementById('noteClienteFab').addEventListener('click', () => panel.classList.contains('open') ? close() : open());
     document.getElementById('noteClienteClose').addEventListener('click', close);
     document.getElementById('noteClienteSave').addEventListener('click', save);
-    text.addEventListener('input', () => setStatus(text.value !== saved ? 'Modifiche non salvate' : ''));
-    text.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); } });
+    document.getElementById('noteClienteAggiungi').addEventListener('click', () => nuovaVoce().querySelector('textarea').focus());
+    panel.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); } });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && panel.classList.contains('open')) close(); });
     load();
 })();

@@ -54,6 +54,8 @@ class Cliente(Base):
 
     # Note interne libere sul cliente (pannello "Note Cliente", visibili da tutti i suoi preventivi)
     note_interne = Column(Text, default="")
+    # le note a voci: [{"id", "testo", "autore", "autore_nome", "quando"}]; note_interne ne e' il testo
+    note_voci = Column(JSON, default=list)
 
     # Campi del JSON senza colonna dedicata (es. codice_univoco, regione, indirizzi_cantiere)
     extra = Column(JSON, default=dict)
@@ -734,6 +736,7 @@ def _apply_schema_migrations():
             ("has_contratto",        "INTEGER DEFAULT 0"),
             ("documenti_anagrafici", "TEXT DEFAULT '[]'"),
             ("note_interne",         "TEXT DEFAULT ''"),
+            ("note_voci",            "TEXT DEFAULT '[]'"),
             ("extra",                "TEXT DEFAULT '{}'"),
         ],
         "preventivi": [("extra", "TEXT DEFAULT '{}'")],

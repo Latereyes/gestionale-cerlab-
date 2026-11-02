@@ -82,7 +82,7 @@
                 </div>
                 <span class="status-tag warning">In attesa di numero conferma</span> </div>
             <div class="actions-group">
-                 <button type="button" class="btn icon-btn copy-order-btn" title="Copia contenuto per email" data-target-table="#pending-order-table-{{ loop.index0 }}"><i class="fas fa-copy"></i></button>
+                 <button type="button" class="btn icon-btn copy-order-btn" title="Copia la tabella degli articoli da incollare nell'email" data-target-table="#pending-order-table-{{ loop.index0 }}" data-fornitore="{{ ordine.azienda }}" data-numero="{{ ordine.numero_conferma }}"><i class="fas fa-copy"></i></button>
                  <button type="button" class="btn icon-btn edit-order-btn" title="Modifica e Conferma Ordine" 
                         data-ordine-id="{{ ordine.ordine_id }}" 
                         data-numero-display="{{ ordine.numero_conferma }}" 
@@ -100,7 +100,7 @@
                 <thead><tr><th>Articolo</th><th>UM</th><th class="right">Q.tà</th><th class="right">Costo Presunto Articolo</th><th style="width: 50px;"></th></tr></thead>
                 <tbody>
                     {% for item in ordine.articoli %}
-                    <tr>
+                    <tr data-articolo="{{ item.articolo }}" data-um="{{ item.unt }}" data-qt="{{ item.qt }}">
                         <td>{{ item.articolo }}</td><td>{{ item.unt }}</td><td class="right">{{ item.qt }}</td><td class="right">{{ money_ui(item.costo_presunto_articolo) }}</td>
                         <td class="row-actions">
                             <button type="button" class="btn icon-btn unlink-item-btn" title="Svincola Articolo" data-item-index="{{ item.original_index }}" data-ordine-id="{{ ordine.ordine_id }}" data-numero-display="{{ ordine.numero_conferma }}"><i class="fas fa-unlink"></i></button>
@@ -159,6 +159,37 @@
     <div class="section-title">
         <h2>Ordini Fornitore Confermati</h2>
     </div>
+    {% if ordine_magazzino %}
+    <div class="card order-card order-magazzino">
+        <div class="card-header">
+            <div class="order-info">
+                <h3>Ordine: <strong>Magazzino interno</strong></h3>
+                <div class="header-totals">
+                    <span class="muted">Articoli già in magazzino: non si ordinano al fornitore e seguono subito il flusso consegne.</span>
+                </div>
+                <span class="status-tag success"><i class="fas fa-magic"></i> Confermato in automatico</span>
+            </div>
+            <div class="actions-group">
+                <button type="button" class="btn icon-btn copy-order-btn" title="Copia la tabella degli articoli da incollare nell'email" data-target-table="#magazzino-order-table" data-fornitore="Magazzino interno" data-numero=""><i class="fas fa-copy"></i></button>
+                <a class="btn icon-btn" href="{{ url_for('dashboard_magazzino') }}" title="Apri il magazzino"><i class="fas fa-warehouse"></i></a>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="styled-table minimal" id="magazzino-order-table">
+                <thead><tr><th>Articolo</th><th>UM</th><th class="right">Q.tà</th><th class="right">Giacenza</th><th>Stato</th></tr></thead>
+                <tbody>
+                    {% for item in ordine_magazzino.articoli %}
+                    <tr data-articolo="{{ item.articolo }}" data-um="{{ item.unt }}" data-qt="{{ item.qt }}" data-codice="{{ item.codice }}">
+                        <td>{% if item.codice %}<span class="muted">{{ item.codice }}</span> · {% endif %}{{ item.articolo }}</td>
+                        <td>{{ item.unt }}</td><td class="right">{{ item.qt }}</td><td class="right">{{ item.giacenza }}</td>
+                        <td>{% if item.scaricato %}<span class="status-tag success">Scaricato alla consegna</span>{% else %}<span class="status-tag warning">Prenotato</span>{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
     {% for ordine in ordini_confermati %}
     <div class="card order-card">
         
@@ -173,7 +204,7 @@
                 <span class="status-tag success">Confermato</span>
             </div>
              <div class="actions-group">
-                <button type="button" class="btn icon-btn copy-order-btn" title="Copia contenuto per email" data-target-table="#confirmed-order-table-{{ loop.index0 }}"><i class="fas fa-copy"></i></button>
+                <button type="button" class="btn icon-btn copy-order-btn" title="Copia la tabella degli articoli da incollare nell'email" data-target-table="#confirmed-order-table-{{ loop.index0 }}" data-fornitore="{{ ordine.azienda }}" data-numero="{{ ordine.numero_conferma }}"><i class="fas fa-copy"></i></button>
                 <button type="button" class="btn icon-btn upload-order-attachment-btn" title="Allega conferma d'ordine" data-ordine-id="{{ ordine.ordine_id }}" data-numero-display="{{ ordine.numero_conferma }}"><i class="fas fa-paperclip"></i></button>
                 
                 <button type="button" class="btn icon-btn edit-order-btn" title="Modifica Ordine" 
@@ -193,7 +224,7 @@
                 <thead><tr><th>Articolo</th><th>UM</th><th class="right">Q.tà</th><th class="right">Costo Presunto Articolo</th><th style="width: 50px;"></th></tr></thead>
                 <tbody>
                     {% for item in ordine.articoli %}
-                    <tr>
+                    <tr data-articolo="{{ item.articolo }}" data-um="{{ item.unt }}" data-qt="{{ item.qt }}">
                         <td>{{ item.articolo }}</td><td>{{ item.unt }}</td><td class="right">{{ item.qt }}</td><td class="right">{{ money_ui(item.costo_presunto_articolo) }}</td>
                         <td class="row-actions">
                              <button type="button" class="btn icon-btn unlink-item-btn" title="Svincola Articolo" data-item-index="{{ item.original_index }}" data-ordine-id="{{ ordine.ordine_id }}" data-numero-display="{{ ordine.numero_conferma }}"><i class="fas fa-unlink"></i></button>
@@ -246,7 +277,7 @@
         </div>
         </div>
     {% else %}
-        <p class="muted">Nessun ordine fornitore confermato per questo preventivo.</p>
+        {% if not ordine_magazzino %}<p class="muted">Nessun ordine fornitore confermato per questo preventivo.</p>{% endif %}
     {% endfor %}
 
 </div>
@@ -771,6 +802,8 @@ FINE BLOCCO FOOTER AGGIORNATO
     .centered-actions { justify-content: center; }
     .modal-icon { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px auto; font-size: 28px; }
     .modal-icon.warning { background: var(--warning-bg); color: var(--warning-text); }
+    .order-magazzino { border-left: 4px solid var(--success); }
+    .order-magazzino .status-tag i { margin-right: 4px; }
 </style>
 
 <script>
@@ -784,66 +817,78 @@ document.addEventListener('DOMContentLoaded', () => {
     let isEditing = false;
     let originalOrderNumber = null;
 
-    // --- LOGICA COPIA NEGLI APPUNTI (Con Fallback per HTTP) ---
-    function fallbackCopyTextToClipboard(text) {
-        const textArea = document.createElement("textarea");
-        textArea.value = text;
-        textArea.style.position = "fixed"; 
-        textArea.style.left = "-9999px";
-        textArea.style.top = "0";
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        try {
-            document.execCommand('copy');
-        } catch (err) {
-            console.error('Fallback: Impossibile copiare', err);
-        }
-        document.body.removeChild(textArea);
+    // --- COPIA PER EMAIL: una tabella che si incolla com'e' in Gmail o Outlook ---
+    // Funziona anche col gestionale aperto in http sulla rete dell'ufficio (dove navigator.clipboard non c'e'):
+    // si seleziona una tabella fuori schermo e si copia, cosi' gli appunti ricevono l'HTML impaginato.
+    const escHtml = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    function tabellaEmail(righe, fornitore, numero) {
+        const bordo = 'border:1px solid #cbd5e1;padding:6px 10px;font-family:Arial,Helvetica,sans-serif;font-size:13px;';
+        const testa = bordo + 'background:#eef1fd;font-weight:bold;text-align:left;';
+        const titolo = `Ordine ${fornitore ? 'per ' + fornitore : ''}${numero ? ' · rif. ' + numero : ''} · preventivo ${quoteId}`;
+        const html = `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:0 0 6px;"><b>${escHtml(titolo)}</b></p>` +
+            `<table style="border-collapse:collapse;border:1px solid #cbd5e1;">` +
+            `<thead><tr><th style="${testa}">#</th><th style="${testa}">Articolo</th><th style="${testa}text-align:right;">Q.tà</th><th style="${testa}">UM</th></tr></thead><tbody>` +
+            righe.map((r, i) => `<tr><td style="${bordo}">${i + 1}</td><td style="${bordo}">${escHtml(r.codice ? r.codice + ' - ' + r.articolo : r.articolo)}</td>` +
+                                `<td style="${bordo}text-align:right;">${escHtml(r.qt)}</td><td style="${bordo}">${escHtml(r.um)}</td></tr>`).join('') +
+            `</tbody></table>`;
+        const testo = titolo + '\n\n' + ['#\tArticolo\tQ.tà\tUM', ...righe.map((r, i) =>
+            `${i + 1}\t${r.codice ? r.codice + ' - ' : ''}${r.articolo}\t${r.qt}\t${r.um}`)].join('\n');
+        return { html, testo };
     }
 
-    function copyToClipboard(text) {
-        if (!navigator.clipboard) {
-            fallbackCopyTextToClipboard(text);
-            return Promise.resolve();
+    function copiaHtml(html, testo) {
+        // 1) appunti moderni (solo in https/localhost): HTML e testo insieme
+        if (navigator.clipboard && window.ClipboardItem && window.isSecureContext) {
+            return navigator.clipboard.write([new ClipboardItem({
+                'text/html': new Blob([html], { type: 'text/html' }),
+                'text/plain': new Blob([testo], { type: 'text/plain' }),
+            })]).catch(() => copiaConSelezione(html));
         }
-        return navigator.clipboard.writeText(text);
+        return Promise.resolve(copiaConSelezione(html));
+    }
+
+    function copiaConSelezione(html) {
+        const box = document.createElement('div');
+        box.innerHTML = html;
+        box.style.cssText = 'position:fixed;left:-10000px;top:0;background:#fff;color:#000;';
+        document.body.appendChild(box);
+        const range = document.createRange();
+        range.selectNodeContents(box);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (err) { console.error('Copia non riuscita', err); }
+        sel.removeAllRanges();
+        box.remove();
+        if (!ok) throw new Error('copia non riuscita');
     }
 
     document.body.addEventListener('click', function(e) {
         const copyBtn = e.target.closest('.copy-order-btn');
         if (!copyBtn) return;
 
-        const targetSelector = copyBtn.dataset.targetTable;
-        const table = document.querySelector(targetSelector);
+        const table = document.querySelector(copyBtn.dataset.targetTable);
         if (!table) return;
+        const righe = [...table.querySelectorAll('tbody tr[data-articolo]')].map(tr => ({
+            articolo: tr.dataset.articolo, um: tr.dataset.um, qt: tr.dataset.qt, codice: tr.dataset.codice || '' }));
+        if (!righe.length) return;
 
-        let textToCopy = "";
-        const rows = table.querySelectorAll('tbody tr');
-        
-        rows.forEach(row => {
-            const cells = row.querySelectorAll('td');
-            if (cells.length >= 3) {
-                const articolo = cells[0].textContent.trim();
-                const um = cells[1].textContent.trim();
-                const qta = cells[2].textContent.trim();
-                textToCopy += `• ${articolo} - Q.tà: ${qta} ${um}\n`;
-            }
-        });
-
-        if (textToCopy) {
-            copyToClipboard(textToCopy).then(() => {
-                const icon = copyBtn.querySelector('i');
-                const originalClass = icon.className;
-                icon.className = 'fas fa-check';
-                copyBtn.style.backgroundColor = '#d1fae5'; // Verde chiaro
-                
-                setTimeout(() => {
-                    icon.className = originalClass;
-                    copyBtn.style.backgroundColor = '';
-                }, 2000);
-            });
-        }
+        const { html, testo } = tabellaEmail(righe, copyBtn.dataset.fornitore, copyBtn.dataset.numero);
+        const icon = copyBtn.querySelector('i');
+        const originalClass = icon.className;
+        Promise.resolve().then(() => copiaHtml(html, testo)).then(() => {
+            icon.className = 'fas fa-check';
+            copyBtn.style.backgroundColor = '#d1fae5';
+            copyBtn.title = 'Tabella copiata: incollala nell\'email';
+        }).catch(() => {
+            icon.className = 'fas fa-times';
+            copyBtn.style.backgroundColor = '#fde4e1';
+        }).finally(() => setTimeout(() => {
+            icon.className = originalClass;
+            copyBtn.style.backgroundColor = '';
+        }, 2000));
     });
 
     // --- MODALI ---

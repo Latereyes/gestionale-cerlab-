@@ -4010,10 +4010,31 @@ def conferma_ordine(quote_id):
     )
     totale_effettivo_globale = sum(o.get("costo_totale_effettivo_imponibile", 0) for o in tutti_gli_ordini)
 
+    # 4. Righe prese dal magazzino: confermate in automatico, non si ordinano al fornitore
+    ordine_magazzino = None
+    indici_magazzino = sorted(_indici_righe_magazzino(p))
+    if indici_magazzino:
+        db = _DBSession()
+        try:
+            articoli_mag = {a.id: a for a in db.query(_ArticoloMagazzino).filter(
+                _ArticoloMagazzino.id.in_([_id_articolo_riga(righe_preventivo[i]) for i in indici_magazzino])).all()}
+        finally:
+            db.close()
+        voci = []
+        for i in indici_magazzino:
+            r = righe_preventivo[i]
+            art = articoli_mag.get(_id_articolo_riga(r))
+            voci.append({"articolo": r.get("articolo", ""), "unt": r.get("unt", ""), "qt": r.get("qt", ""),
+                         "scaricato": bool(r.get("magazzino_scaricato")),
+                         "giacenza": _fmt_qt(art.giacenza) if art else "",
+                         "codice": (art.codice if art and hasattr(art, "codice") else "") or ""})
+        ordine_magazzino = {"articoli": voci, "tutti_scaricati": all(v["scaricato"] for v in voci)}
+
 
     return render_template("conferma_ordine.html", 
         title="Gestione Ordini", p=p,
         righe_non_ordinate=righe_non_ordinate,
+        ordine_magazzino=ordine_magazzino,
         ordini_confermati=ordini_confermati, 
         ordini_in_attesa=ordini_in_attesa,   
         totale_presunto=totale_presunto_globale,
@@ -4029,11 +4050,24 @@ def salva_ordine(quote_id):
 
     form_data = request.form
 
+    # Le righe scelte: solo articoli veri, non gia' in un altro ordine e non presi dal magazzino
+    gia_ordinati = {i for o in p.get("ordini_fornitore", []) for i in o.get("indici_righe", [])}
+    try:
+        indici = sorted({int(i) for i in form_data.getlist("indici_righe[]")})
+    except ValueError:
+        return jsonify({"success": False, "error": "Articoli non validi."})
+    righe = p.get("righe", [])
+    indici = [i for i in indici if 0 <= i < len(righe) and i not in gia_ordinati and i not in _indici_righe_magazzino(p)]
+    if not indici:
+        return jsonify({"success": False, "error": "Seleziona almeno un articolo ancora da ordinare."})
+    if not (form_data.get("azienda") or "").strip():
+        return jsonify({"success": False, "error": "Scrivi il fornitore."})
+
     # --- INIZIO MODIFICA: Leggiamo i costi separati ---
     importo_articoli_val = _to_num(form_data.get("importo_articoli"))
     importo_trasporto_val = _to_num(form_data.get("importo_trasporto"))
     importo_totale_val = importo_articoli_val + importo_trasporto_val # Somma
-    
+
     # L'IVA viene calcolata sul totale
     iva_calcolata = importo_totale_val - (importo_totale_val / 1.22)
     # --- FINE MODIFICA ---
@@ -4042,18 +4076,20 @@ def salva_ordine(quote_id):
     nuovo_ordine = {
         "ordine_id": f"ORD-{uuid.uuid4().hex[:8].upper()}",
         "data_ordine": datetime.date.today().strftime('%Y-%m-%d'),
-        "azienda": form_data.get("azienda"),
-        "numero_conferma": form_data.get("numero_conferma"),
+        "azienda": (form_data.get("azienda") or "").strip(),
+        "numero_conferma": (form_data.get("numero_conferma") or "").strip(),
         
         # --- INIZIO MODIFICA: Salviamo i nuovi campi ---
         "importo": f"{importo_totale_val:.2f}".replace(".", ","), # Manteniamo il totale per compatibilità
         "importo_articoli": form_data.get("importo_articoli"),
         "importo_trasporto": form_data.get("importo_trasporto"),
         "iva_ordine": iva_calcolata,
+        # prima non si salvava: un ordine col trasporto a parte veniva contato come trasporto incluso
+        "trasporto_incluso": form_data.get("trasporto_incluso", "true") == "true",
         # --- FINE MODIFICA ---
-        
+
         "data_arrivo": form_data.get("data_arrivo"),
-        "indici_righe": [int(i) for i in form_data.getlist("indici_righe[]")]
+        "indici_righe": indici
     }
 
     # Aggiunge il nuovo ordine alla lista
@@ -4097,8 +4133,8 @@ def modifica_ordine(quote_id):
         # --- FINE MODIFICA ---
 
         # Aggiorna i dati dell'ordine
-        ordine_trovato["azienda"] = form_data.get("azienda")
-        ordine_trovato["numero_conferma"] = form_data.get("numero_conferma")
+        ordine_trovato["azienda"] = (form_data.get("azienda") or "").strip()
+        ordine_trovato["numero_conferma"] = (form_data.get("numero_conferma") or "").strip()
         
         # --- INIZIO MODIFICA: Salviamo i nuovi campi ---
         ordine_trovato["importo"] = f"{importo_totale_val:.2f}".replace(".", ",")
@@ -8039,22 +8075,52 @@ def api_get_chat_history(other_user):
     finally:
         db.close()
 
+def voci_note_cliente(cli):
+    """Le note del cliente a voci; le note scritte prima (testo libero) diventano una voce per riga."""
+    if cli.note_voci:
+        return list(cli.note_voci)
+    return [{"id": f"v{i}", "testo": t.strip().lstrip("•-* ").strip(), "autore": "", "autore_nome": "", "quando": ""}
+            for i, t in enumerate((cli.note_interne or "").splitlines()) if t.strip().lstrip("•-* ").strip()]
+
+
 @app.route("/api/cliente/<client_id>/note", methods=["GET", "POST"])
 @login_required
 def api_note_cliente(client_id):
-    """Legge (GET) o salva (POST {note: "..."}) le note interne di un cliente."""
+    """Legge (GET) o salva (POST {voci: [...]}) le note interne di un cliente, a voci come i report.
+    Ogni voce: id, testo, autore, autore_nome, quando. 'note_interne' resta il testo (per Ceerlo e le ricerche)."""
     db = _DBSession()
     try:
         cli = db.query(_Cliente).filter_by(id_cliente=client_id).first()
         if not cli:
             return jsonify({"ok": False, "error": "Cliente non trovato"}), 404
+        vecchie = voci_note_cliente(cli)
         if request.method == "GET":
-            return jsonify({"ok": True, "note": cli.note_interne or "",
+            return jsonify({"ok": True, "voci": vecchie, "note": cli.note_interne or "",
                             "cliente": cli.cliente or cli.rag_sociale or client_id})
         data = request.get_json(silent=True) or {}
-        cli.note_interne = str(data.get("note", ""))
+        grezze = data.get("voci")
+        if not isinstance(grezze, list):  # vecchio formato: testo libero, una voce per riga
+            grezze = [{"testo": t} for t in str(data.get("note", "")).splitlines()]
+        per_id = {v["id"]: v for v in vecchie}
+        adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        voci = []
+        for g in grezze[:200]:
+            if not isinstance(g, dict):
+                continue
+            testo = str(g.get("testo") or "").strip()[:2000]
+            if not testo:
+                continue
+            prima = per_id.get(str(g.get("id") or ""))
+            if prima and prima["testo"] == testo:
+                voci.append(prima)  # voce invariata: resta di chi l'ha scritta
+            else:
+                voci.append({"id": (prima or {}).get("id") or uuid.uuid4().hex[:8], "testo": testo,
+                             "autore": session["user_id"], "autore_nome": session.get("user_name") or session["user_id"],
+                             "quando": adesso})
+        cli.note_voci = voci
+        cli.note_interne = "\n".join(f"• {v['testo']}" for v in voci)
         db.commit()
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "voci": voci})
     except Exception as e:
         db.rollback()
         print(f"[note_cliente] Errore: {e}")
