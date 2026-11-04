@@ -48,7 +48,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "3.5.0"  
+APP_VERSION = "3.5.1"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -8642,6 +8642,34 @@ def destinatari_task(t, all_users):
     return chi
 
 
+def aggiungi_coinvolti(t, testo, me, all_users):
+    """Chi viene taggato (@collega o @gruppo) in un commento entra nella task: la vede e ne riceve gli avvisi.
+    Le task personali restano private: li' le menzioni sono solo testo.
+    Modifica t["assigned_to"] e restituisce (nuovi_colleghi, nuovi_gruppi) appena aggiunti."""
+    if t.get("tipo") == "personale":
+        return [], []
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    user_resolver = {u["username"].lower(): u["username"] for u in all_users}
+    assegnati = list(t.get("assigned_to") or [])
+    presenti = {a.lstrip("@").lower() for a in assegnati}
+    nuovi_utenti, nuovi_gruppi = [], []
+    for m in re.findall(r"@(\w+)", testo or ""):
+        nome = m.lower()
+        if nome in presenti:
+            continue
+        if _e_gruppo(nome, ruoli):
+            assegnati.append(f"@{nome}")
+            nuovi_gruppi.append(nome)
+        elif nome in user_resolver and user_resolver[nome] not in (me, t.get("created_by")):
+            assegnati.append(f"@{user_resolver[nome]}")
+            nuovi_utenti.append(user_resolver[nome])
+        else:
+            continue
+        presenti.add(nome)
+    t["assigned_to"] = assegnati
+    return nuovi_utenti, nuovi_gruppi
+
+
 def _estratto_task(desc, utenti=None):
     """Le prime parole della task, leggibili: #CODICE[nome] -> nome, @utente -> nome del collega."""
     utenti = utenti if utenti is not None else {u["username"].lower(): u.get("full_name") or u["username"] for u in load_users()}
@@ -8967,6 +8995,10 @@ def api_task_etc():
         t.etc = nuova
         t.etc_avvisata = ""
         td = t.to_dict()
+        # chi viene taggato nel motivo entra nella task (come nei commenti)
+        nuovi_u, nuovi_g = aggiungi_coinvolti(td, motivo, me, load_users())
+        if nuovi_u or nuovi_g:
+            t.assigned_to = list(td["assigned_to"])
         db.commit()
     except Exception as e:
         db.rollback()
@@ -10901,6 +10933,7 @@ def api_update_task():
     # --- File: gestionale.py (Intorno alla riga 1554) ---
     tasks = load_tasks()
     notification_sent = False # <--- Flag per evitare notifiche doppie
+    notified_assigned = set()  # chi ha gia' avuto l'avviso del cambio stato
     for t in tasks:
         if t["id"] == task_id:
             if not task_visibile(t, session["user_id"], session["user_role"]):
@@ -10952,22 +10985,28 @@ def api_update_task():
                     "status_change": status_change
                 })
                 
-                # Invia notifica commento solo se non è già stato notificato un cambio stato
-                if not notification_sent:
-                    all_users = load_users()
-                    user_resolver = {u['username'].lower(): u['username'] for u in all_users}
-                    notified = {session["user_id"]}
-                    if t.get("created_by") and t["created_by"] not in notified:
-                        add_notification(t["created_by"], f"{session['user_name']} ha commentato {nome_task(t)}", link=f"/tasks#{task_id}", tipo="commento")
-                        notified.add(t["created_by"])
-                    # in una task personale le menzioni non notificano: il collega non la vedrebbe
-                    c_mentions = re.findall(r"@(\w+)", comment_text) if t.get("tipo") != "personale" else []
-                    for cm_lower in set(m.lower() for m in c_mentions):
-                        if cm_lower in user_resolver:
-                            u_real_id = user_resolver[cm_lower]
-                            if u_real_id not in notified:
-                                add_notification(u_real_id, f"{session['user_name']} ti ha menzionato in {nome_task(t)}", link=f"/tasks#{task_id}", tipo="menzione")
-                                notified.add(u_real_id)
+                all_users = load_users()
+                user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+                notified = {session["user_id"]} | notified_assigned
+                # Invia notifica commento all'autore solo se non è già stato notificato un cambio stato
+                if not notification_sent and t.get("created_by") and t["created_by"] not in notified:
+                    add_notification(t["created_by"], f"{session['user_name']} ha commentato {nome_task(t)}", link=f"/tasks#{task_id}", tipo="commento")
+                    notified.add(t["created_by"])
+                # Chi viene taggato entra nella task (la vede e riceve gli avvisi) e viene avvisato
+                # anche se il commento accompagna un cambio di stato. Nelle personali niente: restano private.
+                _, gruppi_nuovi = aggiungi_coinvolti(t, comment_text, session["user_id"], all_users)
+                c_mentions = re.findall(r"@(\w+)", comment_text) if t.get("tipo") != "personale" else []
+                for cm_lower in set(m.lower() for m in c_mentions):
+                    if cm_lower in user_resolver:
+                        u_real_id = user_resolver[cm_lower]
+                        if u_real_id not in notified:
+                            add_notification(u_real_id, f"{session['user_name']} ti ha menzionato in {nome_task(t)}", link=f"/tasks#{task_id}", tipo="menzione")
+                            notified.add(u_real_id)
+                for g in gruppi_nuovi:
+                    for u_real_id in utenti_del_gruppo(g, all_users):
+                        if u_real_id not in notified:
+                            add_notification(u_real_id, f"{session['user_name']} ha coinvolto @{g} in {nome_task(t)}", link=f"/tasks#{task_id}", tipo="menzione")
+                            notified.add(u_real_id)
             break
     save_tasks(tasks)
     return jsonify({"success": True})

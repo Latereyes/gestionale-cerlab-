@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.5.1",
+    "date": "04/11/2026",
+    "title": "Task: chi viene taggato entra nella task",
+    "changes": [
+      "<b>Tag nelle task:</b> chi viene taggato con @ in un commento (o nel motivo quando si sposta la data prevista) entra nella task: la vede nell'elenco e da lì in poi riceve gli avvisi. Taggando un gruppo (es. @produzione) entra tutto il gruppo.",
+      "<b>Tag insieme al cambio di stato:</b> la persona taggata viene avvisata anche quando il commento accompagna una chiusura o una richiesta di supporto.",
+      "<b>Task personali:</b> restano private; lì un @ è solo testo e non aggiunge nessuno."
+    ]
+  },
+  {
     "version": "3.5.0",
     "date": "02/11/2026",
     "title": "Registro attività, report scritti da Ceerlo e nuova dashboard",
