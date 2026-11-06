@@ -4695,7 +4695,15 @@ def annulla_preventivo(quote_id):
     if not p:
         flash("Preventivo non trovato.", "error")
         return redirect(url_for("dashboard"))
-    
+
+    # Annullato dalla cartella del cliente: si torna li', e da li' solo bozze e inviati
+    torna = request.form.get("torna") or ""
+    if not torna.startswith("/cliente/dettaglio/"):
+        torna = ""
+    if torna and p.get("stato") not in ("Bozza", "Inviato"):
+        flash("Dalla cartella del cliente si annullano solo i preventivi in bozza o inviati: apri il preventivo.", "error")
+        return redirect(torna)
+
     p["stato"] = "Annullato"
     p["is_locked"] = True
     
@@ -4704,8 +4712,8 @@ def annulla_preventivo(quote_id):
     # --- FINE RIGA AGGIUNTA ---
 
     save_quote(quote_id, p)
-    flash("Preventivo annullato.", "warning")
-    return redirect(url_for("editor_preventivo", quote_id=quote_id))
+    flash(f"Preventivo {quote_id} annullato." if torna else "Preventivo annullato.", "warning")
+    return redirect(torna or url_for("editor_preventivo", quote_id=quote_id))
 
 # ===============================================
 # === MAGAZZINO ===
