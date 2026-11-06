@@ -2523,5 +2523,10 @@ window.openAdminSupport = function(contextId, contextType, contextLabel) {
 
 {% if ceerlo_attivo %}{% include "_ceerlo.html" %}{% endif %}
 {% include "_mobile.html" %}
+<script>
+    // Tornando indietro alcuni browser (Safari, Chrome) rimettono la pagina dalla memoria cosi' com'era:
+    // in quel caso la si ricarica, cosi' mostra i dati aggiornati.
+    window.addEventListener('pageshow', (e) => { if (e.persisted) window.location.reload(); });
+</script>
 </body>
 </html>

@@ -1907,6 +1907,17 @@ def _richiesta_dal_pc_server():
     return request.remote_addr in ("127.0.0.1", "::1", LAN_IP)
 
 @app.after_request
+def pagine_sempre_aggiornate(response):
+    """Le pagine del gestionale non si tengono in memoria: con "indietro" il browser le richiede
+    e mostra i dati di adesso (stati, pagamenti, task...). Immagini, PDF e file statici restano in cache."""
+    if response.mimetype == "text/html" and "Cache-Control" not in response.headers:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
+@app.after_request
 def notifica_attivita_nel_widget(response):
     """Avvisa con una notifica di Windows (sul PC del server) quando un collega fa un'azione importante."""
     try:
