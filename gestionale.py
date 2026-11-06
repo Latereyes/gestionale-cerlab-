@@ -1907,6 +1907,17 @@ def _richiesta_dal_pc_server():
     return request.remote_addr in ("127.0.0.1", "::1", LAN_IP)
 
 @app.after_request
+def pagine_sempre_aggiornate(response):
+    """Le pagine del gestionale non si tengono in memoria: con "indietro" il browser le richiede
+    e mostra i dati di adesso (stati, pagamenti, task...). Immagini, PDF e file statici restano in cache."""
+    if response.mimetype == "text/html" and "Cache-Control" not in response.headers:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
+@app.after_request
 def notifica_attivita_nel_widget(response):
     """Avvisa con una notifica di Windows (sul PC del server) quando un collega fa un'azione importante."""
     try:
@@ -4695,7 +4706,15 @@ def annulla_preventivo(quote_id):
     if not p:
         flash("Preventivo non trovato.", "error")
         return redirect(url_for("dashboard"))
-    
+
+    # Annullato dalla cartella del cliente: si torna li', e da li' solo bozze e inviati
+    torna = request.form.get("torna") or ""
+    if not torna.startswith("/cliente/dettaglio/"):
+        torna = ""
+    if torna and p.get("stato") not in ("Bozza", "Inviato"):
+        flash("Dalla cartella del cliente si annullano solo i preventivi in bozza o inviati: apri il preventivo.", "error")
+        return redirect(torna)
+
     p["stato"] = "Annullato"
     p["is_locked"] = True
     
@@ -4704,8 +4723,8 @@ def annulla_preventivo(quote_id):
     # --- FINE RIGA AGGIUNTA ---
 
     save_quote(quote_id, p)
-    flash("Preventivo annullato.", "warning")
-    return redirect(url_for("editor_preventivo", quote_id=quote_id))
+    flash(f"Preventivo {quote_id} annullato." if torna else "Preventivo annullato.", "warning")
+    return redirect(torna or url_for("editor_preventivo", quote_id=quote_id))
 
 # ===============================================
 # === MAGAZZINO ===
@@ -8670,6 +8689,45 @@ def aggiungi_coinvolti(t, testo, me, all_users):
     return nuovi_utenti, nuovi_gruppi
 
 
+def nuovo_commento(testo, status_change=None):
+    """Un commento di task: con id e username dell'autore, per poterlo poi modificare o eliminare."""
+    return {"id": uuid.uuid4().hex[:12], "user_id": session["user_id"], "user": session["user_name"],
+            "text": testo, "timestamp": datetime.datetime.now().strftime("%d/%m %H:%M"),
+            "status_change": status_change}
+
+
+def autore_commento(c, me, mio_nome):
+    """I commenti vecchi non hanno lo username: li' vale il nome mostrato."""
+    if c.get("user_id"):
+        return c["user_id"] == me
+    return bool(mio_nome) and c.get("user") == mio_nome
+
+
+def puo_modificare_commento(c, me, mio_nome, my_role):
+    """L'autore del commento, oppure admin e CEO. Le righe "data prevista spostata" le scrive il gestionale: non si toccano."""
+    if c.get("status_change") == "etc":
+        return False
+    return my_role in ("amministratore", "ceo") or autore_commento(c, me, mio_nome)
+
+
+def puo_eliminare_commento(c, me, mio_nome, my_role):
+    """Come la modifica, ma il commento che ha cambiato lo stato resta nello storico (se ne puo' correggere il testo)."""
+    return not c.get("status_change") and puo_modificare_commento(c, me, mio_nome, my_role)
+
+
+def trova_commento(commenti, cid, idx, testo_orig):
+    """Posizione del commento: per id, oppure (commenti vecchi senza id) per posizione con il testo che combacia."""
+    if cid:
+        return next((i for i, c in enumerate(commenti) if c.get("id") == cid), None)
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        return None
+    if 0 <= idx < len(commenti) and not commenti[idx].get("id") and commenti[idx].get("text") == testo_orig:
+        return idx
+    return None
+
+
 def _estratto_task(desc, utenti=None):
     """Le prime parole della task, leggibili: #CODICE[nome] -> nome, @utente -> nome del collega."""
     utenti = utenti if utenti is not None else {u["username"].lower(): u.get("full_name") or u["username"] for u in load_users()}
@@ -8959,6 +9017,9 @@ def api_tasks():
         aperta = t.get("status") in ("open", "support")
         t["giorni_ritardo"] = (oggi - d).days if (d and aperta and d < oggi) else 0
         t["scaduta"] = t["giorni_ritardo"] > 0
+        t["comments"] = [dict(c, puo_modificare=puo_modificare_commento(c, me, session["user_name"], my_role),
+                              puo_eliminare=puo_eliminare_commento(c, me, session["user_name"], my_role))
+                         for c in (t.get("comments") or [])]
     return jsonify(visibili)
 
 
@@ -8989,9 +9050,7 @@ def api_task_etc():
         fmt = lambda v: leggi_data_etc(v).strftime("%d/%m/%Y") if leggi_data_etc(v) else v
         testo = (f"Data prevista spostata dal {fmt(vecchia)} al {fmt(nuova)}" if vecchia
                  else f"Data prevista impostata al {fmt(nuova)}") + (f": {motivo}" if motivo else "")
-        t.comments = list(t.comments or []) + [{
-            "user": session["user_name"], "text": testo,
-            "timestamp": datetime.datetime.now().strftime("%d/%m %H:%M"), "status_change": "etc"}]
+        t.comments = list(t.comments or []) + [nuovo_commento(testo, "etc")]
         t.etc = nuova
         t.etc_avvisata = ""
         td = t.to_dict()
@@ -10979,11 +11038,7 @@ def api_update_task():
             
             if comment_text:
                 if "comments" not in t: t["comments"] = []
-                t["comments"].append({
-                    "user": session["user_name"], "text": comment_text,
-                    "timestamp": datetime.datetime.now().strftime("%d/%m %H:%M"),
-                    "status_change": status_change
-                })
+                t["comments"].append(nuovo_commento(comment_text, status_change))
                 
                 all_users = load_users()
                 user_resolver = {u['username'].lower(): u['username'] for u in all_users}
@@ -11010,6 +11065,79 @@ def api_update_task():
             break
     save_tasks(tasks)
     return jsonify({"success": True})
+
+@app.route("/api/tasks/commento", methods=["POST"])
+@login_required
+def api_task_commento():
+    """Modifica (azione "modifica", con il testo nuovo) o elimina (azione "elimina") un commento di una task.
+    Puo' farlo chi l'ha scritto, oppure admin e CEO. Chi viene taggato nel testo nuovo entra nella task come nei commenti."""
+    data = request.json or {}
+    task_id = str(data.get("id") or "")
+    azione = data.get("azione")
+    testo = str(data.get("testo") or "").strip()
+    if azione not in ("modifica", "elimina"):
+        return jsonify({"error": "Azione non valida."}), 400
+    if azione == "modifica" and not testo:
+        return jsonify({"error": "Il commento non puo' essere vuoto: per toglierlo usa Elimina."}), 400
+    me, my_role, mio_nome = session["user_id"], session["user_role"], session["user_name"]
+    all_users = load_users()
+    db = _DBSession()
+    try:
+        t = db.query(_Task).filter_by(id=task_id).first()
+        if not t or not task_visibile(t.to_dict(), me, my_role):
+            return jsonify({"error": "Task non trovata."}), 404
+        commenti = copy.deepcopy(list(t.comments or []))
+        i = trova_commento(commenti, data.get("cid"), data.get("idx"), data.get("testo_orig"))
+        if i is None:
+            return jsonify({"error": "Commento non trovato: forse e' gia' stato cambiato. Ricarica la pagina."}), 404
+        c = commenti[i]
+        if azione == "elimina":
+            if not puo_eliminare_commento(c, me, mio_nome, my_role):
+                return jsonify({"error": "Non puoi eliminare questo commento."}), 403
+            del commenti[i]
+            t.comments = commenti
+            db.commit()
+            return jsonify({"success": True})
+        if not puo_modificare_commento(c, me, mio_nome, my_role):
+            return jsonify({"error": "Non puoi modificare questo commento."}), 403
+        vecchio = c.get("text") or ""
+        if testo == vecchio:
+            return jsonify({"success": True})
+        c["text"] = testo
+        c.setdefault("id", uuid.uuid4().hex[:12])
+        c["modificato"] = datetime.datetime.now().strftime("%d/%m %H:%M")
+        if c.get("user") != mio_nome:
+            c["modificato_da"] = mio_nome
+        else:
+            c.pop("modificato_da", None)
+        t.comments = commenti
+        td = t.to_dict()
+        nuovi_u, nuovi_g = aggiungi_coinvolti(td, testo, me, all_users)
+        if nuovi_u or nuovi_g:
+            t.assigned_to = list(td["assigned_to"])
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[api_task_commento] Errore: {e}")
+        return jsonify({"error": "Errore interno durante il salvataggio."}), 500
+    finally:
+        db.close()
+    # avvisa solo chi e' taggato adesso e non lo era nel testo di prima
+    if td.get("tipo") != "personale":
+        user_resolver = {u["username"].lower(): u["username"] for u in all_users}
+        prima = {m.lower() for m in re.findall(r"@(\w+)", vecchio)}
+        notified = {me}
+        for nome in {m.lower() for m in re.findall(r"@(\w+)", testo)} - prima:
+            if nome in user_resolver and user_resolver[nome] not in notified:
+                add_notification(user_resolver[nome], f"{mio_nome} ti ha menzionato in {nome_task(td)}", link=f"/tasks#{task_id}", tipo="menzione")
+                notified.add(user_resolver[nome])
+        for g in nuovi_g:
+            for u_real_id in utenti_del_gruppo(g, all_users):
+                if u_real_id not in notified:
+                    add_notification(u_real_id, f"{mio_nome} ha coinvolto @{g} in {nome_task(td)}", link=f"/tasks#{task_id}", tipo="menzione")
+                    notified.add(u_real_id)
+    return jsonify({"success": True})
+
 
 def _ordine_notifica(ts, adesso=None):
     """Le notifiche hanno l'ora come "gg/mm HH:MM" (senza anno): chiave di ordinamento che regge il cambio d'anno."""
