@@ -1,5 +1,16 @@
 [
   {
+    "version": "3.5.2",
+    "date": "06/11/2026",
+    "title": "Commenti modificabili, annulla dalla cartella cliente, pagine aggiornate",
+    "changes": [
+      "<b>Commenti delle task:</b> passando col mouse su un commento compaiono la matita (modifica) e il cestino (elimina). Può farlo chi l'ha scritto, oppure amministratore e CEO; se si corregge il commento di un altro, sotto resta scritto \"modificato da\".",
+      "<b>Tag nei commenti corretti:</b> chi viene taggato con @ nel testo corretto entra nella task e riceve l'avviso, come nei commenti nuovi. I commenti che hanno cambiato lo stato si possono correggere ma non eliminare; le righe automatiche della data prevista non si toccano.",
+      "<b>Cartella cliente:</b> i preventivi in Bozza o Inviato si possono annullare direttamente dalla cartella, con il tasto \"Annulla preventivo\" accanto a \"Modifica Preventivo\", senza aprirli.",
+      "<b>Tasto indietro:</b> tornando indietro (con il browser o con la freccia del gestionale) la pagina mostra sempre i dati aggiornati, non quelli di prima."
+    ]
+  },
+  {
     "version": "3.5.1",
     "date": "04/11/2026",
     "title": "Task: chi viene taggato entra nella task",

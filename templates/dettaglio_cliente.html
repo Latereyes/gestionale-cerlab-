@@ -172,6 +172,12 @@
                     <i class="fas fa-pencil-alt"></i> Modifica Preventivo
                 </a>
             {% endif %}
+            {% if p.stato in ['Bozza', 'Inviato'] and session.user_role != 'segreteria' %}
+                <form method="POST" action="{{ url_for('annulla_preventivo', quote_id=p.numero) }}" class="annulla-preventivo-form" data-numero="{{ p.numero }}" style="display: inline;">
+                    <input type="hidden" name="torna" value="{{ request.full_path.rstrip('?') }}">
+                    <button type="submit" class="btn btn-outline danger" title="Annulla il preventivo senza aprirlo"><i class="fas fa-times"></i> Annulla preventivo</button>
+                </form>
+            {% endif %}
             </div>
         </div>
 
@@ -385,6 +391,8 @@
 .quote-meta span { display: inline-flex; align-items: center; gap: 5px; }
 .quote-total { font-weight: 700; color: var(--accent); font-size: 14px; }
 .quote-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn.btn-outline.danger { color: var(--danger-text); border-color: var(--danger-border); }
+.btn.btn-outline.danger:hover { background: var(--danger); color: #fff; border-color: transparent; }
 
 /* Upload anagrafica */
 .altri-documenti-layout { display: flex; gap: 24px; align-items: flex-start; padding: 22px 24px; }
@@ -451,6 +459,19 @@ document.addEventListener('DOMContentLoaded', () => {
         cardsToFilter.forEach(card => {
             const cardText = card.textContent.toLowerCase();
             card.style.display = (cardText.includes(searchTerm) || searchTerm === "") ? '' : 'none';
+        });
+    });
+
+    // ANNULLA PREVENTIVO (bozza o inviato) direttamente dalla cartella del cliente
+    document.querySelectorAll('.annulla-preventivo-form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+            if (form.dataset.confermato) return;
+            e.preventDefault();
+            showConfirmation(
+                'Annullare il preventivo?',
+                `Il preventivo <strong>${form.dataset.numero}</strong> verrà annullato e bloccato. L'azione è irreversibile.`,
+                () => { form.dataset.confermato = '1'; form.submit(); }
+            );
         });
     });
 
