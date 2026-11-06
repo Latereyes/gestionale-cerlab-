@@ -190,6 +190,20 @@
     .history-line { display: flex; gap: 12px; align-items: flex-start; font-size: 13px; color: var(--text); }
     .history-icon { width: 18px; flex-shrink: 0; text-align: center; margin-top: 2px; }
     .history-meta { font-size: 10.5px; color: var(--text-subtle); margin-top: 2px; }
+    .history-content { flex: 1; min-width: 0; }
+    .history-actions { display: inline-flex; gap: 2px; margin-left: 6px; opacity: 0; transition: opacity .15s; }
+    .history-line:hover .history-actions, .history-line:focus-within .history-actions { opacity: 1; }
+    @media (hover: none) { .history-actions { opacity: 1; } }
+    .history-actions button { border: none; background: transparent; color: var(--text-subtle); cursor: pointer; padding: 2px 5px; border-radius: 6px; font-size: 11px; }
+    .history-actions button:hover { background: var(--surface); color: var(--accent); }
+    .history-actions button.elimina:hover { color: var(--danger); }
+    .history-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; position: relative; }
+    .history-edit .mention-list { top: 100%; bottom: auto; left: 0; right: 0; }
+    .history-edit textarea { width: 100%; min-height: 54px; resize: vertical; font-size: 13px; border-radius: 10px; border: 2px solid var(--accent); padding: 6px 10px; background: var(--surface); color: var(--text); box-sizing: border-box; }
+    .history-edit .riga-btn { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+    .history-edit .riga-btn .errore { flex: 1; font-size: 12px; color: var(--danger-text); }
+    .history-edit .riga-btn button { font-size: 12px; padding: 5px 12px; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+    .history-edit .riga-btn button.salva { background: var(--accent); border-color: var(--accent); color: #fff; }
     .task-footer { display: flex; justify-content: space-between; align-items: center; }
 
     /* Box commento */
@@ -423,7 +437,15 @@ document.addEventListener('DOMContentLoaded', () => {
             card.dataset.late = t.scaduta ? '1' : '';
             card.dataset.perMe = t.per_me ? '1' : '';
 
-            const historyHtml = (t.comments || []).map(c => `<div class="history-line"><div class="history-icon">${iconaStorico(c)}</div><div class="history-content"><strong>${escapeHtml(c.user)}:</strong> ${window.parseMessage(escapeHtml(c.text))}<div class="history-meta">${escapeHtml(c.timestamp)}</div></div></div>`).join('');
+            commentiTask[t.id] = t.comments || [];
+            const historyHtml = commentiTask[t.id].map((c, i) => {
+                const modificato = c.modificato ? ` · modificato${c.modificato_da ? ' da ' + escapeHtml(c.modificato_da) : ''} il ${escapeHtml(c.modificato)}` : '';
+                const azioni = (c.puo_modificare || c.puo_eliminare) ? `<span class="history-actions">
+                        ${c.puo_modificare ? `<button type="button" onclick="window.modificaCommento('${t.id}', ${i})" title="Modifica commento"><i class="fas fa-pen"></i></button>` : ''}
+                        ${c.puo_eliminare ? `<button type="button" class="elimina" onclick="window.eliminaCommento('${t.id}', ${i})" title="Elimina commento"><i class="fas fa-trash-alt"></i></button>` : ''}
+                    </span>` : '';
+                return `<div class="history-line" id="commento-${t.id}-${i}"><div class="history-icon">${iconaStorico(c)}</div><div class="history-content"><strong>${escapeHtml(c.user)}:</strong> <span class="history-testo">${window.parseMessage(escapeHtml(c.text))}</span><div class="history-meta">${escapeHtml(c.timestamp)}${modificato}${azioni}</div></div></div>`;
+            }).join('');
             const dest = destLabel(t);
 
             card.innerHTML = `
@@ -490,6 +512,74 @@ document.addEventListener('DOMContentLoaded', () => {
         else { pendingStates[id] = status; box.className = `inline-comment-box pending-${status}`; input.placeholder = `Commento e invio per segnare "${nomi[status]}"...`; input.focus(); }
         document.querySelectorAll(`[id^="btn-"][id$="-${id}"]`).forEach(b => b.classList.remove('active'));
         if (pendingStates[id]) document.getElementById(`btn-${status}-${id}`).classList.add('active');
+    };
+
+    // --- Modifica / elimina commenti (autore del commento, admin e CEO) ---
+    const commentiTask = {};
+    const chiaveCommento = (id, i) => {
+        const c = commentiTask[id][i];
+        return { id, cid: c.id || null, idx: i, testo_orig: c.text };
+    };
+    const inviaCommento = async (corpo) => {
+        try {
+            const res = await fetch('/api/tasks/commento', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+            const dati = await res.json().catch(() => ({}));
+            return res.ok ? null : (dati.error || 'Operazione non riuscita.');
+        } catch (e) { return 'Errore di rete: riprova.'; }
+    };
+    window.modificaCommento = (id, i) => {
+        const riga = document.getElementById(`commento-${id}-${i}`);
+        if (!riga || riga.querySelector('.history-edit')) return;
+        const c = commentiTask[id][i];
+        const box = document.createElement('div');
+        box.className = 'history-edit';
+        box.innerHTML = `<div class="mention-list" id="mentions-edit-${id}-${i}"></div>
+            <textarea id="edit-${id}-${i}" autocomplete="off"></textarea>
+            <div class="riga-btn"><span class="errore"></span>
+                <button type="button" class="annulla">Annulla</button>
+                <button type="button" class="salva">Salva</button></div>`;
+        const area = box.querySelector('textarea');
+        area.value = c.text || '';
+        area.oninput = () => window.handleAutocomplete && window.handleAutocomplete(area, box.querySelector('.mention-list'));
+        area.onkeydown = (e) => {
+            if (e.key === 'Escape') window.loadTasks();
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); salva(); }
+        };
+        const salva = async () => {
+            const testo = area.value.trim();
+            if (!testo) { box.querySelector('.errore').textContent = 'Scrivi qualcosa, oppure usa Elimina.'; return; }
+            const err = await inviaCommento({ ...chiaveCommento(id, i), azione: 'modifica', testo });
+            if (err) { box.querySelector('.errore').textContent = err; return; }
+            window.loadTasks();
+        };
+        box.querySelector('.salva').onclick = salva;
+        box.querySelector('.annulla').onclick = () => window.loadTasks();
+        riga.querySelector('.history-testo').style.display = 'none';
+        riga.querySelector('.history-meta').style.display = 'none';
+        riga.querySelector('.history-content').appendChild(box);
+        area.focus();
+        area.setSelectionRange(area.value.length, area.value.length);
+    };
+    window.eliminaCommento = async (id, i) => {
+        const riga = document.getElementById(`commento-${id}-${i}`);
+        const meta = riga && riga.querySelector('.history-meta');
+        if (!meta) return;
+        // conferma dentro la riga (niente finestre del browser)
+        if (!riga.dataset.confermaElimina) {
+            riga.dataset.confermaElimina = '1';
+            const conferma = document.createElement('span');
+            conferma.className = 'conferma-elimina';
+            conferma.style.cssText = 'margin-left:8px;color:var(--danger-text);font-weight:600;';
+            conferma.innerHTML = `Eliminare? <a href="#" style="color:var(--danger-text)">Sì</a> · <a href="#" style="color:var(--text-subtle)">No</a>`;
+            const [si, no] = conferma.querySelectorAll('a');
+            si.onclick = (e) => { e.preventDefault(); window.eliminaCommento(id, i); };
+            no.onclick = (e) => { e.preventDefault(); delete riga.dataset.confermaElimina; conferma.remove(); };
+            meta.appendChild(conferma);
+            return;
+        }
+        const err = await inviaCommento({ ...chiaveCommento(id, i), azione: 'elimina' });
+        if (err) { meta.querySelector('.conferma-elimina').textContent = err; delete riga.dataset.confermaElimina; return; }
+        window.loadTasks();
     };
 
     window.submitComment = async (id, current) => {
