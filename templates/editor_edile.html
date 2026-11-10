@@ -67,6 +67,7 @@
         </div>
 
         <!-- CARD GRIGLIA LAVORAZIONI -->
+        <div id="sections-container">
         {% for s_idx, sezione in enumerate(p.sezioni_edili) %}
         <div class="card section-card" data-section-index="{{ s_idx }}">
             <div class="card-header">
@@ -74,10 +75,21 @@
                 <input type="text" name="s[{{s_idx}}][titolo]" value="{{ sezione.titolo }}" 
                        class="header-title-input" placeholder="Titolo Sezione (es. Demolizioni)">
                 <div class="header-actions" style="display: flex; align-items: center; gap: 12px;">
+                    <div class="section-move-group">
+                        <button type="button" class="btn icon-btn section-move-btn section-move-up" onclick="moveSection(this, -1)" title="Sposta la sezione su">
+                            <i class="fas fa-arrow-up"></i>
+                        </button>
+                        <button type="button" class="btn icon-btn section-move-btn section-move-down" onclick="moveSection(this, 1)" title="Sposta la sezione giù">
+                            <i class="fas fa-arrow-down"></i>
+                        </button>
+                        <div class="section-drag-handle section-move-btn" title="Trascina per spostare la sezione">
+                            <i class="fas fa-grip-vertical"></i>
+                        </div>
+                    </div>
                     <button type="button" class="btn btn-outline btn-costi-vivi" style="padding: 6px 12px; font-size: 12px;" onclick="openCostiViviModal({{ s_idx }})" title="Spalma costi su lavorazioni">
                         <i class="fas fa-coins text-warning"></i> Costi Vivi
                     </button>
-                    <span class="badge">Sezione {{ s_idx + 1 }}</span>
+                    <span class="badge section-badge">Sezione {{ s_idx + 1 }}</span>
                     <button type="button" class="btn icon-btn delete-section-btn" onclick="confirmDeleteSection({{ s_idx }})" title="Elimina intera sezione">
                         <i class="fas fa-trash-alt" style="color: #ef4444;"></i>
                     </button>
@@ -162,6 +174,7 @@
             </div>
             </div>
         {% endfor %}
+        </div>
 
         <div class="section-adder" id="section-adder">
     <button class="btn btn-outline btn-large" type="submit" formaction="{{ url_for('salva_righe_edili', quote_id=p.numero, add_section=1) }}#section-adder" style="width: 100%; border-style: dashed; border-width: 2px;">
@@ -415,6 +428,23 @@ body { padding-bottom: 90px; }
 
 .section-card { border-left: 4px solid var(--accent); margin-bottom: 32px; }
 
+/* Spostamento sezioni */
+.section-move-group { display: flex; align-items: center; gap: 2px; }
+.section-move-btn.btn.icon-btn:hover { color: var(--accent); background: var(--accent-light); }
+.section-move-btn:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+.section-drag-handle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; cursor: grab; color: var(--text-muted); border-radius: var(--radius-sm); touch-action: none; }
+.section-drag-handle:active { cursor: grabbing; }
+.section-ghost { opacity: 0.35; }
+.section-chosen { box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
+.section-card.section-just-moved { animation: sectionMoved 0.9s ease; }
+@keyframes sectionMoved { 0% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); } }
+@media (max-width: 992px) {
+    .section-card > .card-header { flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+    .section-card .header-title-input { width: 100%; }
+    .section-card .header-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; }
+    .section-move-btn.btn.icon-btn, .section-drag-handle { width: 40px; height: 40px; }
+}
+
 /* Margine Indicatore */
 .row-margin-indicator { font-size: 10px; text-align: right; margin-top: 4px; font-weight: 700; min-height: 15px; }
 
@@ -577,7 +607,7 @@ input:checked + .slider:before { transform: translateX(18px); }
         });
 
         // Nasconde controlli riga e drag
-        document.querySelectorAll('.drag-handle, .delete-row-btn, .delete-section-btn, .btn-outline:not(.btn-costi-vivi), .btn-row-attach').forEach(el => {
+        document.querySelectorAll('.drag-handle, .section-move-btn, .delete-row-btn, .delete-section-btn, .btn-outline:not(.btn-costi-vivi), .btn-row-attach').forEach(el => {
             el.style.display = shouldBeLocked ? 'none' : 'flex';
         });
 
@@ -734,6 +764,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Trascinamento delle intere sezioni (maniglia nell'intestazione)
+    const sectionsContainer = document.getElementById('sections-container');
+    if (sectionsContainer) {
+        new Sortable(sectionsContainer, {
+            handle: '.section-drag-handle',
+            draggable: '.section-card',
+            animation: 150,
+            ghostClass: 'section-ghost',
+            chosenClass: 'section-chosen',
+            onEnd: function() {
+                updateAllInputIndices();
+                updateTotalsEdile();
+            }
+        });
+    }
+    updateAllInputIndices();
+
     // --- NUOVO LISTENER DELEGATO PER I CALCOLI ---
     // Invece di usare sortable-rows (che ora sono molteplici), 
     // mettiamo in ascolto tutto l'editor container.
@@ -758,36 +805,60 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function updateAllInputIndices() {
-    document.querySelectorAll('.section-card').forEach((section, sIdx) => {
-        // Aggiorna l'indice della sezione stessa
+    const sections = document.querySelectorAll('.section-card');
+    sections.forEach((section, sIdx) => {
+        // Indice della sezione stessa
         section.dataset.sectionIndex = sIdx;
-        
-        // Aggiorna l'ID input json costi di sezione
-        const jsonInput = section.querySelector('[id^="json-costi-vivi-"]');
-        if (jsonInput) jsonInput.id = `json-costi-vivi-${sIdx}`;
-        
+
+        // Tutti i campi della sezione: s[X][titolo], s[X][costi_vivi_json], s[X][r][Y][...]
+        section.querySelectorAll('[name^="s["]').forEach(input => {
+            input.setAttribute('name', input.getAttribute('name').replace(/^s\[\d+\]/, `s[${sIdx}]`));
+        });
+
+        // ID a livello di sezione
+        const setId = (sel, prefix) => { const el = section.querySelector(sel); if (el) el.id = prefix + sIdx; };
+        setId('[id^="json-costi-vivi-"]', 'json-costi-vivi-');
+        setId('.sortable-rows', 'rows-section-');
+        setId('[id^="section-footer-"]', 'section-footer-');
+        setId('[id^="section-total-"]', 'section-total-');
+        setId('[id^="section-costs-"]', 'section-costs-');
+
+        // Numero mostrato nel badge
+        const badge = section.querySelector('.section-badge');
+        if (badge) badge.textContent = `Sezione ${sIdx + 1}`;
+
+        // Pulsanti con l'indice della sezione
+        const costiBtn = section.querySelector('.btn-costi-vivi');
+        if (costiBtn) costiBtn.setAttribute('onclick', `openCostiViviModal(${sIdx})`);
+        const delSecBtn = section.querySelector('.delete-section-btn');
+        if (delSecBtn) delSecBtn.setAttribute('onclick', `confirmDeleteSection(${sIdx})`);
+        const addRowBtn = section.querySelector('[formaction*="add_row="]');
+        if (addRowBtn) {
+            addRowBtn.setAttribute('formaction', addRowBtn.getAttribute('formaction')
+                .replace(/add_row=\d+/, `add_row=${sIdx}`)
+                .replace(/#section-footer-\d+/, `#section-footer-${sIdx}`));
+        }
+
+        // Su/giù: disattiva quelli che non hanno senso (prima / ultima sezione)
+        const upBtn = section.querySelector('.section-move-up');
+        if (upBtn) upBtn.disabled = (sIdx === 0);
+        const downBtn = section.querySelector('.section-move-down');
+        if (downBtn) downBtn.disabled = (sIdx === sections.length - 1);
+
         section.querySelectorAll('.rt-row.item').forEach((row, rIdx) => {
             row.dataset.index = rIdx;
             row.querySelectorAll('[name]').forEach(input => {
-                let name = input.getAttribute('name');
-                if(name) {
-                    // Regex più robusta per sostituire s[index][r][index]
-                    name = name.replace(/s\[\d+\]\[r\]\[\d+\]/, `s[${sIdx}][r][${rIdx}]`);
-                    // Gestisce anche il titolo sezione s[index][titolo]
-                    name = name.replace(/s\[\d+\]\[titolo\]/, `s[${sIdx}][titolo]`);
-                    // Gestisce il JSON costi sezione
-                    name = name.replace(/s\[\d+\]\[costi_vivi_json\]/, `s[${sIdx}][costi_vivi_json]`);
-                    input.setAttribute('name', name);
-                }
+                const name = input.getAttribute('name');
+                if (name) input.setAttribute('name', name.replace(/s\[\d+\]\[r\]\[\d+\]/, `s[${sIdx}][r][${rIdx}]`));
             });
-            
+
             // Aggiorna gli ID degli span per i calcoli in tempo reale
             const impSpan = row.querySelector('.row-imponibile span');
             if(impSpan) impSpan.id = `row-imp-${sIdx}-${rIdx}`;
-            
+
             const totSpan = row.querySelector('.total-ivato span');
             if(totSpan) totSpan.id = `row-tot-${sIdx}-${rIdx}`;
-            
+
             const hideCostInd = row.querySelector('.row-hide-cost-indicator');
             if(hideCostInd) hideCostInd.id = `hide-cost-ind-${sIdx}-${rIdx}`;
 
@@ -798,12 +869,31 @@ function updateAllInputIndices() {
             const delBtn = row.querySelector('.delete-row-btn');
             if(delBtn) delBtn.setAttribute('onclick', `confirmDeleteRow(${sIdx}, ${rIdx})`);
         });
-        
-        // Aggiorna il puntatore della funzione elimina sezione
-        const delSecBtn = section.querySelector('.delete-section-btn');
-        if(delSecBtn) delSecBtn.setAttribute('onclick', `confirmDeleteSection(${sIdx})`);
     });
 }
+
+// Sposta una sezione intera su (-1) o giù (+1)
+window.moveSection = function(btn, dir) {
+    if (document.querySelector('[name="is_locked"]').value === 'true') return;
+    const card = btn.closest('.section-card');
+    if (!card) return;
+    if (dir < 0) {
+        const prev = card.previousElementSibling;
+        if (!prev || !prev.classList.contains('section-card')) return;
+        card.parentNode.insertBefore(card, prev);
+    } else {
+        const next = card.nextElementSibling;
+        if (!next || !next.classList.contains('section-card')) return;
+        card.parentNode.insertBefore(next, card);
+    }
+    updateAllInputIndices();
+    updateTotalsEdile();
+    card.classList.remove('section-just-moved');
+    void card.offsetWidth;
+    card.classList.add('section-just-moved');
+    const header = card.querySelector('.card-header');
+    (header || card).scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
 
 
 

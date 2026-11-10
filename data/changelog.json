@@ -1,5 +1,13 @@
 [
   {
+    "version": "3.5.3",
+    "date": "10/11/2026",
+    "title": "Preventivi edili: sezioni spostabili",
+    "changes": [
+      "<b>Ordine delle sezioni:</b> nei preventivi edili ogni sezione ha nell'intestazione le frecce su/giù e la maniglia per trascinarla (anche da telefono). Il numero \"Sezione N\" si aggiorna subito; dopo aver salvato, il nuovo ordine vale anche per anteprima e PDF."
+    ]
+  },
+  {
     "version": "3.5.2",
     "date": "06/11/2026",
     "title": "Commenti modificabili, annulla dalla cartella cliente, pagine aggiornate",
