@@ -208,6 +208,19 @@ for testo in ("Ritiro in negozio a cura del cliente", "Paolo Neri", "Firma di ch
     verifica(testo in html, f"stampa ritiro contiene «{testo}»")
 verifica("Firma del conducente" not in html and "Targa" not in html, "niente conducente/targa nel ritiro")
 
+print("14. DDT per ritiro in magazzino")
+g.save_quote("PREV-TEST-5", {
+    "numero": "PREV-TEST-5", "id_cliente": "CL-5", "cliente": "Lucia", "stato": "Confermato", "tipo_preventivo": "standard",
+    "righe": [{"articolo": "Sacchi di colla", "unt": "PZ", "qt": "8", "stato_consegna": "Pronto per Consegna"}],
+    "ordini_fornitore": [{"ordine_id": "O5", "numero_conferma": "C-5", "azienda": "F", "indici_righe": [0]}]})
+r = c.post("/consegna/PREV-TEST-5/crea-bolla", data={"selected_items[]": ["0"], "ritiro_negozio": "1",
+                                                    "ritiro_sede": "magazzino", "ddt_ritirato_da": "Lucia"}).get_json()
+b5 = g.load_quote("PREV-TEST-5")["bolle"][0]
+verifica(r["success"] and b5.get("ritiro_sede") == "magazzino", "ritiro in magazzino salvato")
+html = c.get(f"/stampa-bolla-html/PREV-TEST-5/{b5['id']}").get_data(as_text=True)
+verifica("Ritiro in magazzino a cura del cliente" in html and "Via Torre del Padiglione, 8" in html, "stampa con l'indirizzo del magazzino")
+verifica(g.load_quote("PREV-TEST-4")["bolle"][0].get("ritiro_sede") == "negozio", "senza scelta il ritiro resta in negozio")
+
 print()
 if ERRORI:
     print(f"FALLITI {len(ERRORI)} controlli")

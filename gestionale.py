@@ -7035,8 +7035,9 @@ def leggi_dati_ddt(form, bolla_id=None):
         if valore:
             dati[campo] = valore
     if form.get("ritiro_negozio") == "1":
-        # Ritiro in negozio: la merce la prende il cliente (o un suo incaricato) in sede
+        # Ritiro: la merce la prende il cliente (o un suo incaricato) in negozio o in magazzino
         dati["ritiro_negozio"] = True
+        dati["ritiro_sede"] = "magazzino" if form.get("ritiro_sede") == "magazzino" else "negozio"
         dati["trasporto_a_cura"] = "Destinatario"
         for campo in ("vettore", "conducente", "targa"):
             dati.pop(campo, None)

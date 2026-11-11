@@ -193,7 +193,8 @@
         <form id="ddt-form" onsubmit="return false;">
             <div class="ddt-tipo">
                 <label><input type="radio" name="ddt_tipo" value="consegna" checked> <i class="fas fa-truck"></i> Consegna al cliente</label>
-                <label><input type="radio" name="ddt_tipo" value="ritiro"> <i class="fas fa-store"></i> Ritiro in negozio</label>
+                <label><input type="radio" name="ddt_tipo" value="ritiro_negozio"> <i class="fas fa-store"></i> Ritiro in negozio</label>
+                <label><input type="radio" name="ddt_tipo" value="ritiro_magazzino"> <i class="fas fa-warehouse"></i> Ritiro in magazzino</label>
             </div>
             <div class="form-grid ddt-grid">
                 <div class="form-group">
@@ -489,7 +490,7 @@
 .small-note { font-size: 12px; margin: 0 0 14px; }
 .ddt-grid textarea { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; width: 100%; font-size: 14px; background: var(--surface); color: var(--text); font-family: inherit; resize: vertical; }
 .ddt-tipo { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
-.ddt-tipo label { flex: 1; min-width: 180px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; font-weight: 600; font-size: 14px; }
+.ddt-tipo label { flex: 1; min-width: 170px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; font-weight: 600; font-size: 14px; }
 .ddt-tipo label:has(input:checked) { border-color: var(--accent); background: var(--accent-light); color: var(--accent); }
 .ddt-tipo input { width: auto !important; margin: 0; }
 .ddt-numero { display: flex; align-items: center; gap: 6px; }
@@ -634,7 +635,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function eRitiro() {
         const r = ddtForm.querySelector('input[name="ddt_tipo"]:checked');
-        return !!r && r.value === 'ritiro';
+        return !!r && r.value.startsWith('ritiro');
     }
     function aggiornaTipoDdt() {
         const ritiro = eRitiro();
@@ -654,7 +655,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!ritiro && k === 'ddt_ritirato_da') return;
             entries.push([k, v]);
         });
-        if (ritiro) entries.push(['ritiro_negozio', '1']);
+        if (ritiro) {
+            entries.push(['ritiro_negozio', '1']);
+            entries.push(['ritiro_sede', ddtForm.querySelector('input[name="ddt_tipo"]:checked').value === 'ritiro_magazzino' ? 'magazzino' : 'negozio']);
+        }
         if (ddtParziale.checked) {
             let errore = null;
             let qualcosaDiParziale = false;
@@ -677,7 +681,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { /* ignorato */ }
         ddtEntries = entries;
         ddtModal.style.display = 'none';
-        // Il ritiro avviene in negozio: nessun indirizzo di consegna da scegliere
+        // Ritiro in negozio o in magazzino: nessun indirizzo di consegna da scegliere
         if (ritiro) proceedWithBollaCreation(null);
         else addressConfirmModal.style.display = 'flex';
     }

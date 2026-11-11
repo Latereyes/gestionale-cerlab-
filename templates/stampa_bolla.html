@@ -160,8 +160,13 @@
             <div class="box">
                 <span class="box-label">{{ 'Ritiro merce' if bolla.ritiro_negozio else 'Luogo di destinazione' }}</span>
                 {% if bolla.ritiro_negozio %}
+                    {% if bolla.ritiro_sede == 'magazzino' %}
+                    <strong>Ritiro in magazzino a cura del cliente</strong><br>
+                    presso il magazzino CER LAB srl, Via Torre del Padiglione, 8 – 04011 Aprilia (LT)
+                    {% else %}
                     <strong>Ritiro in negozio a cura del cliente</strong><br>
                     presso CER LAB srl, Via Guarneville, 1 – 04011 Aprilia (LT)
+                    {% endif %}
                 {% elif indirizzo_consegna %}
                     <strong>{{ indirizzo_consegna.descrizione }}</strong><br>
                     {{ indirizzo_consegna.indirizzo }}, {{ indirizzo_consegna.cap }} {{ indirizzo_consegna.comune }} ({{ indirizzo_consegna.provincia }})
