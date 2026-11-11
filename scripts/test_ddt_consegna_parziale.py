@@ -221,6 +221,19 @@ html = c.get(f"/stampa-bolla-html/PREV-TEST-5/{b5['id']}").get_data(as_text=True
 verifica("Ritiro in magazzino a cura del cliente" in html and "Via Torre del Padiglione, 8" in html, "stampa con l'indirizzo del magazzino")
 verifica(g.load_quote("PREV-TEST-4")["bolle"][0].get("ritiro_sede") == "negozio", "senza scelta il ritiro resta in negozio")
 
+print("15. Luogo di partenza delle consegne")
+verifica(g.load_quote(Q)["bolle"][0].get("partenza") == "negozio", "senza scelta la merce parte dal negozio")
+g.save_quote("PREV-TEST-6", {
+    "numero": "PREV-TEST-6", "id_cliente": "CL-6", "cliente": "Gino", "stato": "Confermato", "tipo_preventivo": "standard",
+    "righe": [{"articolo": "Lastre", "unt": "MQ", "qt": "20", "stato_consegna": "Pronto per Consegna"}],
+    "ordini_fornitore": [{"ordine_id": "O6", "numero_conferma": "C-6", "azienda": "F", "indici_righe": [0]}]})
+r = c.post("/consegna/PREV-TEST-6/crea-bolla", data={"selected_items[]": ["0"], "ddt_partenza": "magazzino"}).get_json()
+b6 = g.load_quote("PREV-TEST-6")["bolle"][0]
+html = c.get(f"/stampa-bolla-html/PREV-TEST-6/{b6['id']}").get_data(as_text=True)
+verifica(r["success"] and b6.get("partenza") == "magazzino" and "Luogo di partenza" in html
+         and "Magazzino – Via Torre del Padiglione, 8" in html, "consegna in partenza dal magazzino")
+verifica(g.load_quote("PREV-TEST-5")["bolle"][0].get("partenza") == "magazzino", "ritiro in magazzino: partenza dal magazzino")
+
 print()
 if ERRORI:
     print(f"FALLITI {len(ERRORI)} controlli")

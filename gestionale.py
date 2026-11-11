@@ -6984,7 +6984,7 @@ def annulla_stato_consegna(quote_id):
 # 'consegne'. Finche' resta un residuo la riga torna "Pronto per Consegna" (in attesa di consegna).
 
 CAMPI_DDT = ("causale", "trasporto_a_cura", "vettore", "conducente", "targa", "aspetto_beni",
-             "n_colli", "peso_kg", "annotazioni", "ritirato_da")
+             "n_colli", "peso_kg", "annotazioni", "ritirato_da", "partenza")
 ANNULLA_ULTIMA_CONSEGNA = "annulla_ultima_consegna"
 
 
@@ -7041,8 +7041,11 @@ def leggi_dati_ddt(form, bolla_id=None):
         dati["trasporto_a_cura"] = "Destinatario"
         for campo in ("vettore", "conducente", "targa"):
             dati.pop(campo, None)
+        dati["partenza"] = dati["ritiro_sede"]
     else:
         dati.pop("ritirato_da", None)
+        # Luogo di partenza della merce: negozio (predefinito) o magazzino
+        dati["partenza"] = "magazzino" if dati.get("partenza") == "magazzino" else "negozio"
     numero = str(form.get("ddt_numero") or "").strip()[:20]
     if not numero:
         numero = str(prossimo_numero_ddt(anno))

@@ -5,6 +5,7 @@
     "title": "Consegne: DDT fiscali e consegna parziale",
     "changes": [
       "<b>Documento di trasporto:</b> la bolla dei preventivi commerciali diventa un DDT completo: numero progressivo annuale (proposto in automatico, modificabile, mai doppio), causale del trasporto, trasporto a cura di mittente/destinatario/vettore, vettore, conducente, targa, aspetto esteriore dei beni, n. colli, peso e annotazioni. Destinatario con P.IVA/C.F. e luogo di destinazione separati.",
+      "<b>Luogo di partenza:</b> per le consegne si sceglie se la merce parte dal negozio (Via Guarneville 1) o dal magazzino (Via Torre del Padiglione 8); viene stampato sul DDT.",
       "<b>A penna:</b> data e ora di inizio trasporto, firma del conducente, del vettore e del destinatario sono spazi da compilare a mano; anche i campi lasciati vuoti restano spazi da compilare.",
       "<b>Ritiro in negozio o in magazzino:</b> nel modulo DDT si sceglie \"Ritiro in negozio\" (Via Guarneville 1) o \"Ritiro in magazzino\" (Via Torre del Padiglione 8): niente vettore/conducente/targa, trasporto a cura del destinatario, campo \"Ritirato da\" e in stampa data/ora del ritiro, documento di riconoscimento e firme dell'addetto CER LAB e di chi ritira.",
       "<b>Consegna parziale:</b> creando la bolla si spunta \"Consegna parziale\" e si scelgono i PZ/mq da consegnare per ogni articolo. Dopo la consegna la rimanenza resta in attesa (\"Parz. consegnato\") e va in un DDT successivo; il magazzino scala solo la parte consegnata.",

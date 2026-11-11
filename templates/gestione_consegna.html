@@ -216,6 +216,13 @@
                         <option value="Vettore">Vettore</option>
                     </select>
                 </div>
+                <div class="form-group solo-consegna">
+                    <label>Partenza da</label>
+                    <select name="ddt_partenza">
+                        <option value="negozio">Negozio – Via Guarneville, 1</option>
+                        <option value="magazzino">Magazzino – Via Torre del Padiglione, 8</option>
+                    </select>
+                </div>
                 <div class="form-group solo-ritiro hidden">
                     <label>Ritirato da</label>
                     <input name="ddt_ritirato_da" placeholder="Nome e cognome di chi ritira">
@@ -576,7 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnRevertUltima = document.getElementById('btn-revert-ultima-consegna');
     let ddtEntries = [];
     // Valori del DDT ricordati su questo dispositivo per la bolla successiva
-    const DDT_RICORDA = ['ddt_causale', 'ddt_trasporto_a_cura', 'ddt_vettore', 'ddt_conducente', 'ddt_targa', 'ddt_aspetto_beni'];
+    const DDT_RICORDA = ['ddt_causale', 'ddt_trasporto_a_cura', 'ddt_partenza', 'ddt_vettore', 'ddt_conducente', 'ddt_targa', 'ddt_aspetto_beni'];
     const DDT_STORAGE = 'gestionale_ddt_ultimi';
     const cantiereAddressModal = document.getElementById('cantiere-address-modal');
     const cantiereForm = document.getElementById('cantiere-form');
@@ -648,7 +655,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const entries = [];
         const ritiro = eRitiro();
         // Ritiro in negozio: niente vettore/conducente/targa, trasporto a cura del destinatario
-        const soloConsegna = ['ddt_trasporto_a_cura', 'ddt_vettore', 'ddt_conducente', 'ddt_targa'];
+        const soloConsegna = ['ddt_trasporto_a_cura', 'ddt_partenza', 'ddt_vettore', 'ddt_conducente', 'ddt_targa'];
         new FormData(ddtForm).forEach((v, k) => {
             if (k === 'parziale' || k === 'ddt_tipo') return;
             if (ritiro && soloConsegna.includes(k)) return;

@@ -58,7 +58,7 @@
             color: #64748b;
             margin-bottom: 2px;
         }
-        .grid-3 { display: grid; grid-template-columns: 1fr 1.4fr; gap: 0; margin-bottom: 10px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 0; margin-bottom: 10px; }
         .grid-5 { display: grid; grid-template-columns: 1.6fr .7fr .8fr 1fr .8fr; gap: 0; margin-bottom: 10px; }
         .grid-3 .box, .grid-5 .box, .grid-vettore .box { border-radius: 0; margin-left: -1px; }
         .grid-3 .box:first-child, .grid-5 .box:first-child, .grid-vettore .box:first-child { margin-left: 0; }
@@ -185,6 +185,12 @@
                 <span class="box-label">Trasporto a cura del</span>
                 {{ spunta(bolla.trasporto_a_cura, 'Mittente') }}{{ spunta(bolla.trasporto_a_cura, 'Destinatario') }}{{ spunta(bolla.trasporto_a_cura, 'Vettore') }}
             </div>
+            {% if bolla.partenza and not bolla.ritiro_negozio %}
+            <div class="box">
+                <span class="box-label">Luogo di partenza</span>
+                {% if bolla.partenza == 'magazzino' %}Magazzino – Via Torre del Padiglione, 8 – Aprilia (LT){% else %}Negozio – Via Guarneville, 1 – Aprilia (LT){% endif %}
+            </div>
+            {% endif %}
         </div>
 
         <h3>Descrizione dei beni (natura e qualità)</h3>
