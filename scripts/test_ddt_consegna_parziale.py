@@ -192,6 +192,22 @@ verifica(consegna.__name__ and c.post("/consegna/PREV-TEST-3/marca-consegnato", 
     "selected_items[]": ["0"], "file": (io.BytesIO(b"x"), "f.pdf")}, content_type="multipart/form-data").get_json()["success"]
     and g.load_quote("PREV-TEST-3")["righe"][0]["stato_consegna"] == "Consegnato", "bolla vecchia consegnata per intero")
 
+print("13. DDT per ritiro in negozio")
+g.save_quote("PREV-TEST-4", {
+    "numero": "PREV-TEST-4", "id_cliente": "CL-4", "cliente": "Paolo", "stato": "Confermato", "tipo_preventivo": "standard",
+    "righe": [{"articolo": "Piastrelle 20x20", "unt": "MQ", "qt": "12", "stato_consegna": "Pronto per Consegna"}],
+    "ordini_fornitore": [{"ordine_id": "O4", "numero_conferma": "C-4", "azienda": "F", "indici_righe": [0]}]})
+r = c.post("/consegna/PREV-TEST-4/crea-bolla", data={
+    "selected_items[]": ["0"], "ritiro_negozio": "1", "ddt_ritirato_da": "Paolo Neri",
+    "ddt_vettore": "da ignorare", "ddt_trasporto_a_cura": "Mittente", "ddt_causale": "Vendita"}).get_json()
+b4 = g.load_quote("PREV-TEST-4")["bolle"][0]
+verifica(r["success"] and b4.get("ritiro_negozio") is True and b4.get("trasporto_a_cura") == "Destinatario"
+         and b4.get("ritirato_da") == "Paolo Neri" and "vettore" not in b4, "ritiro salvato senza vettore, a cura del destinatario")
+html = c.get(f"/stampa-bolla-html/PREV-TEST-4/{b4['id']}").get_data(as_text=True)
+for testo in ("Ritiro in negozio a cura del cliente", "Paolo Neri", "Firma di chi ritira", "Data ritiro", "Ora ritiro"):
+    verifica(testo in html, f"stampa ritiro contiene «{testo}»")
+verifica("Firma del conducente" not in html and "Targa" not in html, "niente conducente/targa nel ritiro")
+
 print()
 if ERRORI:
     print(f"FALLITI {len(ERRORI)} controlli")

@@ -191,6 +191,10 @@
         <h3><i class="fas fa-file-alt"></i> Documento di Trasporto (DDT)</h3>
         <p class="muted small-note">I campi lasciati vuoti restano come spazi da compilare a penna. Data e ora di inizio trasporto e le firme si compilano sempre a mano sulla stampa.</p>
         <form id="ddt-form" onsubmit="return false;">
+            <div class="ddt-tipo">
+                <label><input type="radio" name="ddt_tipo" value="consegna" checked> <i class="fas fa-truck"></i> Consegna al cliente</label>
+                <label><input type="radio" name="ddt_tipo" value="ritiro"> <i class="fas fa-store"></i> Ritiro in negozio</label>
+            </div>
             <div class="form-grid ddt-grid">
                 <div class="form-group">
                     <label>Numero DDT</label>
@@ -203,7 +207,7 @@
                         <option value="Vendita"><option value="Conto visione"><option value="Conto lavorazione"><option value="Reso"><option value="Sostituzione"><option value="Omaggio"><option value="Tentata vendita">
                     </datalist>
                 </div>
-                <div class="form-group">
+                <div class="form-group solo-consegna">
                     <label>Trasporto a cura del</label>
                     <select name="ddt_trasporto_a_cura">
                         <option value="Mittente">Mittente</option>
@@ -211,15 +215,19 @@
                         <option value="Vettore">Vettore</option>
                     </select>
                 </div>
-                <div class="form-group full-width">
+                <div class="form-group solo-ritiro hidden">
+                    <label>Ritirato da</label>
+                    <input name="ddt_ritirato_da" placeholder="Nome e cognome di chi ritira">
+                </div>
+                <div class="form-group full-width solo-consegna">
                     <label>Vettore (ragione sociale e indirizzo)</label>
                     <input name="ddt_vettore" placeholder="Vuoto se il trasporto è a cura del mittente">
                 </div>
-                <div class="form-group">
+                <div class="form-group solo-consegna">
                     <label>Conducente</label>
                     <input name="ddt_conducente" placeholder="Nome e cognome">
                 </div>
-                <div class="form-group">
+                <div class="form-group solo-consegna">
                     <label>Targa automezzo</label>
                     <input name="ddt_targa" placeholder="AB123CD">
                 </div>
@@ -480,6 +488,10 @@
 .consegna-chip a { color: var(--accent); font-weight: 600; }
 .small-note { font-size: 12px; margin: 0 0 14px; }
 .ddt-grid textarea { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; width: 100%; font-size: 14px; background: var(--surface); color: var(--text); font-family: inherit; resize: vertical; }
+.ddt-tipo { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.ddt-tipo label { flex: 1; min-width: 180px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; font-weight: 600; font-size: 14px; }
+.ddt-tipo label:has(input:checked) { border-color: var(--accent); background: var(--accent-light); color: var(--accent); }
+.ddt-tipo input { width: auto !important; margin: 0; }
 .ddt-numero { display: flex; align-items: center; gap: 6px; }
 .ddt-numero span { color: var(--text-muted); white-space: nowrap; }
 .ddt-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -614,12 +626,35 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         ddtParziale.checked = false;
         parzialeRighe.classList.add('hidden');
+        ddtForm.querySelector('input[name="ddt_tipo"][value="consegna"]').checked = true;
+        ddtForm.elements['ddt_ritirato_da'].value = '';
+        aggiornaTipoDdt();
         ddtModal.style.display = 'flex';
     }
 
+    function eRitiro() {
+        const r = ddtForm.querySelector('input[name="ddt_tipo"]:checked');
+        return !!r && r.value === 'ritiro';
+    }
+    function aggiornaTipoDdt() {
+        const ritiro = eRitiro();
+        ddtForm.querySelectorAll('.solo-consegna').forEach(el => el.classList.toggle('hidden', ritiro));
+        ddtForm.querySelectorAll('.solo-ritiro').forEach(el => el.classList.toggle('hidden', !ritiro));
+    }
+    ddtForm.querySelectorAll('input[name="ddt_tipo"]').forEach(r => r.addEventListener('change', aggiornaTipoDdt));
+
     function confermaDdt() {
         const entries = [];
-        new FormData(ddtForm).forEach((v, k) => { if (k !== 'parziale') entries.push([k, v]); });
+        const ritiro = eRitiro();
+        // Ritiro in negozio: niente vettore/conducente/targa, trasporto a cura del destinatario
+        const soloConsegna = ['ddt_trasporto_a_cura', 'ddt_vettore', 'ddt_conducente', 'ddt_targa'];
+        new FormData(ddtForm).forEach((v, k) => {
+            if (k === 'parziale' || k === 'ddt_tipo') return;
+            if (ritiro && soloConsegna.includes(k)) return;
+            if (!ritiro && k === 'ddt_ritirato_da') return;
+            entries.push([k, v]);
+        });
+        if (ritiro) entries.push(['ritiro_negozio', '1']);
         if (ddtParziale.checked) {
             let errore = null;
             let qualcosaDiParziale = false;
@@ -642,7 +677,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { /* ignorato */ }
         ddtEntries = entries;
         ddtModal.style.display = 'none';
-        addressConfirmModal.style.display = 'flex';
+        // Il ritiro avviene in negozio: nessun indirizzo di consegna da scegliere
+        if (ritiro) proceedWithBollaCreation(null);
+        else addressConfirmModal.style.display = 'flex';
     }
 
     function showModal({ title, text, onConfirm, isAlert = false }) {

@@ -6,6 +6,7 @@
     "changes": [
       "<b>Documento di trasporto:</b> la bolla dei preventivi commerciali diventa un DDT completo: numero progressivo annuale (proposto in automatico, modificabile, mai doppio), causale del trasporto, trasporto a cura di mittente/destinatario/vettore, vettore, conducente, targa, aspetto esteriore dei beni, n. colli, peso e annotazioni. Destinatario con P.IVA/C.F. e luogo di destinazione separati.",
       "<b>A penna:</b> data e ora di inizio trasporto, firma del conducente, del vettore e del destinatario sono spazi da compilare a mano; anche i campi lasciati vuoti restano spazi da compilare.",
+      "<b>Ritiro in negozio:</b> nel modulo DDT si sceglie \"Ritiro in negozio\": niente vettore/conducente/targa, trasporto a cura del destinatario, campo \"Ritirato da\" e in stampa data/ora del ritiro, documento di riconoscimento e firme dell'addetto CER LAB e di chi ritira.",
       "<b>Consegna parziale:</b> creando la bolla si spunta \"Consegna parziale\" e si scelgono i PZ/mq da consegnare per ogni articolo. Dopo la consegna la rimanenza resta in attesa (\"Parz. consegnato\") e va in un DDT successivo; il magazzino scala solo la parte consegnata.",
       "<b>Annulla ultima consegna:</b> da \"Annulla Stato\" si può annullare l'ultima consegna registrata di un articolo: torna nel suo DDT e la merce del magazzino rientra in giacenza."
     ]

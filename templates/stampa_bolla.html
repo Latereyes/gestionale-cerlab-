@@ -85,6 +85,10 @@
         .annotazioni-testo { white-space: pre-wrap; }
 
         .firme { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 26px; font-size: 10px; }
+        .firme-2 { grid-template-columns: 1fr 1fr; gap: 40px; }
+        .grid-ritiro { display: grid; grid-template-columns: 2fr 1fr; margin-bottom: 10px; }
+        .grid-ritiro .box { border-radius: 0; }
+        .grid-ritiro .box + .box { margin-left: -1px; }
         .firma { border-top: 1px solid #1a202c; padding-top: 5px; text-align: center; }
         .firma small { display: block; color: #64748b; font-size: 8.5px; }
         footer {
@@ -154,8 +158,11 @@
                 {% if p.telefono %}<br>Tel.: {{ p.telefono }}{% endif %}
             </div>
             <div class="box">
-                <span class="box-label">Luogo di destinazione</span>
-                {% if indirizzo_consegna %}
+                <span class="box-label">{{ 'Ritiro merce' if bolla.ritiro_negozio else 'Luogo di destinazione' }}</span>
+                {% if bolla.ritiro_negozio %}
+                    <strong>Ritiro in negozio a cura del cliente</strong><br>
+                    presso CER LAB srl, Via Guarneville, 1 – 04011 Aprilia (LT)
+                {% elif indirizzo_consegna %}
                     <strong>{{ indirizzo_consegna.descrizione }}</strong><br>
                     {{ indirizzo_consegna.indirizzo }}, {{ indirizzo_consegna.cap }} {{ indirizzo_consegna.comune }} ({{ indirizzo_consegna.provincia }})
                 {% else %}
@@ -223,15 +230,27 @@
                     {{ campo(bolla.peso_kg) }}
                 </div>
                 <div class="box">
-                    <span class="box-label">Data inizio trasporto</span>
+                    <span class="box-label">{{ 'Data ritiro' if bolla.ritiro_negozio else 'Data inizio trasporto' }}</span>
                     <span class="penna">____ / ____ / ________</span>
                 </div>
                 <div class="box">
-                    <span class="box-label">Ora</span>
+                    <span class="box-label">{{ 'Ora ritiro' if bolla.ritiro_negozio else 'Ora' }}</span>
                     <span class="penna">____ : ____</span>
                 </div>
             </div>
 
+            {% if bolla.ritiro_negozio %}
+            <div class="grid-ritiro">
+                <div class="box">
+                    <span class="box-label">Merce ritirata da (nome e cognome)</span>
+                    {{ campo(bolla.ritirato_da) }}
+                </div>
+                <div class="box">
+                    <span class="box-label">Documento di riconoscimento n.</span>
+                    <span class="penna">&nbsp;</span>
+                </div>
+            </div>
+            {% else %}
             <div class="grid-vettore">
                 <div class="box">
                     <span class="box-label">Vettore (ragione sociale, indirizzo)</span>
@@ -246,6 +265,7 @@
                     {{ campo(bolla.targa) }}
                 </div>
             </div>
+            {% endif %}
 
             <div class="box annotazioni">
                 <span class="box-label">Annotazioni</span><div class="annotazioni-testo">{{ bolla.annotazioni or '' }}</div>
@@ -260,11 +280,18 @@
                 </ul>
             </footer>
 
+            {% if bolla.ritiro_negozio %}
+            <div class="firme firme-2">
+                <div class="firma">Firma dell'addetto CER LAB<small>per consegna della merce</small></div>
+                <div class="firma">Firma di chi ritira<small>per ricevuta e accettazione · data ____/____/______</small></div>
+            </div>
+            {% else %}
             <div class="firme">
                 <div class="firma">Firma del conducente<small>&nbsp;</small></div>
                 <div class="firma">Firma del vettore<small>(se diverso dal conducente)</small></div>
                 <div class="firma">Firma del destinatario<small>per ricevuta e accettazione · data ____/____/______</small></div>
             </div>
+            {% endif %}
         </div>
     </div>
 </body>
