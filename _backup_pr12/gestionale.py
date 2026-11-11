@@ -1,0 +1,11430 @@
+from __future__ import annotations
+import os, json, re, datetime, uuid, copy, base64
+import urllib.request
+import hashlib
+import urllib.parse
+from pathlib import Path
+from flask import Flask, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, jsonify
+from jinja2.runtime import Undefined
+from werkzeug.security import check_password_hash, generate_password_hash 
+from functools import wraps
+from werkzeug.utils import secure_filename
+from dateutil.relativedelta import relativedelta
+from packaging.version import parse as parse_version
+import webbrowser
+import threading
+import os
+from PIL import Image
+from pystray import MenuItem as item
+import pystray
+from waitress import serve
+import sys
+import socket
+import ipaddress
+import ctypes
+import subprocess
+import datetime
+from datetime import timedelta
+import shutil
+import time  
+from tkinter import Tk, Label, PhotoImage
+from tkinter.ttk import Progressbar, Style
+import queue
+from tkinter import Tk, Label, PhotoImage, Button
+# Fix di sicurezza per incompatibilità pyarrow residuo / namespace package orfano
+import sys
+try:
+    import pyarrow
+    if not hasattr(pyarrow, '__version__'):
+        sys.modules['pyarrow'] = None
+except Exception:
+    sys.modules['pyarrow'] = None
+
+import pandas as pd
+import io
+from flask import send_file
+from openpyxl import load_workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.utils import get_column_letter
+
+
+APP_VERSION = "3.5.3"  
+
+GITHUB_REPO_OWNER = "Latereyes" 
+GITHUB_REPO_NAME = "gestionale-cerlab-"
+
+# Questo URL punta all'API per la release "più recente"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
+
+def get_persistent_data_dir():
+    """
+    Trova o crea una cartella dati permanente in AppData-Roaming.
+    Questo è il posto giusto per salvare i dati creati dall'utente.
+    """
+    app_data_path = os.environ.get('APPDATA')
+    if not app_data_path:
+        # Fallback per sistemi non Windows o configurazioni strane
+        app_data_path = os.path.expanduser('~')
+    
+    persistent_dir = Path(app_data_path) / "GestionalePreventivi"
+    persistent_dir.mkdir(parents=True, exist_ok=True)
+    return persistent_dir
+
+# === Logica per selezionare la cartella dati (Sviluppo vs Produzione) ===
+if "--debug" in sys.argv:
+    # MODALITÀ DEBUG: Usa una cartella 'data' locale
+    print(">>> INFO: Rilevato '--debug'. Utilizzo della cartella dati locale.")
+    DATA_DIR = Path(__file__).parent / "data"
+else:
+    # MODALITÀ NORMALE/PRODUZIONE: Usa la cartella persistente in AppData
+    DATA_DIR = get_persistent_data_dir()
+
+# Le altre directory (clienti, preventivi, etc.) verranno create 
+# automaticamente nel posto giusto in base alla modalità.
+CLIENTS_DIR = DATA_DIR / "clienti"
+QUOTES_DIR = DATA_DIR / "preventivi"
+ALLEGATI_DIR = DATA_DIR / "allegati"
+USERS_FILE = DATA_DIR / "users.json"
+MESSAGES_FILE = DATA_DIR / "messages.json"
+TASKS_FILE = DATA_DIR / "tasks.json"
+PDF_LOG_FILE = DATA_DIR / "pdf_generation.log"
+TAGBOX_FILE = DATA_DIR / "tagbox.json"
+NOTIFICATIONS_FILE = DATA_DIR / "notifications.json"
+ADMIN_TASKS_FILE = DATA_DIR / "admin_tasks.json"
+
+
+# Creiamo le sottocartelle se non esistono
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+import integrazioni_google
+integrazioni_google.configura(DATA_DIR)
+import ceerlo
+ceerlo.configura(DATA_DIR)
+CLIENTS_DIR.mkdir(exist_ok=True)
+QUOTES_DIR.mkdir(exist_ok=True)
+ALLEGATI_DIR.mkdir(exist_ok=True)
+CHAT_ATTACHMENTS_DIR = DATA_DIR / "chat_attachments"
+CHAT_ATTACHMENTS_DIR.mkdir(exist_ok=True)
+
+# Definiamo il percorso scrivibile in AppData
+APPDATA_DIR = os.path.join(os.environ.get('APPDATA', ''), 'gestionalepreventivi')
+TEMPLATES_DIR = os.path.join(APPDATA_DIR, 'templates')
+
+if not os.path.exists(TEMPLATES_DIR):
+    os.makedirs(TEMPLATES_DIR)
+USERS_FILE = os.path.join(APPDATA_DIR, 'users.json')
+VERSION_FILE = os.path.join(APPDATA_DIR, 'version.txt')
+
+
+# Il nome del file del token che leggeremo
+TOKEN_FILE = DATA_DIR / "gh_token.txt"
+
+
+def start_flask_server_thread():
+    """Avvia solo il server Flask in un thread non bloccante."""
+    setup_first_run()
+    print("INFO: Avvio servizi principali dell'applicazione...")
+    manage_firewall_rule(PORT)
+    
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    
+    # Apriamo il browser non appena il server parte
+    webbrowser.open(DISPLAY_URL)
+
+_TRAY_WIDGET = None
+
+def tray_notify(message):
+    """Mostra una notifica di Windows dal widget del server (se attivo). Non blocca mai la richiesta."""
+    w = _TRAY_WIDGET
+    if not w:
+        return
+    def _send():
+        try:
+            w.icon.notify(message[:250], "Gestionale Cerlab")
+        except Exception as e:
+            print(f"[tray] Notifica non inviata: {e}")
+    threading.Thread(target=_send, daemon=True).start()
+
+# --- Registro attività recenti: letto dal programma "Gestionale Notifiche" installato sugli altri PC ---
+from collections import deque
+_ATTIVITA_RECENTI = deque(maxlen=300)
+_ATTIVITA_LOCK = threading.Lock()
+_ATTIVITA_ULTIMO_ID = 0
+
+def registra_attivita(testo, tipo="attivita", link=""):
+    """Registra un evento (azione di un collega, PDF generato/fallito) per le notifiche sugli altri PC."""
+    global _ATTIVITA_ULTIMO_ID
+    try:
+        ip = request.remote_addr
+    except RuntimeError:
+        ip = ""
+    with _ATTIVITA_LOCK:
+        _ATTIVITA_ULTIMO_ID += 1
+        _ATTIVITA_RECENTI.append({"id": _ATTIVITA_ULTIMO_ID, "ts": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                  "testo": testo, "tipo": tipo, "ip": ip, "link": link})
+
+def annuncia(testo, tipo="attivita", link=""):
+    """Registra l'evento per gli altri PC e lo mostra anche nel widget del PC server.
+    Sul PC server: gli errori PDF sempre; il resto solo con 'Notifiche attività colleghi' attivo
+    e se l'azione non è stata fatta proprio dal PC server."""
+    registra_attivita(testo, tipo, link)
+    w = _TRAY_WIDGET
+    if not w:
+        return
+    if tipo == "pdf_errore" or (w.notifiche_attivita and not _richiesta_dal_pc_server()):
+        tray_notify(testo)
+
+def _chi():
+    try:
+        return session.get("user_name") or session.get("user_id") or "un utente"
+    except RuntimeError:
+        return "un utente"
+
+def run_tray_icon_loop():
+    """Icona nell'area di notifica (vicino all'orologio) con lo stato del server in tempo reale."""
+    try:
+        TrayWidget().run()
+    except Exception as e:
+        print(f"ERRORE: Impossibile creare l'icona nella tray. Dettagli: {e}")
+
+
+class TrayWidget:
+    """Widget del server nell'area di notifica di Windows.
+
+    - icona con pallino verde/rosso in base allo stato reale del server (controllato ogni 15 s)
+    - tooltip con stato, indirizzo, utenti collegati e da quanto tempo è attivo
+    - menu con indirizzo copiabile, utenti collegati, cartelle dati/PDF, log e riavvio
+    - notifica di Windows quando il server smette di rispondere o torna attivo, o cambia indirizzo IP
+    """
+    CHECK_EVERY_SECS = 15
+
+    def __init__(self):
+        self.started_at = datetime.datetime.now()
+        self.online = None          # None = ancora in avvio
+        self.last_error = ""
+        self.lan_ip = LAN_IP
+        self.tailscale_ip = get_tailscale_ip()
+        self.notifiche_attivita = self._load_settings().get("notifiche_attivita", True)
+        self.base_image = Image.open(resource_path("static/favicon.ico")).convert("RGBA").resize((64, 64))
+        self.icon = pystray.Icon("Gestionale", self._image_for(None), self._tooltip(), self._menu())
+        global _TRAY_WIDGET
+        _TRAY_WIDGET = self
+
+    # ---------- stato ----------
+    @property
+    def url(self):
+        return f"http://{self.lan_ip}:{PORT}/"
+
+    @property
+    def tailscale_url(self):
+        return f"http://{self.tailscale_ip}:{PORT}/" if self.tailscale_ip else ""
+
+    def _check_server(self):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=5) as r:
+                return r.status == 200, ""
+        except Exception as e:
+            return False, str(e)[:120]
+
+    def _uptime(self):
+        mins = int((datetime.datetime.now() - self.started_at).total_seconds() // 60)
+        if mins < 60:
+            return f"{mins} min"
+        h, m = divmod(mins, 60)
+        return f"{h} h {m} min" if h < 24 else f"{h // 24} g {h % 24} h"
+
+    def _status_text(self):
+        if self.online is None:
+            return "Stato: avvio in corso..."
+        return "Stato: ✔ server attivo" if self.online else "Stato: ✖ il server NON risponde"
+
+    def _users_text(self):
+        users = get_utenti_collegati()
+        if not users:
+            return "Nessun utente collegato"
+        nomi = ", ".join(u["nome"] for u in users[:4]) + ("..." if len(users) > 4 else "")
+        return f"{len(users)} collegat{'o' if len(users) == 1 else 'i'}: {nomi}"
+
+    def _tooltip(self):
+        # Windows limita il tooltip a 127 caratteri
+        stato = "attivo" if self.online else ("in avvio" if self.online is None else "NON RISPONDE")
+        n = len(get_utenti_collegati())
+        text = f"Gestionale Cerlab v{APP_VERSION} - {stato}\n{self.url}\n{n} utent{'e' if n == 1 else 'i'} collegat{'o' if n == 1 else 'i'} - attivo da {self._uptime()}"
+        return text[:127]
+
+    def _image_for(self, online):
+        img = self.base_image.copy()
+        from PIL import ImageDraw
+        d = ImageDraw.Draw(img)
+        color = (148, 163, 184) if online is None else ((22, 163, 74) if online else (220, 38, 38))
+        d.ellipse((38, 38, 63, 63), fill=color, outline=(255, 255, 255), width=4)
+        return img
+
+    def _refresh(self):
+        self.icon.icon = self._image_for(self.online)
+        self.icon.title = self._tooltip()
+        self.icon.update_menu()
+
+    def _monitor_loop(self):
+        while True:
+            ok, err = self._check_server()
+            was = self.online
+            self.online, self.last_error = ok, err
+            new_ip = get_lan_ip()
+            ip_changed = new_ip != self.lan_ip and new_ip != "127.0.0.1"
+            if ip_changed:
+                self.lan_ip = new_ip
+            self.tailscale_ip = get_tailscale_ip()
+            try:
+                self._refresh()
+                if was is True and not ok:
+                    self.icon.notify("Il server non risponde. Prova 'Riavvia server' dal menu dell'icona.", "Gestionale Cerlab")
+                elif was is False and ok:
+                    self.icon.notify("Il server è di nuovo attivo.", "Gestionale Cerlab")
+                if ip_changed:
+                    self.icon.notify(f"L'indirizzo del gestionale è cambiato: {self.url}", "Gestionale Cerlab")
+            except Exception as e:
+                print(f"[tray] Errore aggiornamento icona: {e}")
+            time.sleep(self.CHECK_EVERY_SECS)
+
+    # ---------- impostazioni (persistono tra i riavvii) ----------
+    SETTINGS_FILE = DATA_DIR / "tray_settings.json"
+
+    def _load_settings(self):
+        try:
+            return json.loads(self.SETTINGS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _toggle_notifiche(self, icon=None, item_=None):
+        self.notifiche_attivita = not self.notifiche_attivita
+        try:
+            self.SETTINGS_FILE.write_text(json.dumps({"notifiche_attivita": self.notifiche_attivita}), encoding="utf-8")
+        except Exception as e:
+            print(f"[tray] Impossibile salvare le impostazioni: {e}")
+        self.icon.update_menu()
+
+    # ---------- azioni ----------
+    def _open(self, icon=None, item_=None):
+        webbrowser.open(self.url)
+
+    # le azioni del menu possono avere al massimo (icon, item): pystray rifiuta metodi con più parametri
+    def _copy_url(self, icon=None, item_=None):
+        self._copia_indirizzo(self.url, "degli altri PC")
+
+    def _copy_tailscale_url(self, icon=None, item_=None):
+        self._copia_indirizzo(self.tailscale_url, "del telefono o dei PC collegati a Tailscale")
+
+    def _copia_indirizzo(self, url, dove):
+        try:
+            subprocess.run(["clip"], input=url, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            self.icon.notify(f"Indirizzo copiato: {url}\nIncollalo nel browser {dove}.", "Gestionale Cerlab")
+        except Exception as e:
+            print(f"[tray] Impossibile copiare l'indirizzo: {e}")
+
+    @staticmethod
+    def _open_path(path):
+        try:
+            os.startfile(str(path))
+        except Exception as e:
+            print(f"[tray] Impossibile aprire {path}: {e}")
+
+    @staticmethod
+    def _confirm(text):
+        try:
+            # MB_YESNO | MB_ICONWARNING | MB_TOPMOST -> 6 = Sì
+            return ctypes.windll.user32.MessageBoxW(0, text, "Gestionale Cerlab", 0x4 | 0x30 | 0x40000) == 6
+        except Exception:
+            return True
+
+    def _restart(self, icon=None, item_=None):
+        n = len(get_utenti_collegati())
+        msg = "Riavviare il server del gestionale?"
+        if n:
+            msg += f"\n\n{n} utent{'e è' if n == 1 else 'i sono'} collegat{'o' if n == 1 else 'i'}: per qualche secondo non potranno lavorare."
+        if self._confirm(msg):
+            print("INFO: Riavvio dell'applicazione richiesto dal tray...")
+            self.icon.stop()
+            os.execl(sys.executable, sys.executable, *sys.argv)
+
+    def _quit(self, icon=None, item_=None):
+        n = len(get_utenti_collegati())
+        msg = "Chiudere il gestionale?\n\nGli altri PC non potranno più usarlo finché non lo riavvii."
+        if n:
+            msg += f"\n\nIn questo momento {n} utent{'e è' if n == 1 else 'i sono'} collegat{'o' if n == 1 else 'i'}."
+        if self._confirm(msg):
+            self.icon.stop()
+            os._exit(0)
+
+    def _menu(self):
+        M = pystray.MenuItem
+        return pystray.Menu(
+            M(f"Gestionale Cerlab v{APP_VERSION}", None, enabled=False),
+            M(lambda i: self._status_text(), None, enabled=False),
+            M(lambda i: f"Attivo da {self._uptime()}", None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            M("Apri Gestionale", self._open, default=True),
+            M(lambda i: f"Copia indirizzo  ({self.url})", self._copy_url),
+            M(lambda i: f"Copia indirizzo Tailscale  ({self.tailscale_url})", self._copy_tailscale_url,
+              visible=lambda i: bool(self.tailscale_ip)),
+            M(lambda i: self._users_text(), None, enabled=False),
+            M("Notifiche attività colleghi", self._toggle_notifiche, checked=lambda it: self.notifiche_attivita),
+            pystray.Menu.SEPARATOR,
+            M("Apri cartella dati", lambda i, it: self._open_path(DATA_DIR)),
+            M("Apri cartella PDF", lambda i, it: self._open_path(QUOTES_DIR)),
+            M("Apri log PDF", lambda i, it: self._open_path(PDF_LOG_FILE), enabled=lambda it: PDF_LOG_FILE.exists()),
+            pystray.Menu.SEPARATOR,
+            M("Riavvia server", self._restart),
+            M("Esci", self._quit),
+        )
+
+    def run(self):
+        threading.Thread(target=self._monitor_loop, daemon=True).start()
+        print("--- Il Launcher ha passato il testimone. Il programma ora attende la chiusura dal tray. ---")
+        self.icon.run()  # chiamata bloccante che tiene vivo il programma
+
+def restart_app(icon, menu_item):
+    """Ferma l'icona, chiude il server e riavvia l'applicazione."""
+    print("INFO: Riavvio dell'applicazione richiesto...")
+    icon.stop()
+    # Riavvia l'eseguibile corrente con gli stessi argomenti
+    os.execl(sys.executable, sys.executable, *sys.argv)
+# --- CLASSE DEL LAUNCHER (MODIFICATA PER ESSERE THREAD-SAFE) ---
+# Sostituisci la vecchia classe AppLauncher e le funzioni esterne con questo blocco corretto
+
+def login_or_local_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # 1. Verifica token PDF monouso (per browser headless nella generazione PDF)
+        pdf_token = request.args.get('_pdf_token')
+        quote_id = kwargs.get('quote_id', '')
+        if pdf_token and verify_pdf_token(pdf_token, quote_id):
+            return f(*args, **kwargs)
+        # 2. Verifica sessione standard
+        client_ip = request.remote_addr
+        is_local_internal = (
+            client_ip in ["127.0.0.1", "::1"] or 
+            client_ip.startswith("192.168.") or 
+            client_ip.startswith("10.") or 
+            client_ip.startswith("172.")
+        )
+        if not session.get("logged_in") and not is_local_internal:
+            flash("Effettua il login per accedere.", "error")
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+class AppLauncher(Tk):
+    def skip_update_check(self):
+        """Imposta l'evento per segnalare di saltare il controllo aggiornamenti."""
+        print("INFO: Richiesta di saltare il controllo aggiornamenti.")
+        self.skip_button.config(state="disabled", text="Avvio...") # Disabilita il pulsante
+        self.skip_requested.set() # Imposta l'evento
+
+    def __init__(self):
+        print("--- PASSO 2: INIZIALIZZAZIONE CLASSE AppLauncher ---")
+        super().__init__()
+        self.should_start_server = False
+        self.title(f"{APP_NAME} - Avvio in corso...")
+        self.geometry("450x250")
+        self.resizable(False, False)
+        self.configure(bg="#ffffff")
+
+        try:
+            icon_path = resource_path("static/favicon.ico")
+            self.iconbitmap(icon_path)
+        except Exception:
+            print("Icona non trovata.")
+        try:
+            logo_path = resource_path("static/logo.png")
+            self.logo_img = PhotoImage(file=logo_path)
+            Label(self, image=self.logo_img, bg="#ffffff").pack(pady=(20, 10))
+        except Exception:
+            Label(self, text=APP_NAME, font=("Helvetica", 18, "bold"), bg="#ffffff").pack(pady=(20, 10))
+
+        self.status_label = Label(self, text="Inizializzazione...", font=("Helvetica", 10), bg="#ffffff", fg="#333")
+        self.status_label.pack(pady=5)
+        style = Style(self)
+        style.theme_use('clam')
+        style.configure("green.Horizontal.TProgressbar", background='#28a745', troughcolor='#e0e0e0', bordercolor='#e0e0e0', lightcolor='#e0e0e0', darkcolor='#e0e0e0')
+        self.progress = Progressbar(self, orient="horizontal", length=300, mode="determinate", style="green.Horizontal.TProgressbar")
+        # Spostiamo il pulsante "Salta" QUI, prima della barra di progresso
+        self.skip_button = Button(self, text="Salta Controllo e Avvia", command=self.skip_update_check, bg="#f0f0f0", relief="flat")
+        self.skip_button.pack(pady=5)
+        # E mettiamo la barra di progresso DOPO
+        self.progress.pack(pady=10)
+        
+        self.version_label = Label(self, text=f"Versione Attuale: {APP_VERSION}", font=("Helvetica", 8), bg="#ffffff", fg="#666")
+        self.version_label.pack(side="bottom", pady=5)
+
+        self.queue = queue.Queue()
+        self.skip_requested = threading.Event()
+        self.process_thread = threading.Thread(target=self.run_startup_process, daemon=True)
+        self.process_thread.start()
+        self.after(100, self.process_queue)
+
+    def process_queue(self):
+        try:
+            message = self.queue.get_nowait()
+            if message[0] == 'update_status':
+                _, text, value = message
+                self.status_label.config(text=text)
+                self.progress['value'] = value
+            elif message[0] == 'update_status_button':
+                new_state = message[1]
+                if self.skip_button: # Controlla se il pulsante esiste
+                    self.skip_button.config(state=new_state)    
+            elif message[0] == 'run_action':
+                action = message[1]
+                if action == 'start_gestionale':
+                    self.start_gestionale()
+                elif action == 'run_installer':
+                    installer_path = message[2]
+                    self.run_installer_and_exit(installer_path)
+                
+                self.destroy()
+        except queue.Empty:
+            pass
+        except Exception as e: # Aggiunto per debug
+            print(f"Errore in process_queue: {e}")
+        finally:
+            if self.winfo_exists():
+                 self.after(100, self.process_queue)
+
+    
+    def run_startup_process(self):
+        """
+        Controlla gli aggiornamenti con una logica di "retry"
+        per dare tempo alla connessione di rete di attivarsi.
+        """
+        
+        MAX_RETRIES = 4       # Numero massimo di tentativi (1 subito + 3)
+        RETRY_DELAY_SEC = 15  # Secondi da aspettare tra i tentativi
+        
+        installer_path = None
+        check_result = ""
+
+        for attempt in range(MAX_RETRIES):
+            # 1. Controlla se l'utente ha cliccato "Salta" nel frattempo
+            if self.skip_requested.is_set():
+                print("INFO: Controllo aggiornamenti saltato dall'utente.")
+                break
+            
+            # 2. Aggiorna la UI e disabilita il pulsante durante il check
+            progress = (attempt / MAX_RETRIES) * 100
+            self.queue.put(('update_status_button', 'disabled'))
+            if attempt == 0:
+                self.queue.put(('update_status', "Ricerca aggiornamenti...", 10))
+            else:
+                self.queue.put(('update_status', f"Controllo aggiornamenti... (Tentativo {attempt + 1})", progress))
+
+            # 3. Esegui il controllo
+            check_result = self.check_for_updates()
+
+            # 4. Analizza il risultato
+            if isinstance(check_result, str) and check_result.endswith(".exe"):
+                # CASO A: Trovato aggiornamento!
+                installer_path = check_result
+                break # Usciamo dal ciclo dei tentativi
+            
+            if check_result == "NO_UPDATE" or check_result == "FATAL_ERROR":
+                # CASO B: Check OK (nessun update) o Errore Grave (token, ecc.)
+                # In entrambi i casi, non ha senso riprovare.
+                break # Usciamo dal ciclo dei tentativi
+            
+            if check_result == "NETWORK_ERROR":
+                # CASO C: Errore di Rete.
+                if attempt < MAX_RETRIES - 1:
+                    # Non è l'ultimo tentativo, quindi aspettiamo
+                    msg = f"Rete assente. Riprovo tra {RETRY_DELAY_SEC}s..."
+                    self.queue.put(('update_status', msg, progress))
+                    # Ri-abilita il pulsante "Salta" durante l'attesa
+                    self.queue.put(('update_status_button', 'normal'))
+                    
+                    # Ciclo di attesa (controllando ogni secondo se l'utente "Salta")
+                    for _ in range(RETRY_DELAY_SEC):
+                        if self.skip_requested.is_set():
+                            break
+                        time.sleep(1)
+                else:
+                    # Era l'ultimo tentativo, ci arrendiamo
+                    print("INFO: Errore di rete dopo tutti i tentativi.")
+            
+            # (Il ciclo for ricomincia se era NETWORK_ERROR)
+
+        # 5. Finito il ciclo, decidiamo cosa fare
+        if installer_path:
+            # Trovato aggiornamento
+            self.queue.put(('update_status', "Nuova versione trovata! Installazione...", 100))
+            time.sleep(2)
+            self.queue.put(('run_action', 'run_installer', installer_path))
+        else:
+            # Nessun aggiornamento, o l'utente ha saltato, o errore
+            msg = "Avvio del gestionale..."
+            if self.skip_requested.is_set():
+                msg = "Avvio saltato dall'utente..."
+            elif check_result == "NO_UPDATE":
+                msg = "Nessun aggiornamento. Avvio del gestionale..."
+            elif check_result == "NETWORK_ERROR":
+                msg = "Offline. Avvio del gestionale..."
+
+            self.queue.put(('update_status', msg, 100))
+            time.sleep(1)
+            self.queue.put(('run_action', 'start_gestionale'))
+    
+    def check_for_updates(self):
+        """
+        Controlla gli aggiornamenti da GitHub.
+        Restituisce 3 possibili valori:
+        - Il PERCORSO (str) dell'installer se trovato.
+        - "NO_UPDATE" (str) se il check è OK ma non ci sono aggiornamenti.
+        - "NETWORK_ERROR" (str) se il server non è raggiungibile.
+        - "FATAL_ERROR" (str) per tutti gli altri problemi (token, file .exe mancante, ecc.)
+        """
+        
+        # 1. Leggi il token
+        try:
+            with open(TOKEN_FILE, "r") as f:
+                token = f.read().strip()
+            if not token:
+                raise FileNotFoundError
+        except FileNotFoundError:
+            print(f"ERRORE: File token '{TOKEN_FILE.name}' non trovato. L'aggiornamento automatico è disabilitato.")
+            return "FATAL_ERROR" # Errore grave, non ha senso riprovare
+        except Exception as e:
+            print(f"ERRORE: Impossibile leggere il token. {e}")
+            return "FATAL_ERROR"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+
+        try:
+            # 2. Chiama l'API di GitHub
+            print(f"INFO: Contatto API GitHub: {GITHUB_API_URL}")
+            req_manifest = urllib.request.Request(GITHUB_API_URL, headers=headers)
+            with urllib.request.urlopen(req_manifest, timeout=10) as response:
+                release_data = json.load(response)
+
+            # 3. Confronta la versione
+            latest_version_str = release_data.get("tag_name", "0.0.0").lstrip('v')
+            if not latest_version_str:
+                print("ERRORE: Il tag della release su GitHub è vuoto.")
+                return "FATAL_ERROR" # Errore di configurazione
+
+            print(f"INFO: Versione GitHub: {latest_version_str} / Versione Locale: {APP_VERSION}")
+            if parse_version(latest_version_str) > parse_version(APP_VERSION):
+                print(f"INFO: Nuova versione {latest_version_str} trovata.")
+                
+                # 4. Cerca l'asset .exe
+                download_asset = None
+                for asset in release_data.get("assets", []):
+                    if asset.get("name", "").endswith(".exe"):
+                        download_asset = asset
+                        break
+                
+                if not download_asset:
+                    print("ERRORE: Release trovata, ma nessun file .exe allegato.")
+                    return "FATAL_ERROR" # Errore di configurazione
+                
+                download_api_url = download_asset.get("url")
+                installer_filename = download_asset.get("name")
+                
+                if not download_api_url:
+                     print("ERRORE: URL API per l'asset non trovato.")
+                     return "FATAL_ERROR"
+
+                self.queue.put(('update_status', f"Download versione {latest_version_str}...", 50))
+                
+                # 5. Scarica il file .exe
+                updates_dir = DATA_DIR / "updates"
+                updates_dir.mkdir(parents=True, exist_ok=True)
+                local_installer_path = updates_dir / installer_filename
+
+                print(f"INFO: Download di {installer_filename} in corso...")
+                download_headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/octet-stream"
+                }
+                req_download = urllib.request.Request(download_api_url, headers=download_headers)
+                
+                with urllib.request.urlopen(req_download, timeout=600) as in_stream, open(local_installer_path, 'wb') as out_file:
+                    shutil.copyfileobj(in_stream, out_file)
+                
+                print(f"INFO: Installer scaricato con successo in {local_installer_path}")
+                # --- SUCCESSO: Restituisce il percorso ---
+                return str(local_installer_path)
+            
+            else:
+                print("INFO: L'applicazione è già aggiornata.")
+                # --- SUCCESSO: Nessun aggiornamento ---
+                return "NO_UPDATE"
+
+        except urllib.error.URLError as e:
+            # --- ERRORE DI RETE ---
+            if hasattr(e, 'code') and e.code == 401:
+                 print("ERRORE: Autenticazione fallita (401). Controlla il token 'gh_token.txt'.")
+                 return "FATAL_ERROR" # Token sbagliato, inutile riprovare
+            if hasattr(e, 'code') and e.code == 404:
+                 print("INFO: Nessuna release 'latest' trovata (404).")
+                 return "NO_UPDATE" # Lo trattiamo come "nessun aggiornamento"
+                 
+            print(f"ATTENZIONE: Impossibile contattare il server GitHub. (Sei offline?). Errore: {e}")
+            return "NETWORK_ERROR"
+        except Exception as e:
+            # --- ERRORE GENERICO ---
+            print(f"ERRORE non gestito in check_for_updates: {e}")
+            return "FATAL_ERROR"
+
+    def run_installer_and_exit(self, installer_path):
+        """
+        Crea un piccolo script .bat temporaneo che attende 3 secondi
+        e poi lancia l'installer. Questo garantisce che l'eseguibile principale
+        si sia chiuso prima che l'aggiornamento inizi.
+        """
+        log_dir = get_persistent_data_dir()
+        log_path = log_dir / "installer_update_log.txt"
+        installer_command = f'"{installer_path}" /SILENT /SP- /NORESTART /LOG="{log_path}"'
+
+        # Contenuto dello script batch
+        # timeout /t 5: attende 5 secondi
+        # start "" ...: avvia l'installer
+        # del "%~f0": elimina se stesso alla fine
+        batch_content = f"""
+        @echo off
+        echo Attendo la chiusura del Gestionale... > "{log_path}"
+        timeout /t 5 /nobreak > nul
+        echo Avvio aggiornamento... >> "{log_path}"
+        start "" {installer_command}
+        del "%~f0"
+        """
+
+        try:
+            # Creiamo il file .bat in una cartella temporanea di sistema
+            temp_dir = os.environ.get("TEMP", os.path.expanduser("~"))
+            batch_path = os.path.join(temp_dir, f"update_launcher_{uuid.uuid4().hex}.bat")
+            
+            with open(batch_path, "w") as f:
+                f.write(batch_content)
+
+            print(f"Creato script trampolino temporaneo: {batch_path}")
+
+            # Avviamo lo script .bat in modo completamente indipendente e nascosto
+            # CREATE_NO_WINDOW nasconde la finestra del prompt che altrimenti lampeggerebbe
+            # ambiente senza le variabili interne di PyInstaller: altrimenti GestionaleNotifiche, avviato
+            # dall'installer, si ferma con "Security validation failure ... parent process"
+            env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("_PYI", "_MEI"))}
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            subprocess.Popen(['cmd.exe', '/c', batch_path], creationflags=subprocess.CREATE_NO_WINDOW, env=env)
+
+        except Exception as e:
+            print(f"!!! ERRORE CRITICO: Impossibile creare o lanciare lo script di aggiornamento. Errore: {e}")
+            ctypes.windll.user32.MessageBoxW(0, f"Impossibile avviare il processo di aggiornamento.\n\nDettagli: {e}", "Errore Aggiornamento", 0x10)
+        
+        finally:
+            # Usciamo immediatamente, lasciando che lo script .bat faccia il suo lavoro
+            print("--- Gestionale chiuso per permettere l'aggiornamento. Il trampolino è stato lanciato. ---")
+            os._exit(0)
+
+
+    def start_gestionale(self):
+        """Imposta il flag e avvia il thread del server Flask non bloccante."""
+        self.should_start_server = True
+        print("Avvio del server web in background...")
+        start_flask_server_thread()
+
+# --- FINE CLASSE DEL LAUNCHER ---
+
+
+def _carica_secret_key():
+    """Chiave che firma le sessioni e i token di stampa. Non sta nel codice (il repository e' pubblico):
+    si genera al primo avvio in DATA_DIR/secret_key.txt e resta uguale ai riavvii.
+    GESTIONALE_SECRET_KEY, se impostata, ha la precedenza."""
+    import secrets
+    chiave = os.environ.get("GESTIONALE_SECRET_KEY", "").strip()
+    if chiave:
+        return chiave
+    percorso = DATA_DIR / "secret_key.txt"
+    try:
+        chiave = percorso.read_text(encoding="utf-8").strip()
+    except OSError:
+        chiave = ""
+    if not chiave:
+        chiave = secrets.token_hex(32)
+        percorso.write_text(chiave, encoding="utf-8")
+    return chiave
+
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = _carica_secret_key()
+
+class _IndirizzoDaTailscaleServe:
+    """Con `tailscale serve` (indirizzo https per installare l'app sul telefono) le richieste arrivano
+    da 127.0.0.1: si usa l'IP del dispositivo che Tailscale mette in X-Forwarded-For, altrimenti il
+    telefono passerebbe per il PC server (che per alcune pagine non chiede il login).
+    Solo per le richieste da 127.0.0.1: un PC della rete non può fingersi un altro."""
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        if environ.get("REMOTE_ADDR") in ("127.0.0.1", "::1"):
+            inoltrato = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[-1].strip()
+            if inoltrato:
+                environ["REMOTE_ADDR"] = inoltrato
+        return self.wsgi_app(environ, start_response)
+
+app.wsgi_app = _IndirizzoDaTailscaleServe(app.wsgi_app)
+APP_NAME = "Gestionale Preventivi"
+
+import hmac, hashlib, time as _time
+
+def generate_pdf_token(quote_id: str) -> str:
+    """Genera un token HMAC firmato per autorizzare la stampa headless senza sessione.
+    Il token ha validità di 10 minuti (600 secondi).
+    Formato: <timestamp_hex>.<hmac_hex>
+    """
+    ts = format(int(_time.time()), 'x')  # Timestamp hex
+    secret = app.config["SECRET_KEY"].encode()
+    payload = f"{quote_id}:{ts}".encode()
+    sig = hmac.new(secret, payload, hashlib.sha256).hexdigest()
+    return f"{ts}.{sig}"
+
+def verify_pdf_token(token: str, quote_id: str, max_age: int = 600) -> bool:
+    """Verifica che il token sia valido e non scaduto."""
+    try:
+        ts_hex, sig = token.split('.', 1)
+        ts = int(ts_hex, 16)
+        # Verifica scadenza
+        if _time.time() - ts > max_age:
+            return False
+        # Verifica firma
+        secret = app.config["SECRET_KEY"].encode()
+        payload = f"{quote_id}:{ts_hex}".encode()
+        expected = hmac.new(secret, payload, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, sig)
+    except Exception:
+        return False
+
+@app.context_processor
+def inject_debug_mode():
+    """Rende la variabile 'debug_mode' disponibile in tutti i template."""
+    return dict(debug_mode=app.config['DEBUG'])
+
+# --- NOTE CLIENTE (pannello laterale nelle pagine di un preventivo) ---
+@app.context_processor
+def inject_current_quote_client():
+    """Sulle pagine di un preventivo (URL con <quote_id>) espone il cliente collegato,
+    usato da base.html per mostrare il pulsante "Note Cliente"."""
+    quote_id = (request.view_args or {}).get("quote_id")
+    if not quote_id or "user_id" not in session:
+        return {}
+    db = _DBSession()
+    try:
+        prev = db.query(_Preventivo).filter_by(numero=quote_id).first()
+        if not prev or not prev.id_cliente:
+            return {}
+        cli = db.query(_Cliente).filter_by(id_cliente=prev.id_cliente).first()
+        if not cli:
+            return {}
+        return dict(current_quote_id=quote_id, current_client_id=cli.id_cliente,
+                    current_client_name=cli.cliente or cli.rag_sociale or cli.id_cliente)
+    except Exception as e:
+        print(f"[note_cliente] Errore context: {e}")
+        return {}
+    finally:
+        db.close()
+
+
+# --- INIZIO BLOCCO GESTIONE MARGINI (AGGIORNATO CON REGOLE COLORE) ---
+
+MARGINI_FILE = DATA_DIR / "config_margini.json"
+
+DEFAULT_MARGINI = {
+    "fasce": [
+        {
+            "key": "economici", 
+            "descrizione": "Fascia Bassa ", 
+            "max_costo": 500, # <-- NUOVO LIMITE
+            "pallini": {"verde": 80, "arancione": 70, "rosso": 60}, # <-- Ricarichi più alti
+            "regole_colore": {
+                "verde_min": 75, "verde_max": 85,        # Target Margine ~43-46%
+                "arancione_min1": 65, "arancione_max1": 74,
+                "arancione_min2": 86, "arancione_max2": 95
+            }
+        },
+        {
+            "key": "standard", 
+            "descrizione": "Fascia Standard ", 
+            "max_costo": 1500, # <-- NUOVO LIMITE
+            "pallini": {"verde": 67, "arancione": 55, "rosso": 45}, # <-- Ricarichi medi (il tuo target 40% margine)
+           "regole_colore": {
+                "verde_min": 62, "verde_max": 72,        # Target Margine ~38-42%
+                "arancione_min1": 55, "arancione_max1": 61,
+                "arancione_min2": 73, "arancione_max2": 80
+            }
+        },
+        {
+            "key": "costosi", 
+            "descrizione": "Fascia Alta ", 
+            "max_costo": 999999,
+            "pallini": {"verde": 50, "arancione": 40, "rosso": 30}, # <-- Ricarichi più bassi
+           "regole_colore": {
+                "verde_min": 45, "verde_max": 55,        # Target Margine ~31-35%
+                "arancione_min1": 38, "arancione_max1": 44,
+                "arancione_min2": 56, "arancione_max2": 65
+            }
+        }
+    ]
+}
+def log_pdf_event(quote_id, message_type, message):
+    """Logs an event related to PDF generation."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_line = f"[{timestamp}] [{quote_id}] [{message_type.upper()}] {message}\n"
+    try:
+        with open(PDF_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(log_line)
+    except Exception as e:
+        print(f"ERRORE: Impossibile scrivere nel log PDF: {e}")
+
+def get_browser_executable():
+    """Trova il percorso dell'eseguibile di Chrome o Edge su Windows o Linux."""
+    import shutil
+    # 1. Controlla nel PATH
+    for name in ["msedge", "chrome", "google-chrome", "chromium", "brave"]:
+        found = shutil.which(name)
+        if found:
+            return found
+
+    # 2. Percorsi standard di installazione su Windows
+    standard_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"),
+    ]
+    for p in standard_paths:
+        if os.path.isfile(p):
+            return p
+    return None
+
+def load_margini_config():
+    """Carica la configurazione dei margini dal DB SQLite (tabella config_margini)."""
+    db = _DBSession()
+    try:
+        fasce_db = db.query(_ConfigMargini).all()
+        if fasce_db:
+            return {"fasce": [f.to_dict() for f in fasce_db]}
+    except Exception:
+        pass
+    finally:
+        db.close()
+    # Fallback ai default se il DB e' vuoto
+    return DEFAULT_MARGINI
+# --- FINE BLOCCO GESTIONE MARGINI ---
+def setup_first_run():
+    """
+    Controlla se i file di base (es. comuni.json) esistono nella cartella
+    dati permanente. Se no, li copia dalla versione impacchettata.
+    Inoltre, se rileva un DB vuoto con dati JSON V2 presenti, avvia
+    automaticamente la migrazione V2 -> V3 (una sola volta).
+    """
+    dest_comuni_file = DATA_DIR / "comuni.json"
+    if not dest_comuni_file.exists():
+        print("INFO: Primo avvio, configurazione dati iniziali...")
+        try:
+            source_comuni_file = resource_path("data/comuni.json")
+            shutil.copy2(source_comuni_file, dest_comuni_file)
+            print(f"INFO: 'comuni.json' copiato in {dest_comuni_file}")
+        except Exception as e:
+            print(f"ERRORE CRITICO: Impossibile copiare i dati iniziali. Dettagli: {e}")
+
+    # --- Migrazione automatica V2 -> V3 (one-shot) ---
+    _run_auto_migration_if_needed()
+
+
+def _run_auto_migration_if_needed():
+    """
+    Esegue migrate_v3_installer.py se:
+    1. Il file sentinel 'migration_v3_done.flag' NON esiste (mai completata), E
+    2. Esiste almeno un file JSON di clienti o preventivi in AppData.
+    Se la migrazione dell'installer si e' interrotta a meta' viene ripresa: i record gia'
+    presenti nel DB vengono saltati. Il sentinel lo scrive lo script solo a migrazione riuscita.
+    """
+    sentinel = DATA_DIR / "migration_v3_done.flag"
+    if sentinel.exists():
+        return  # Gia' eseguita, skip
+
+    # Controlla se ci sono dati JSON V2 da migrare
+    has_json_data = (
+        any((DATA_DIR / "clienti").glob("*.json")) or
+        any((DATA_DIR / "preventivi").glob("*.json")) or
+        (DATA_DIR / "users.json").exists()
+    )
+    if not has_json_data:
+        # Nessun dato V2 trovato: install fresh, segna come done
+        sentinel.touch()
+        return
+
+    # Avvia la migrazione in un thread separato per non bloccare il boot del server
+    print("INFO: Rilevati dati V2 da migrare. Avvio migrazione automatica V2 -> V3...")
+
+    def _migration_thread():
+        try:
+            # Import diretto: funziona sia in dev che nell'EXE PyInstaller
+            from migrate_v3_installer import main as run_migration
+            import sys as _sys
+            # Passiamo DATA_DIR come argomento simulando sys.argv
+            _original_argv = _sys.argv[:]
+            _sys.argv = ["migrate_v3_installer.py", str(DATA_DIR)]
+            try:
+                # Il flag di fine migrazione lo scrive migrate_v3_installer solo se tutto e' andato a buon fine
+                if run_migration() == 0:
+                    print("INFO: Migrazione V2 -> V3 completata con successo.")
+                else:
+                    print("ATTENZIONE: Migrazione V2 -> V3 incompleta, verra' ritentata al prossimo avvio.")
+            finally:
+                _sys.argv = _original_argv
+        except Exception as e:
+            print(f"ERRORE: Migrazione V2 -> V3 fallita: {e}")
+
+    migration_thread = threading.Thread(target=_migration_thread, daemon=True, name="MigrazioneV3")
+    migration_thread.start()
+def get_installed_version():
+    """Legge la versione dal file in AppData."""
+    try:
+        if os.path.exists(VERSION_FILE):
+            with open(VERSION_FILE, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+    except Exception:
+        pass
+    return "1.0.0"
+def resource_path(relative_path):
+    """ Ottiene il percorso assoluto della risorsa, funziona sia in dev che con PyInstaller """
+    try:
+        # PyInstaller crea una cartella temp e ci salva il percorso in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+try:
+    with open(resource_path("data/comuni.json"), "r", encoding="utf-8") as f: GEO_DATA = json.load(f)
+except FileNotFoundError: GEO_DATA = []; print("ATTENZIONE: File 'data/comuni.json' non trovato.")
+# === A3/A4/A5: Import modelli SQLAlchemy ===
+# Il DB sta nella cartella dati utente, non in quella del programma (cancellata dall'installer a ogni update).
+# Nome diverso da "gestionale.db" per non riusare il vecchio DB di prova presente in alcune AppData.
+os.environ.setdefault(
+    "GESTIONALE_DB_PATH",
+    str(DATA_DIR / ("gestionale.db" if "--debug" in sys.argv else "gestionale_v3.db"))
+)
+from models import (
+    campi_extra as _campi_extra,
+    SessionLocal as _DBSession,
+    Preventivo as _Preventivo, Ordine as _Ordine, Bolla as _Bolla,
+    Cliente as _Cliente,
+    Utente as _Utente,
+    Task as _Task, AdminTask as _AdminTask, Report as _Report, Promemoria as _Promemoria,
+    RegistroAttivita as _RegistroAttivita,
+    Message as _Message, TagboxEntry as _TagboxEntry,
+    Notification as _Notification, ConfigMargini as _ConfigMargini,
+    ArticoloMagazzino as _ArticoloMagazzino, MovimentoMagazzino as _MovimentoMagazzino,
+    Campione as _Campione, ContatoreCampionari as _ContatoreCampionari,
+    init_db as _init_db
+)
+_init_db()  # Assicura che tutte le tabelle V3 esistano
+import catalogo_auto as _catalogo_auto
+
+# Chiavi che hanno una colonna dedicata (o una tabella collegata): tutto il resto finisce in 'extra'
+_CAMPI_PREVENTIVO = set(_Preventivo.__table__.columns.keys()) | {"ordini_fornitore", "bolle"}
+_CAMPI_ORDINE = set(_Ordine.__table__.columns.keys())
+_CAMPI_BOLLA = set(_Bolla.__table__.columns.keys())
+_CAMPI_CLIENTE = set(_Cliente.__table__.columns.keys())
+
+def load_users():
+    """Carica gli utenti dalla tabella SQLite 'utenti'."""
+    db = _DBSession()
+    try:
+        return [u.to_dict() for u in db.query(_Utente).all()]
+    except Exception:
+        return []
+    finally:
+        db.close()
+
+# Carichiamo il changelog (Sola lettura, resta nella cartella app)
+try:
+    with open(resource_path("data/changelog.json"), "r", encoding="utf-8") as f:
+        CHANGELOG_DATA = json.load(f)
+    # Il file puo' contenere una sola versione (oggetto) o un elenco di versioni
+    if isinstance(CHANGELOG_DATA, dict):
+        CHANGELOG_DATA = [CHANGELOG_DATA]
+    CHANGELOG_DATA = [e for e in CHANGELOG_DATA if isinstance(e, dict) and e.get("version")]
+except (FileNotFoundError, json.JSONDecodeError):
+    CHANGELOG_DATA = []
+    print("ATTENZIONE: File 'data/changelog.json' non trovato o corrotto.")
+def save_users(users_data):
+    """Salva lista di utenti nella tabella SQLite 'utenti' (upsert)."""
+    db = _DBSession()
+    try:
+        for u in users_data:
+            username = u.get("username")
+            if not username:
+                continue
+            existing = db.query(_Utente).filter_by(username=username).first()
+            if existing:
+                existing.password_hash = u.get("password_hash", existing.password_hash)
+                existing.full_name = u.get("full_name", existing.full_name)
+                existing.role = u.get("role", existing.role)
+                existing.sigla = u.get("sigla", existing.sigla)
+                existing.force_password_reset = u.get("force_password_reset", False)
+                existing.last_seen_version = u.get("last_seen_version", "")
+                existing.email = u.get("email", existing.email or "")
+                existing.email_report = u.get("email_report", existing.email_report or False)
+                existing.email_admin = u.get("email_admin", existing.email_admin or False)
+            else:
+                db.add(_Utente(
+                    username=username,
+                    password_hash=u.get("password_hash", ""),
+                    full_name=u.get("full_name", ""),
+                    role=u.get("role", "venditore"),
+                    sigla=u.get("sigla", ""),
+                    force_password_reset=u.get("force_password_reset", False),
+                    last_seen_version=u.get("last_seen_version", ""),
+                    email=u.get("email", ""),
+                    email_report=u.get("email_report", False),
+                    email_admin=u.get("email_admin", False)
+                ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[save_users] Errore: {e}")
+    finally:
+        db.close()
+def get_template_path(filename):
+    """Restituisce il percorso assoluto del template in AppData."""
+    return os.path.join(TEMPLATES_DIR, filename)
+def check_templates():
+    """Verifica che i template esistano, altrimenti li ricopia dalla cartella app."""
+    for template in ["modello cashflow.xlsx", "template_analisi.xlsx"]:
+        dest = os.path.join(TEMPLATES_DIR, template)
+        if not os.path.exists(dest):
+            src = resource_path(os.path.join("data", template))
+            if os.path.exists(src):
+                shutil.copy(src, dest)
+
+# Richiama la funzione all'avvio
+check_templates()    
+
+def get_all_quotes(user_role=None, full_name=None):
+    """Restituisce l'elenco preventivi da SQLite, filtrato per venditore se richiesto."""
+    db = _DBSession()
+    try:
+        q = db.query(
+            _Preventivo.numero,
+            _Preventivo.data,
+            _Preventivo.cliente,
+            _Preventivo.totale,
+            _Preventivo.stato
+        )
+        if user_role == 'venditore' and full_name:
+            q = q.filter(_Preventivo.venditore == full_name)
+        results = q.order_by(_Preventivo.numero.desc()).all()
+        return [
+            {"numero": r.numero, "data": r.data, "cliente": r.cliente,
+             "totale": r.totale, "stato": r.stato or "Bozza"}
+            for r in results
+        ]
+    except Exception as e:
+        print(f"[get_all_quotes] Errore SQLite: {e}")
+        return []
+    finally:
+        db.close()
+def get_new_quote_id(venditore_sigla):
+    if not venditore_sigla: venditore_sigla = "XX"
+    now = datetime.datetime.now()
+    mesi_map = {1: "GN", 2: "FB", 3: "MR", 4: "AP", 5: "MG", 6: "GU", 7: "LU", 8: "AG", 9: "ST", 10: "OT", 11: "NV", 12: "DC"}
+    prefix = "PREV-"; giorno = now.strftime('%d'); mese = mesi_map[now.month]; anno = now.strftime('%y'); ora = now.strftime('%I'); ampm = 'A' if now.strftime('%p') == 'AM' else 'P'; minuti = now.strftime('%M')
+    return f"{prefix}{venditore_sigla.upper()}-{giorno}{mese}{anno}{ora}{ampm}{minuti}"
+def load_quote(quote_id):
+    """Carica un preventivo dal DB SQLite e lo restituisce come dict."""
+    db = _DBSession()
+    try:
+        prev = db.query(_Preventivo).filter_by(numero=quote_id).first()
+        if not prev:
+            return None
+        data = prev.to_dict()
+        # Compatibilita edile: ricostruisce righe_edili da sezioni se vuote
+        if data.get("tipo_preventivo") == "edile" and data.get("sezioni_edili"):
+            if not data.get("righe_edili"):
+                flat = []
+                for s in data.get("sezioni_edili", []):
+                    for r in s.get("righe", []):
+                        flat.append(r)
+                data["righe_edili"] = flat
+        return data
+    except Exception as e:
+        print(f"[load_quote] Errore caricamento '{quote_id}': {e}")
+        return None
+    finally:
+        db.close()
+
+
+def save_quote(quote_id, data):
+    """Salva un preventivo nel DB SQLite (upsert completo)."""
+    data = aggiorna_stato_pagamento_globale(data)
+    aggiorna_stato_consegna_globale(data)
+    aggiorna_stato_avanzamento(data)
+    # Ricostruisce righe_edili se necessario
+    if data and data.get("tipo_preventivo") == "edile" and data.get("sezioni_edili"):
+        flat = []
+        for s in data.get("sezioni_edili", []):
+            for r in s.get("righe", []):
+                flat.append(r)
+        data["righe_edili"] = flat
+
+    db = _DBSession()
+    try:
+        prev = db.query(_Preventivo).filter_by(numero=quote_id).first()
+        if not prev:
+            prev = _Preventivo(numero=quote_id)
+            db.add(prev)
+
+        # Aggiorna tutti i campi scalari
+        raw_no_iva = data.get("no_iva", False)
+        prev.data = data.get("data", "")
+        prev.venditore = data.get("venditore", "")
+        prev.cliente = data.get("cliente", "")
+        prev.regione = str(data.get("regione", ""))
+        prev.regione_nome = data.get("regione_nome", "")
+        prev.indirizzo = data.get("indirizzo", "")
+        prev.email = data.get("email", "")
+        prev.telefono = data.get("telefono", "")
+        prev.referente = data.get("referente", "")
+        prev.fee_pct = str(data.get("fee_pct", ""))
+        prev.totale = str(data.get("totale", ""))
+        prev.comune = data.get("comune", "")
+        prev.provincia = data.get("provincia", "")
+        prev.rag_sociale = data.get("rag_sociale", "")
+        prev.p_iva = data.get("p_iva", "")
+        prev.cap = data.get("cap", "")
+        prev.stato = data.get("stato", "Bozza")
+        prev.is_locked = bool(data.get("is_locked", False))
+        prev.id_cliente = data.get("id_cliente")
+        # V3
+        prev.data_conferma = data.get("data_conferma")
+        prev.no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
+        prev.tipo_preventivo = data.get("tipo_preventivo", "standard")
+        prev.codice_univoco = data.get("codice_univoco", "")
+        prev.iva_pct = data.get("iva_pct", "")
+        prev.righe_edili = data.get("righe_edili", [])
+        prev.sezioni_edili = data.get("sezioni_edili", [])
+        # Calcolati
+        prev.tot_imponibile_negozio = str(data.get("tot_imponibile_negozio", ""))
+        prev.tot_imponibile_cliente = str(data.get("tot_imponibile_cliente", ""))
+        prev.tot_iva = str(data.get("tot_iva", ""))
+        prev.ricarico_medio_pct = str(data.get("ricarico_medio_pct", ""))
+        prev.stato_consegna_globale = data.get("stato_consegna_globale", "")
+        prev.stato_pagamento_globale = data.get("stato_pagamento_globale", "")
+        prev.stato_fattura = data.get("stato_fattura", "")
+        prev.data_chiusura = data.get("data_chiusura", "")
+        # JSON annidati
+        prev.righe = data.get("righe", [])
+        prev.imponibili_iva = data.get("imponibili_iva", {})
+        prev.tot_iva_dettaglio = data.get("tot_iva_dettaglio", {})
+        prev.storico_pdf = data.get("storico_pdf", [])
+        prev.pagamenti = data.get("pagamenti", [])
+        prev.fatture_allegate = data.get("fatture_allegate", [])
+        prev.extra = _campi_extra(data, _CAMPI_PREVENTIVO)
+        db.flush()
+
+        # --- Sync Ordini ---
+        ordini_db_ids = {o.ordine_id for o in prev.ordini_rel}
+        ordini_json = data.get("ordini_fornitore", [])
+        ordini_json_ids = set()
+        for ordine in ordini_json:
+            oid = ordine.get("ordine_id")
+            if not oid:
+                import uuid as _uuid
+                oid = _uuid.uuid4().hex[:8].upper()
+                ordine["ordine_id"] = oid
+            ordini_json_ids.add(oid)
+            existing_o = db.query(_Ordine).filter_by(ordine_id=oid).first()
+            if existing_o:
+                existing_o.data_ordine = ordine.get("data_ordine", "")
+                existing_o.azienda = ordine.get("azienda", "")
+                existing_o.numero_conferma = ordine.get("numero_conferma", "")
+                existing_o.importo = str(ordine.get("importo", ""))
+                existing_o.importo_articoli = str(ordine.get("importo_articoli", ""))
+                existing_o.importo_trasporto = str(ordine.get("importo_trasporto", ""))
+                existing_o.iva_ordine = float(ordine.get("iva_ordine", 0) or 0)
+                existing_o.data_arrivo = ordine.get("data_arrivo", "")
+                existing_o.indici_righe = ordine.get("indici_righe", [])
+                existing_o.allegati = ordine.get("allegati", [])
+                existing_o.extra = _campi_extra(ordine, _CAMPI_ORDINE)
+            else:
+                db.add(_Ordine(
+                    ordine_id=oid, preventivo_id=quote_id,
+                    data_ordine=ordine.get("data_ordine", ""),
+                    azienda=ordine.get("azienda", ""),
+                    numero_conferma=ordine.get("numero_conferma", ""),
+                    importo=str(ordine.get("importo", "")),
+                    importo_articoli=str(ordine.get("importo_articoli", "")),
+                    importo_trasporto=str(ordine.get("importo_trasporto", "")),
+                    iva_ordine=float(ordine.get("iva_ordine", 0) or 0),
+                    data_arrivo=ordine.get("data_arrivo", ""),
+                    indici_righe=ordine.get("indici_righe", []),
+                    allegati=ordine.get("allegati", []),
+                    extra=_campi_extra(ordine, _CAMPI_ORDINE)
+                ))
+        # Rimuovi ordini cancellati
+        for oid in ordini_db_ids - ordini_json_ids:
+            db.query(_Ordine).filter_by(ordine_id=oid).delete()
+
+        # --- Sync Bolle ---
+        bolle_db = {b.id: b for b in prev.bolle_rel}
+        bolle_json = data.get("bolle", [])
+        bolle_json_ids = set()
+        for bolla in bolle_json:
+            bid = bolla.get("id")
+            if not bid:
+                continue
+            bolle_json_ids.add(bid)
+            if bid in bolle_db:
+                b = bolle_db[bid]
+                b.data = bolla.get("data", "")
+                b.indirizzo_cantiere_id = bolla.get("indirizzo_cantiere_id", "")
+                b.indici_righe = bolla.get("indici_righe", [])
+                b.extra = _campi_extra(bolla, _CAMPI_BOLLA)
+            else:
+                db.add(_Bolla(
+                    id=bid, preventivo_id=quote_id,
+                    data=bolla.get("data", ""),
+                    indirizzo_cantiere_id=bolla.get("indirizzo_cantiere_id", ""),
+                    indici_righe=bolla.get("indici_righe", []),
+                    extra=_campi_extra(bolla, _CAMPI_BOLLA)
+                ))
+        # Rimuovi bolle cancellate
+        for bid, b in bolle_db.items():
+            if bid not in bolle_json_ids:
+                db.delete(b)
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[save_quote] Errore salvataggio '{quote_id}': {e}")
+        raise
+    finally:
+        db.close()
+    aggiorna_catalogo_in_background(data)
+
+
+
+def aggiorna_stato_consegna_globale(preventivo_data):
+    """
+    Ricalcola lo stato di consegna globale.
+    """
+    stato_preventivo = preventivo_data.get("stato")
+    is_edile = preventivo_data.get("tipo_preventivo") == "edile"
+    
+    if is_edile:
+        righe = get_flat_righe_edili(preventivo_data)
+        if not righe:
+            preventivo_data["stato_consegna_globale"] = "N/D"
+            return
+            
+        # Consideriamo "Da Consegnare" se lo stato è nullo
+        stati = {r.get("stato_consegna") or "Da Consegnare" for r in righe}
+        
+        if all(s == "Consegnato" for s in stati):
+            preventivo_data["stato_consegna_globale"] = "Completato"
+        elif any(s in ["Consegnato", "In Bolla", "Pronto per Consegna"] for s in stati):
+            preventivo_data["stato_consegna_globale"] = "Parziale"
+        else:
+            preventivo_data["stato_consegna_globale"] = "Da Consegnare"
+        return
+
+    # 1. Trova tutti gli indici confermati (Per preventivi STANDARD)
+    ordini_confermati = [
+        o for o in _ordini_con_magazzino(preventivo_data)
+        if o.get("numero_conferma", "").strip()
+    ]
+    
+    indici_confermati = set()
+    for o in ordini_confermati:
+        indici_confermati.update(o.get("indici_righe", []))
+
+    # --- INIZIO BLOCCO AGGIUNTO: Controllo stato ordini ---
+    
+    # 2a. Trova tutti gli indici delle righe valide (con un articolo)
+    righe_preventivo = preventivo_data.get("righe", [])
+    indici_righe_valide = {
+        i for i, r in enumerate(righe_preventivo) 
+        if r.get("articolo", "").strip() and r.get("unt", "").strip().upper() != "S"
+    }
+
+    # 2b. Trova tutti gli indici già ordinati e quelli in attesa di conferma
+    indici_gia_ordinati = set()
+    articoli_in_attesa_conferma = 0
+    ordini_fornitore = _ordini_con_magazzino(preventivo_data)
+    
+    for ordine in ordini_fornitore:
+        indici_ordine = set(ordine.get("indici_righe", []))
+        indici_gia_ordinati.update(indici_ordine)
+        # Se l'ordine NON è confermato, conta i suoi articoli
+        if not ordine.get("numero_conferma", "").strip():
+            articoli_in_attesa_conferma += len(indici_ordine)
+
+    # 2c. Calcola articoli ancora da ordinare
+    articoli_da_ordinare_count = len(indici_righe_valide - indici_gia_ordinati)
+
+    # 2d. Definisce lo stato "Tutto Ordinato e Confermato"
+    #     Questo corrisponde allo stato "Ordinato" che desideri.
+    is_tutto_ordinato_e_confermato = (articoli_da_ordinare_count == 0) and (articoli_in_attesa_conferma == 0)
+    # --- FINE BLOCCO AGGIUNTO ---
+
+
+    # 3. Se lo stato non è attivo OPPURE non ci sono proprio articoli confermati,
+    # lo stato di consegna è Non Applicabile. (Logica originale invariata)
+    if stato_preventivo in ["Bozza", "Inviato", "Annullato"] or not indici_confermati:
+        preventivo_data["stato_consegna_globale"] = "N/D"
+        return
+        
+    # 4. Controlla lo stato di consegna SOLO degli indici confermati (Logica originale invariata)
+    stati_righe_confermate = set()
+    
+    for index in indici_confermati:
+        if 0 <= index < len(righe_preventivo):
+            riga = righe_preventivo[index]
+            # Usa "Da Consegnare" come default se lo stato è vuoto o None
+            stati_righe_confermate.add(riga.get("stato_consegna") or "Da Consegnare")
+
+    # 5. Determina lo stato globale in base agli stati raccolti
+    
+    # Rimuovi None o stringhe vuote se sono finite nel set per errore
+    stati_puliti = {s for s in stati_righe_confermate if s}
+
+    # --- INIZIO BLOCCO MODIFICATO ---
+    if all(s == "Consegnato" for s in stati_puliti):
+        
+        # Tutti gli articoli CONFERMATI sono stati consegnati.
+        # ORA controlliamo se l'intero stato ordine è "Ordinato".
+        if is_tutto_ordinato_e_confermato:
+            # Sì, tutti gli articoli del preventivo sono ordinati, confermati E consegnati.
+            preventivo_data["stato_consegna_globale"] = "Completato"
+        else:
+            # No, abbiamo consegnato solo gli articoli confermati, 
+            # ma altri sono in attesa (da ordinare o da confermare).
+            # Lo stato di consegna è quindi "Parziale".
+            preventivo_data["stato_consegna_globale"] = "Parziale"
+
+    elif all(s == "Da Consegnare" for s in stati_puliti):
+        # Se TUTTI gli articoli confermati sono "Da Consegnare"
+        preventivo_data["stato_consegna_globale"] = "Da Consegnare"
+    else:
+        # Se c'è un mix (alcuni consegnati, altri in bolla, altri da consegnare)
+        preventivo_data["stato_consegna_globale"] = "Parziale"
+    # --- FINE BLOCCO MODIFICATO ---
+def aggiorna_stato_pagamento_globale(p):
+    """
+    Ricalcola il saldo correggendo:
+    1. Formati numerici misti (virgola/punto).
+    2. Gestione Esente IVA (usa l'imponibile come target).
+    3. Supporto specifico per Preventivi Edili.
+    4. [V3] Retrocompatibilita' preventivi V2 senza PAY ID.
+    """
+    def safe_money(val):
+        """ Helper interno robusto per leggere formati moneta con simboli """
+        if not val: return 0.0
+        # Rimuove simboli valuta, percentuali e spazi extra
+        s = re.sub(r"[€%\s]", "", str(val))
+        if ',' in s:
+            # Se c'è la virgola, rimuove il punto delle migliaia e usa la virgola come decimale
+            s = s.replace('.', '').replace(',', '.')
+        try:
+            return float(s)
+        except ValueError:
+            return 0.0
+
+    # --- GUARDIA RETROCOMPATIBILITA' V2 ---
+    # Caso 1: Preventivo "Chiuso" = saldato per definizione.
+    # Il workflow chiude il preventivo solo quando tutto e' a posto.
+    if p.get("stato") == "Chiuso":
+        def _to_ita(f):
+            return f"{f:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        totale_pagato_chiuso = sum(
+            safe_money(pay.get("importo", "0"))
+            for pay in p.get("pagamenti", [])
+            if not pay.get("is_scheduled")
+        )
+        p["stato_pagamento_globale"] = "Saldato"
+        p["totale_pagato"] = _to_ita(totale_pagato_chiuso)
+        p["totale_da_saldare"] = "0,00"
+        return p
+
+    # Caso 2: Gia' "Saldato" senza pagamenti registrati = vecchio preventivo V2
+    # saldato con sistema precedente all'introduzione dei PAY ID.
+    if (p.get("stato_pagamento_globale") == "Saldato"
+            and not p.get("pagamenti")
+            and p.get("stato") not in ("Bozza", "Inviato", "Annullato")):
+        def _to_ita(f):
+            return f"{f:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        totale_dovuto_v2 = safe_money(p.get("totale", "0"))
+        p["totale_pagato"] = _to_ita(totale_dovuto_v2)
+        p["totale_da_saldare"] = "0,00"
+        return p
+    # --- FINE GUARDIA ---
+
+    if p.get("tipo_preventivo") == "edile":
+        # Usiamo l'appiattimento per calcolare i totali globali in modo infallibile
+        flat_righe = get_flat_righe_edili(p)
+        tot_imp = sum(safe_money(r.get("prezzo_vendita")) for r in flat_righe)
+        tot_iva = sum(safe_money(r.get("prezzo_vendita")) * (safe_money(r.get("iva_pct")) / 100) for r in flat_righe)
+        
+        p["tot_imponibile_cliente"] = f"{tot_imp:.2f}".replace(".", ",")
+        p["tot_iva"] = f"{tot_iva:.2f}".replace(".", ",")
+        p["totale"] = f"{(tot_imp + tot_iva):.2f}".replace(".", ",")
+        
+        # Dettaglio per aliquote
+        imp_iva_map = {}
+        for r in flat_righe:
+            k = str(int(safe_money(r.get("iva_pct"))))
+            imp_iva_map[k] = imp_iva_map.get(k, 0.0) + safe_money(r.get("prezzo_vendita"))
+        p["imponibili_iva"] = {k: f"{v:.2f}".replace(".", ",") for k, v in imp_iva_map.items()}
+
+    # 1. Determina il "Totale Dovuto" (Target)
+    if p.get("no_iva") is True:
+        # SE ESENTE IVA: Il cliente deve pagare solo l'imponibile!
+        # Usiamo tot_imponibile_cliente se esiste, altrimenti fallback su totale
+        totale_dovuto = safe_money(p.get("tot_imponibile_cliente", p.get("totale", "0")))
+    else:
+        # CASO NORMALE: Il cliente paga il totale (inclusa IVA)
+        totale_dovuto = safe_money(p.get("totale", "0"))
+    
+    # 2. Somma i pagamenti effettuati (escludendo quelli ancora programmati/non confermati)
+    totale_pagato = 0.0
+    for pay in p.get("pagamenti", []):
+        if not pay.get("is_scheduled"):
+            totale_pagato += safe_money(pay.get("importo", "0"))
+        
+    # 3. Calcola il rimanente
+    da_saldare = totale_dovuto - totale_pagato
+    
+    # Tolleranza di 0.05€ per arrotondamenti
+    if da_saldare <= 0.05:
+        da_saldare = 0.0
+        nuovo_stato = "Saldato"
+    else:
+        nuovo_stato = "Da Saldare"
+        
+    # 4. Scrive i valori corretti nel JSON
+    # Formattiamo alla 'italiana' per la visualizzazione
+    def to_ita_str(f_val):
+        return f"{f_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    p["totale_pagato"] = to_ita_str(totale_pagato)
+    p["totale_da_saldare"] = to_ita_str(da_saldare)
+    p["stato_pagamento_globale"] = nuovo_stato
+    
+    return p
+
+def aggiorna_stato_avanzamento(preventivo_data):
+    """
+    Aggiorna lo stato di avanzamento del preventivo ('In Lavorazione', 'Chiuso')
+    in base alla presenza di ordini, pagamenti, e allo stato di consegna/saldo.
+    """
+    stato_attuale = preventivo_data.get("stato")
+
+    # MODIFICA 1: Rimuovi "Chiuso" da questo controllo.
+    # Vogliamo che i preventivi chiusi vengano RIVALUTATI.
+    if stato_attuale in ["Bozza", "Inviato", "Annullato"]:
+        return
+
+    # --- La logica di controllo rimane invariata ---
+    is_saldato = preventivo_data.get("stato_pagamento_globale") == "Saldato"
+    # MODIFICA 2: "Completato" è la chiave per chiudere
+    is_consegnato_completamente = preventivo_data.get("stato_consegna_globale") == "Completato"
+    is_fatturato = preventivo_data.get("stato_fattura") == "Fatturato"
+    is_no_iva = preventivo_data.get("no_iva") == True
+    condizione_fattura_ok = is_fatturato or is_no_iva
+
+    # --- MODIFICA 3: Logica di Chiusura / Riapertura ---
+    
+    # CASO A: Le condizioni per la chiusura SONO soddisfatte
+    if is_saldato and is_consegnato_completamente and condizione_fattura_ok:
+        if stato_attuale != "Chiuso":
+            # Mettiamo in "Chiuso" solo se non lo era già
+            preventivo_data["stato"] = "Chiuso"
+            preventivo_data["is_locked"] = True
+            if "data_chiusura" not in preventivo_data:
+                preventivo_data["data_chiusura"] = datetime.date.today().strftime('%Y-%m-%d')
+        return # È chiuso e merita di esserlo.
+
+    # CASO B: Le condizioni per la chiusura NON sono soddisfatte
+    else:
+        # Se NON merita di essere chiuso, ma è segnato come "Chiuso",
+        # dobbiamo riaprilo e impostarlo a "In Lavorazione".
+        if stato_attuale == "Chiuso":
+            preventivo_data["stato"] = "In Lavorazione"
+            preventivo_data["is_locked"] = True # Rimane bloccato
+            preventivo_data.pop("data_chiusura", None) # Rimuovi la data di chiusura
+            return
+
+    # CASO C: Non è "Chiuso" e non merita di esserlo.
+    # Controlla se deve passare da "Confermato" a "In Lavorazione"
+    has_ordini = bool(preventivo_data.get("ordini_fornitore"))
+    has_pagamenti = bool(preventivo_data.get("pagamenti"))
+    if (has_ordini or has_pagamenti) and stato_attuale == "Confermato":
+        preventivo_data["stato"] = "In Lavorazione"
+        preventivo_data["is_locked"] = True 
+        return
+  
+
+def get_new_client_id(): return f"CLT-{uuid.uuid4().hex[:6].upper()}"
+def load_client(client_id):
+    """Carica un cliente dal DB SQLite."""
+    db = _DBSession()
+    try:
+        c = db.query(_Cliente).filter_by(id_cliente=client_id).first()
+        return c.to_dict() if c else None
+    except Exception as e:
+        print(f"[load_client] Errore: {e}")
+        return None
+    finally:
+        db.close()
+
+def save_client(client_id, data):
+    """Salva un cliente nel DB SQLite (upsert)."""
+    db = _DBSession()
+    try:
+        existing = db.query(_Cliente).filter_by(id_cliente=client_id).first()
+        if existing:
+            existing.cliente = data.get("cliente", "")
+            existing.telefono = data.get("telefono", "")
+            existing.email = data.get("email", "")
+            existing.regione_nome = data.get("regione_nome", "")
+            existing.provincia = data.get("provincia", "")
+            existing.comune = data.get("comune", "")
+            existing.cap = data.get("cap", "")
+            existing.indirizzo = data.get("indirizzo", "")
+            existing.p_iva = data.get("p_iva", "")
+            existing.rag_sociale = data.get("rag_sociale", "")
+            existing.has_ci = bool(data.get("has_ci", False))
+            existing.has_privacy = bool(data.get("has_privacy", False))
+            existing.has_contratto = bool(data.get("has_contratto", False))
+            existing.documenti_anagrafici = data.get("documenti_anagrafici", [])
+            existing.extra = _campi_extra(data, _CAMPI_CLIENTE)
+        else:
+            db.add(_Cliente(
+                id_cliente=client_id,
+                cliente=data.get("cliente", ""),
+                telefono=data.get("telefono", ""),
+                email=data.get("email", ""),
+                regione_nome=data.get("regione_nome", ""),
+                provincia=data.get("provincia", ""),
+                comune=data.get("comune", ""),
+                cap=data.get("cap", ""),
+                indirizzo=data.get("indirizzo", ""),
+                p_iva=data.get("p_iva", ""),
+                rag_sociale=data.get("rag_sociale", ""),
+                has_ci=bool(data.get("has_ci", False)),
+                has_privacy=bool(data.get("has_privacy", False)),
+                has_contratto=bool(data.get("has_contratto", False)),
+                documenti_anagrafici=data.get("documenti_anagrafici", []),
+                extra=_campi_extra(data, _CAMPI_CLIENTE)
+            ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[save_client] Errore: {e}")
+    finally:
+        db.close()
+
+def find_clients_by_term(search_term):
+    """Ricerca clienti per nome o ragione sociale nel DB SQLite."""
+    if not search_term:
+        return []
+    db = _DBSession()
+    try:
+        term = f"%{search_term.lower()}%"
+        from sqlalchemy import func
+        results = db.query(_Cliente).filter(
+            (func.lower(_Cliente.cliente).like(term)) |
+            (func.lower(_Cliente.rag_sociale).like(term))
+        ).all()
+        return [c.to_dict() for c in results]
+    except Exception as e:
+        print(f"[find_clients_by_term] Errore: {e}")
+        return []
+    finally:
+        db.close()
+EMPTY_STATE = {"venditore": "", "numero": "", "data": "", "cliente": "", "regione": "", "regione_nome": "","indirizzo": "", "email": "", "telefono": "", "referente": "", "fee_pct": "", "iva_pct": "22 %","no_iva": False,"totale": "","riepilogo": "", "comune": "", "provincia": "", "rag_sociale": "", "p_iva": "", "cap": "", "righe": [], "stato": "Bozza", "is_locked": False,
+  "ordini_fornitore": []}
+def money_ui(value):
+    if value is None or isinstance(value, Undefined) or str(value).strip() == "": return ""
+    try: num = float(str(value).replace(",", ".")); return f"{num:.2f}".replace(".", ",") + " €"
+    except (ValueError, TypeError): return ""
+app.jinja_env.globals["money_ui"] = money_ui
+app.jinja_env.filters["money_ui"] = money_ui
+
+def today_date_filter(value):
+    return datetime.date.today().strftime('%Y-%m-%d')
+
+# Registra il nuovo filtro nell'ambiente Jinja
+app.jinja_env.filters['today_date'] = today_date_filter
+
+def data_it_filter(value):
+    """Converte 'YYYY-MM-DD' in 'DD/MM/YYYY' (lascia invariato tutto il resto)."""
+    try:
+        return datetime.datetime.strptime(str(value)[:10], '%Y-%m-%d').strftime('%d/%m/%Y')
+    except (ValueError, TypeError):
+        return value or ""
+app.jinja_env.filters['data_it'] = data_it_filter
+app.jinja_env.globals['enumerate'] = enumerate
+
+def _str_to_date(date_str):
+    """Converte una stringa 'YYYY-MM-DD' in oggetto date. Ritorna None se fallisce."""
+    try:
+        if not date_str: return None
+        return datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+### LOGIN, LOGOUT E SICUREZZA ###
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        users = load_users()
+        user_found = next((u for u in users if u["username"] == username), None)
+        if user_found and check_password_hash(user_found["password_hash"], password):
+            next_url = session.get("next_url", "")
+            # Cancella la vecchia sessione, inclusi i nostri "segnali"
+            session.clear() 
+            session["user_id"] = user_found["username"]
+            session["user_name"] = user_found["full_name"]
+            session["user_role"] = user_found["role"]
+            session["user_sigla"] = user_found.get("sigla", "XX")
+            session["force_password_reset"] = user_found.get("force_password_reset", False)
+            lega_utente_al_pc(request.remote_addr, user_found["username"], user_found["full_name"])
+
+            flash(f"Benvenuto, {user_found['full_name']}!", "success")
+            
+            # Torna alla pagina richiesta prima del login (solo percorsi interni), altrimenti dashboard
+            if next_url.startswith("/") and not next_url.startswith("//") and not session["force_password_reset"]:
+                return redirect(next_url)
+            return redirect(url_for("dashboard"))
+        else:
+            flash("Credenziali non valide. Riprova.", "error")
+# --------------------------------------------------
+
+    return render_template("login.html", app_version=APP_VERSION)
+
+@app.route("/logout", methods=['GET', 'POST'])
+def logout():
+    if "user_id" in session:
+        stacca_utente_dal_pc(request.remote_addr, session["user_id"])
+    session.clear()
+    return redirect(url_for("login"))
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            if request.method == "GET":
+                session["next_url"] = request.full_path
+            return redirect(url_for("login"))
+        # NUOVO: Controlla se l'utente deve cambiare password
+        if session.get("force_password_reset") and request.endpoint != 'cambia_password':
+            flash("Per favore, imposta una nuova password.", "warning")
+            return redirect(url_for("cambia_password"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def role_required(*roles):
+    """Decorator per limitare l'accesso a ruoli specifici."""
+    def wrapper(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if session.get("user_role") not in roles:
+                flash("Accesso non autorizzato.", "error")
+                return redirect(url_for("dashboard"))
+            return f(*args, **kwargs)
+        return decorated_function
+    return wrapper
+@app.route('/ack_changelog', methods=['POST'])
+def ack_changelog():
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'error': 'Non loggato'}), 401
+    
+    installed_ver = get_installed_version()
+    users = load_users()
+    updated = False
+    
+    for u in users:
+        if u['username'] == session['user_id']:
+            u['last_seen_version'] = installed_ver
+            updated = True
+            break
+    
+    if updated:
+        save_users(users)
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': 'Utente non trovato'})
+
+# --- File: gestionale.py (Intorno alla riga 515) ---
+@app.route("/changelog")
+@login_required
+def changelog():
+    """Mostra la pagina con tutte le novità, senza filtri di lettura."""
+    # Ordiniamo tutto il changelog per versione decrescente
+    updates_to_show = sorted(CHANGELOG_DATA, key=lambda x: parse_version(x['version']), reverse=True)
+    # le novita' scritte prima della build portano il numero previsto: se la build ne ha dato un altro vale quello vero
+    if updates_to_show and parse_version(updates_to_show[0]['version']) > parse_version(APP_VERSION):
+        updates_to_show[0] = dict(updates_to_show[0], version=APP_VERSION)
+        
+    return render_template("changelog.html", title="Novità", changelog_updates=updates_to_show)
+# --------------------------------------------------
+
+@app.route("/mark-changelog-as-seen")
+@login_required
+def mark_changelog_as_seen():
+    """Aggiorna la versione vista dall'utente e lo reindirizza alla dashboard."""
+    users = load_users()
+    
+    # Trova la versione più alta presente nel changelog.json
+    if CHANGELOG_DATA:
+        latest_json_version = max([entry['version'] for entry in CHANGELOG_DATA], key=parse_version)
+    else:
+        latest_json_version = APP_VERSION
+
+    user_updated = False
+    for user in users:
+        if user["username"] == session["user_id"]:
+            # Aggiorna alla versione effettiva letta nel changelog
+            user["last_seen_version"] = latest_json_version
+            user_updated = True
+            break
+    
+    if user_updated:
+        save_users(users)
+        flash("Novità contrassegnate come lette.", "success")
+    return redirect(url_for("dashboard"))
+
+@app.before_request
+def make_session_permanent_and_timed():
+    session.permanent = True
+    # La sessione scadrà dopo 1 ore di completa inattività
+    app.permanent_session_lifetime = timedelta(hours=1)
+    # Questa riga resetta il timer ad ogni azione dell'utente
+    session.modified = True
+
+# --- Utenti collegati (mostrati nel widget del server vicino all'orologio) ---
+_UTENTI_ATTIVITA = {}   # user_id -> {"nome", "ip", "ts"}
+_UTENTI_ATTIVITA_LOCK = threading.Lock()
+
+@app.before_request
+def traccia_utente_collegato():
+    if request.endpoint in (None, "static", "health", "manifest_app", "icona_app") or "user_id" not in session:
+        return
+    with _UTENTI_ATTIVITA_LOCK:
+        _UTENTI_ATTIVITA[session["user_id"]] = {
+            "nome": session.get("user_name") or session["user_id"],
+            "ip": request.remote_addr,
+            "ts": time.time(),
+        }
+    # Le richieste automatiche delle pagine aperte (GET /api/...: badge, chat, notifiche) non contano:
+    # solo un'azione vera "lega" l'utente al PC, così una scheda dimenticata aperta non lo ricollega.
+    if request.method != "GET" or not request.path.startswith("/api/"):
+        lega_utente_al_pc(request.remote_addr, session["user_id"], session.get("user_name"))
+
+# --- Chi sta usando il gestionale su ciascun PC ---
+# Il programma "Gestionale Notifiche" mostra chat e notifiche di questo utente, non di chi lo ha installato:
+# se sullo stesso PC lavorano più persone, i messaggi seguono chi ha fatto l'ultima azione nel gestionale.
+_UTENTE_DEL_PC = {}               # chiave PC -> {"user", "nome", "ts"}
+UTENTE_DEL_PC_MAX_ORE = 12        # dopo una giornata senza usare il gestionale il PC torna "libero"
+
+def _chiave_pc(ip):
+    """Il PC server arriva come 127.0.0.1 o con l'IP di rete: è sempre lo stesso PC."""
+    return "server" if ip in ("127.0.0.1", "::1", LAN_IP) else (ip or "")
+
+def lega_utente_al_pc(ip, username, nome=None):
+    with _UTENTI_ATTIVITA_LOCK:
+        _UTENTE_DEL_PC[_chiave_pc(ip)] = {"user": username, "nome": nome or username, "ts": time.time()}
+
+def utente_del_pc(ip):
+    """Username di chi sta usando il gestionale dal PC con questo IP, oppure None."""
+    with _UTENTI_ATTIVITA_LOCK:
+        info = _UTENTE_DEL_PC.get(_chiave_pc(ip))
+    if not info or time.time() - info["ts"] > UTENTE_DEL_PC_MAX_ORE * 3600:
+        return None
+    return info["user"]
+
+def stacca_utente_dal_pc(ip, username=None):
+    """Il PC non è più di nessuno (uscita dal gestionale, PC bloccato o inattivo)."""
+    with _UTENTI_ATTIVITA_LOCK:
+        info = _UTENTE_DEL_PC.get(_chiave_pc(ip))
+        if info and (username is None or info["user"] == username):
+            del _UTENTE_DEL_PC[_chiave_pc(ip)]
+
+def get_utenti_collegati(minuti=10):
+    """Utenti che hanno usato il gestionale negli ultimi `minuti` minuti (i più recenti prima)."""
+    limite = time.time() - minuti * 60
+    with _UTENTI_ATTIVITA_LOCK:
+        attivi = [dict(v, user_id=k) for k, v in _UTENTI_ATTIVITA.items() if v["ts"] >= limite]
+    return sorted(attivi, key=lambda u: u["ts"], reverse=True)
+
+# --- Notifiche attività nel widget del server ---
+# endpoint -> testo (formattato con: chi, q = numero preventivo, cliente, importo)
+_NOTIFICHE_ATTIVITA = {
+    "nuovo_preventivo":        "📝 {chi} ha creato un nuovo preventivo",
+    "nuovo_preventivo_edile":  "📝 {chi} ha creato un nuovo preventivo edile",
+    "clona_preventivo":        "📝 {chi} ha clonato il preventivo {q}",
+    "conferma_preventivo":     "🎉 {chi} ha confermato il preventivo {q}{cliente}",
+    "annulla_preventivo":      "🚫 {chi} ha annullato il preventivo {q}{cliente}",
+    "sblocca_preventivo":      "🔓 {chi} ha riportato in Bozza il preventivo {q}{cliente}",
+    "aggiungi_pagamento":      "💶 {chi} ha registrato un pagamento{importo} sul preventivo {q}{cliente}",
+    "conferma_incasso":        "💶 {chi} ha confermato un incasso sul preventivo {q}{cliente}",
+    "rettifica_pagamento":     "💶 {chi} ha rettificato un pagamento sul preventivo {q}{cliente}",
+    "crea_bolla":              "🚚 {chi} ha creato una bolla per il preventivo {q}{cliente}",
+    "marca_pronto":            "📦 {chi} ha segnato merce pronta per la consegna ({q}{cliente})",
+    "marca_consegnato":        "✅ {chi} ha segnato merce consegnata ({q}{cliente})",
+    "salva_ordine":            "🛒 {chi} ha creato un ordine fornitore per il preventivo {q}{cliente}",
+    "aggiungi_a_ordine":       "🛒 {chi} ha aggiunto articoli a un ordine fornitore ({q}{cliente})",
+    "allega_fattura":          "🧾 {chi} ha allegato una fattura al preventivo {q}{cliente}",
+    "crea_cliente":            "👤 {chi} ha creato un nuovo cliente",
+}
+
+def _richiesta_dal_pc_server():
+    return request.remote_addr in ("127.0.0.1", "::1", LAN_IP)
+
+@app.after_request
+def pagine_sempre_aggiornate(response):
+    """Le pagine del gestionale non si tengono in memoria: con "indietro" il browser le richiede
+    e mostra i dati di adesso (stati, pagamenti, task...). Immagini, PDF e file statici restano in cache."""
+    if response.mimetype == "text/html" and "Cache-Control" not in response.headers:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
+@app.after_request
+def notifica_attivita_nel_widget(response):
+    """Avvisa con una notifica di Windows (sul PC del server) quando un collega fa un'azione importante."""
+    try:
+        testo = _NOTIFICHE_ATTIVITA.get(request.endpoint)
+        if not testo or response.status_code >= 400:
+            return response
+        if request.method != "POST" and request.endpoint not in ("nuovo_preventivo", "nuovo_preventivo_edile", "clona_preventivo"):
+            return response
+        # Azione rifiutata? (risposta JSON con errore oppure messaggio flash di errore)
+        if response.is_json:
+            dati = response.get_json(silent=True) or {}
+            if dati.get("success") is False or dati.get("error"):
+                return response
+        if any(cat == "error" for cat, _ in session.get("_flashes", [])):
+            return response
+        q = (request.view_args or {}).get("quote_id", "")
+        cliente, link = "", "/"
+        if q:
+            db = _DBSession()
+            try:
+                prev = db.query(_Preventivo).filter_by(numero=q).first()
+                cliente = f" - {prev.cliente}" if prev and prev.cliente else ""
+                edile = bool(prev and prev.tipo_preventivo == "edile")
+            finally:
+                db.close()
+            ep = request.endpoint
+            if ep in ("aggiungi_pagamento", "conferma_incasso", "rettifica_pagamento"):
+                link = url_for("gestione_pagamenti", quote_id=q)
+            elif ep in ("crea_bolla", "marca_pronto", "marca_consegnato"):
+                link = url_for("gestione_consegna", quote_id=q)
+            elif ep in ("salva_ordine", "aggiungi_a_ordine"):
+                link = url_for("conferma_ordine", quote_id=q)
+            elif ep == "allega_fattura":
+                link = url_for("editor_fattura", quote_id=q)
+            else:
+                link = url_for("editor_preventivo_edile" if edile else "editor_preventivo", quote_id=q)
+        importo = request.form.get("importo", "").strip() if request.endpoint == "aggiungi_pagamento" else ""
+        annuncia(testo.format(chi=_chi(), q=q, cliente=cliente, importo=f" di {importo} €" if importo else ""), link=link)
+    except Exception as e:
+        print(f"[tray] Errore notifica attività: {e}")
+    return response
+
+# --- Registro attivita' per utente (SQLite): diventa la bozza del report di Ceerlo e, se il report non arriva, il report ---
+# endpoint -> (tipo, voce del report). {rif} e' il preventivo o il cliente nella forma #CODICE[nome] (link nel gestionale)
+_REGISTRO_ATTIVITA = {
+    "nuovo_preventivo":        ("preventivo_nuovo", "Creato il preventivo {rif}"),
+    "nuovo_preventivo_edile":  ("preventivo_nuovo", "Creato il preventivo edile {rif}"),
+    "clona_preventivo":        ("preventivo_nuovo", "Creato il preventivo {rif} (clonato da {q})"),
+    "salva_righe":             ("preventivo_modificato", "Modificato il preventivo {rif}"),
+    "salva_righe_edili":       ("preventivo_modificato", "Modificato il preventivo edile {rif}"),
+    "invia_preventivo":        ("preventivo_inviato", "Inviato al cliente il preventivo {rif}"),
+    "conferma_preventivo":     ("preventivo_confermato", "Confermato il preventivo {rif}"),
+    "annulla_preventivo":      ("preventivo_annullato", "Annullato il preventivo {rif}"),
+    "sblocca_preventivo":      ("preventivo_modificato", "Riportato in bozza il preventivo {rif}"),
+    "aggiungi_pagamento":      ("incasso", "Registrato un pagamento{importo} sul preventivo {rif}"),
+    "conferma_incasso":        ("incasso", "Confermato un incasso sul preventivo {rif}"),
+    "rettifica_pagamento":     ("incasso", "Rettificato un pagamento sul preventivo {rif}"),
+    "crea_bolla":              ("consegna", "Creata la bolla del preventivo {rif}"),
+    "marca_pronto":            ("consegna", "Segnata la merce pronta per la consegna ({rif})"),
+    "marca_consegnato":        ("consegna", "Segnata la merce consegnata ({rif})"),
+    "salva_ordine":            ("ordine", "Creato un ordine fornitore per il preventivo {rif}"),
+    "aggiungi_a_ordine":       ("ordine", "Aggiunti articoli a un ordine fornitore ({rif})"),
+    "allega_fattura":          ("fattura", "Allegata una fattura al preventivo {rif}"),
+    "crea_cliente":            ("cliente_nuovo", "Creato il cliente {rif}"),
+    "modifica_cliente":        ("cliente_modificato", "Aggiornata l'anagrafica del cliente {rif}"),
+    "api_note_cliente":        ("cliente_modificato", "Aggiornate le note del cliente {rif}"),
+}
+# attivita' che si ripetono (salvataggi automatici): una sola voce al giorno per utente e riferimento
+_REGISTRO_UNA_AL_GIORNO = {"preventivo_modificato", "cliente_modificato"}
+
+
+def _tag_codice(codice, nome):
+    """#CODICE[nome] come lo scrive Ceerlo: nelle pagine e nelle email diventa un link."""
+    nome = re.sub(r"[\[\]\n]", " ", nome or "").strip()
+    return f"#{codice}[{nome}]" if nome else f"#{codice}"
+
+
+def scrivi_registro(utente, utente_nome, tipo, testo, riferimento="", quando=None):
+    """Aggiunge un'attivita' al registro dell'utente (non solleva mai: il registro non deve bloccare il lavoro)."""
+    quando = quando or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db = _DBSession()
+    try:
+        riga = None
+        if tipo in _REGISTRO_UNA_AL_GIORNO and riferimento:
+            riga = db.query(_RegistroAttivita).filter(
+                _RegistroAttivita.utente == utente, _RegistroAttivita.tipo == tipo,
+                _RegistroAttivita.riferimento == riferimento, _RegistroAttivita.quando >= quando[:10] + " 00:00:00").first()
+        if riga:
+            riga.quando, riga.volte, riga.testo = quando, (riga.volte or 1) + 1, testo
+        else:
+            db.add(_RegistroAttivita(utente=utente, utente_nome=utente_nome or utente, quando=quando, tipo=tipo,
+                                     riferimento=riferimento or "", testo=testo[:500], volte=1))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[registro attivita'] {e}")
+    finally:
+        db.close()
+
+
+def registro_attivita(utente, dal, al=None):
+    """Attivita' dell'utente dopo `dal` (e fino ad `al`), dalla piu' vecchia."""
+    db = _DBSession()
+    try:
+        q = db.query(_RegistroAttivita).filter(_RegistroAttivita.utente == utente, _RegistroAttivita.quando > dal)
+        if al:
+            q = q.filter(_RegistroAttivita.quando <= al)
+        return [r.to_dict() for r in q.order_by(_RegistroAttivita.quando, _RegistroAttivita.id).all()]
+    finally:
+        db.close()
+
+
+@app.after_request
+def registra_attivita_utente(response):
+    """Scrive nel registro dell'utente le azioni andate a buon fine (stessi criteri delle notifiche attivita')."""
+    try:
+        voce = _REGISTRO_ATTIVITA.get(request.endpoint)
+        if not voce or response.status_code >= 400 or "user_id" not in session:
+            return response
+        ep = request.endpoint
+        if request.method != "POST" and ep not in ("nuovo_preventivo", "nuovo_preventivo_edile", "clona_preventivo"):
+            return response
+        if response.is_json:
+            dati = response.get_json(silent=True) or {}
+            if dati.get("success") is False or dati.get("ok") is False or dati.get("error"):
+                return response
+        if any(cat == "error" for cat, _ in session.get("_flashes", [])):
+            return response
+        args = request.view_args or {}
+        q = args.get("quote_id", "")
+        tipo, testo = voce
+        if ep == "clona_preventivo":
+            codice = (response.get_json(silent=True) or {}).get("nuovo_id", "") if response.is_json else ""
+        elif ep in ("nuovo_preventivo", "nuovo_preventivo_edile"):
+            # il numero nuovo e' nell'indirizzo dell'editor a cui si viene mandati
+            m = re.search(r"/edit/([^/?#]+)", response.location or "") if response.status_code in (301, 302, 303) else None
+            if not m:
+                return response
+            codice = urllib.parse.unquote(m.group(1))
+        elif ep == "crea_cliente":
+            m = re.search(r"/nuovo/([^/?#]+)", response.location or "") if response.status_code in (301, 302, 303) else None
+            if not m:
+                return response
+            codice = urllib.parse.unquote(m.group(1))
+        else:
+            codice = q or args.get("client_id", "")
+        if not codice:
+            return response
+        nome = ""
+        db = _DBSession()
+        try:
+            if tipo.startswith("cliente"):
+                c = db.query(_Cliente).filter_by(id_cliente=codice).first()
+                nome = (c.cliente or c.rag_sociale) if c else ""
+            else:
+                prev = db.query(_Preventivo).filter_by(numero=codice).first()
+                nome = (prev.cliente or "") if prev else ""
+        finally:
+            db.close()
+        importo = request.form.get("importo", "").strip() if ep == "aggiungi_pagamento" else ""
+        scrivi_registro(session["user_id"], session.get("user_name"), tipo,
+                        testo.format(rif=_tag_codice(codice, nome), q=q, importo=f" di {importo} €" if importo else ""),
+                        riferimento=codice)
+    except Exception as e:
+        print(f"[registro attivita'] Errore: {e}")
+    return response
+
+_RETE_TAILSCALE = ipaddress.ip_network("100.64.0.0/10")  # indirizzi che Tailscale dà ai dispositivi della VPN
+
+def _ip_tailscale(ip):
+    try:
+        return ipaddress.ip_address(ip) in _RETE_TAILSCALE
+    except ValueError:
+        return False
+
+def _ip_rete_locale(ip):
+    """Rete dell'ufficio, oppure un dispositivo collegato via Tailscale (VPN privata)."""
+    ip = ip or ""
+    return ip in ("127.0.0.1", "::1") or ip.startswith(("192.168.", "10.", "172.")) or _ip_tailscale(ip)
+
+@app.route("/api/attivita")
+def api_attivita():
+    """Eventi recenti per il programma "Gestionale Notifiche" degli altri PC (solo rete locale).
+    ?dopo=<id> restituisce gli eventi successivi; senza parametro solo l'ultimo id (nessun arretrato)."""
+    if not _ip_rete_locale(request.remote_addr):
+        return jsonify({"error": "Accesso consentito solo dalla rete locale"}), 403
+    try:
+        dopo = int(request.args.get("dopo", "0"))
+    except ValueError:
+        dopo = 0
+    with _ATTIVITA_LOCK:
+        ultimo = _ATTIVITA_ULTIMO_ID
+        eventi = [e for e in _ATTIVITA_RECENTI if e["id"] > dopo] if "dopo" in request.args else []
+    # il programma notifiche viene compilato insieme al gestionale con la stessa versione:
+    # i PC che ne hanno una più vecchia lo riscaricano da /api/notifiche/programma
+    notifiche_version = APP_VERSION if _percorso_programma_notifiche() else None
+    return jsonify({"app": "Gestionale Cerlab", "version": APP_VERSION, "ultimo_id": ultimo,
+                    "eventi": eventi, "tuo_ip": request.remote_addr, "notifiche_version": notifiche_version,
+                    "utenti_collegati": len(get_utenti_collegati()),
+                    # spegnimento serale dei PC (Gestionale Notifiche) e se il riepilogo email e' gia' partito
+                    "chiusura": integrazioni_google.stato_chiusura(bool(indirizzi_email("email_report")))})
+
+def _percorso_programma_notifiche():
+    nome = "GestionaleNotifiche.exe"
+    candidati = [Path(sys.executable).parent / nome, Path(__file__).parent / "dist" / "Gestionale" / nome,
+                 Path(__file__).parent / "dist" / nome]
+    return next((c for c in candidati if c.is_file()), None)
+
+@app.route("/notifiche/scarica")
+@login_required
+def scarica_programma_notifiche():
+    """Scarica il programma che mostra le notifiche del gestionale sugli altri PC."""
+    exe = _percorso_programma_notifiche()
+    if not exe:
+        flash("Il programma notifiche non è incluso in questa installazione.", "error")
+        return redirect(request.referrer or url_for("dashboard"))
+    return send_from_directory(exe.parent, exe.name, as_attachment=True)
+
+@app.route("/api/notifiche/programma")
+def api_programma_notifiche():
+    """Aggiornamento automatico del programma notifiche sugli altri PC (solo rete locale)."""
+    if not _ip_rete_locale(request.remote_addr):
+        return jsonify({"error": "Accesso consentito solo dalla rete locale"}), 403
+    exe = _percorso_programma_notifiche()
+    if not exe:
+        return jsonify({"error": "Programma notifiche non incluso in questa installazione"}), 404
+    return send_from_directory(exe.parent, exe.name, as_attachment=True)
+
+# --- API per il programma "Gestionale Notifiche" (widget sui PC): accesso con token personale ---
+WIDGET_TOKENS_FILE = DATA_DIR / "widget_tokens.json"
+_WIDGET_TOKENS_LOCK = threading.Lock()
+
+def _widget_tokens():
+    try:
+        return json.loads(WIDGET_TOKENS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _widget_autorizzato():
+    """Il widget ha un token valido (header X-Widget-Token): il PC è stato abilitato con un accesso."""
+    token = request.headers.get("X-Widget-Token", "")
+    return bool(token) and hashlib.sha256(token.encode()).hexdigest() in _widget_tokens()
+
+def _widget_user():
+    """Utente di cui il widget mostra messaggi e notifiche: chi sta usando il gestionale da quel PC
+    (non chi ha fatto l'accesso al widget), oppure None se in questo momento nessuno lo sta usando."""
+    username = utente_del_pc(request.remote_addr)
+    return next((u for u in load_users() if u["username"] == username), None) if username else None
+
+def _widget_risposta_non_autorizzato():
+    return jsonify({"ok": False, "error": "non_autorizzato"}), 401
+
+@app.route("/api/widget/login", methods=["POST"])
+def api_widget_login():
+    """Il widget si collega una volta con utente e password e riceve un token (salvato solo su quel PC) che abilita
+    il PC; i messaggi mostrati poi seguono chi sta usando il gestionale da quel PC."""
+    if not _ip_rete_locale(request.remote_addr):
+        return jsonify({"ok": False, "error": "Accesso consentito solo dalla rete locale"}), 403
+    data = request.get_json(silent=True) or {}
+    username, password = data.get("username", ""), data.get("password", "")
+    user = next((u for u in load_users() if u["username"].lower() == username.strip().lower()), None)
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"ok": False, "error": "Utente o password non validi"}), 401
+    import secrets
+    token = secrets.token_urlsafe(32)
+    with _WIDGET_TOKENS_LOCK:
+        tokens = _widget_tokens()
+        tokens[hashlib.sha256(token.encode()).hexdigest()] = {
+            "user": user["username"], "pc": str(data.get("pc", ""))[:60], "ip": request.remote_addr,
+            "creato": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+        WIDGET_TOKENS_FILE.write_text(json.dumps(tokens, indent=1), encoding="utf-8")
+    lega_utente_al_pc(request.remote_addr, user["username"], user["full_name"])  # chi accede qui è seduto a quel PC
+    return jsonify({"ok": True, "token": token, "username": user["username"], "full_name": user["full_name"]})
+
+# --- Postazioni: ogni Gestionale Notifiche dice quando si e' acceso il PC e come si e' spento;
+# alle ORA_CONTROLLO_POSTAZIONI il gestionale scrive per ogni postazione com'e' andata la notte ---
+POSTAZIONI_FILE = DATA_DIR / "postazioni.json"          # ultimo rapporto di ogni PC
+POSTAZIONI_LOG_FILE = DATA_DIR / "postazioni_log.json"  # il controllo del mattino, ultimi 60 giorni
+ORA_CONTROLLO_POSTAZIONI = "09:30"
+ORA_INIZIO_SERA = "17:00"                               # da quest'ora del giorno prima conta come "la sera"
+_POSTAZIONI_LOCK = threading.Lock()
+
+
+def _leggi_json_file(percorso, predefinito):
+    try:
+        return json.loads(percorso.read_text(encoding="utf-8"))
+    except Exception:
+        return predefinito
+
+
+@app.route("/api/widget/postazione", methods=["POST"])
+def api_widget_postazione():
+    """Rapporto di un PC: avvio di Windows, spegnimenti dal registro eventi, cosa ha fatto la chiusura serale."""
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
+    d = request.get_json(silent=True) or {}
+    pc = str(d.get("pc") or "").strip()[:60]
+    if not pc:
+        return jsonify({"ok": False, "error": "Nome del PC mancante"}), 400
+    info = _widget_tokens().get(hashlib.sha256(request.headers.get("X-Widget-Token", "").encode()).hexdigest(), {})
+    eventi = d.get("eventi")
+    rapporto = {"pc": pc, "ip": request.remote_addr, "abilitato_da": info.get("user", ""),
+                "ricevuto": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "versione": str(d.get("versione") or "")[:20], "avvio": str(d.get("avvio") or "")[:19],
+                "eventi": [{k: str(e.get(k, ""))[:80] for k in ("quando", "tipo", "da")} | {"riavvio": bool(e.get("riavvio"))}
+                           for e in (eventi or [])[:30] if isinstance(e, dict)] if isinstance(eventi, list) else None,
+                "chiusura": {k: str(v)[:20] for k, v in (d.get("chiusura") or {}).items()},
+                "spegni_qui": bool(d.get("spegni_qui", True))}
+    with _POSTAZIONI_LOCK:
+        tutte = _leggi_json_file(POSTAZIONI_FILE, {})
+        tutte[pc] = rapporto
+        POSTAZIONI_FILE.write_text(json.dumps(tutte, indent=1, ensure_ascii=False), encoding="utf-8")
+    return jsonify({"ok": True})
+
+
+_DESCRIZIONE_SPEGNIMENTO = {
+    "gestionale": "spento dal gestionale (chiusura serale)",
+    "utente": "spento a mano",
+    "windows": "spento da Windows (aggiornamenti)",
+    "programma": "spento da un programma",
+    "improvviso": "spegnimento improvviso (corrente staccata o blocco)",
+    "spento": "spento",
+    "sospensione": "messo in sospensione",
+}
+_ACCENSIONI = ("acceso", "risveglio")
+
+
+def esito_postazione(r, adesso):
+    """Com'e' andata la notte per un PC: {"pc", "esito", "dettaglio", "allarme"}.
+    esito: gestionale | spento | acceso_notte | riacceso_notte | non_collegato."""
+    oggi = adesso.date()
+    sera = datetime.datetime.combine(oggi - datetime.timedelta(days=1),
+                                     datetime.time(*map(int, ORA_INIZIO_SERA.split(":"))))
+    fmt = lambda t: t.strftime("%H:%M") if t.date() == oggi else t.strftime("%d/%m %H:%M")
+    def leggi(t):
+        try:
+            return datetime.datetime.strptime(t[:16], "%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            return None
+    base = {"pc": r.get("pc", ""), "utente": r.get("abilitato_da", ""), "versione": r.get("versione", "")}
+    ricevuto, avvio = leggi(r.get("ricevuto")), leggi(r.get("avvio"))
+    # l'ultima accensione: con l'avvio rapido di Windows (o dopo una sospensione) il tempo dall'avvio non si azzera,
+    # quindi vale l'ultimo avvio o risveglio scritto nel registro eventi, se e' piu' recente
+    accensioni = [t for t in (leggi(e.get("quando")) for e in (r.get("eventi") or []) if e.get("tipo") in _ACCENSIONI)
+                  if t and (not ricevuto or t <= ricevuto)]
+    if accensioni and (not avvio or max(accensioni) > avvio):
+        avvio = max(accensioni)
+    # con l'avvio rapido Windows scrive sia l'avvio (27) sia il risveglio (1): e' un risveglio vero solo senza avvio vicino
+    vicino = lambda tipo: any(e.get("tipo") == tipo and leggi(e.get("quando")) and abs(leggi(e.get("quando")) - avvio)
+                              <= datetime.timedelta(minutes=2) for e in (r.get("eventi") or [])) if avvio else False
+    risveglio = vicino("risveglio") and not vicino("acceso")
+    if not ricevuto or ricevuto < datetime.datetime.combine(oggi, datetime.time(0, 0)) or not avvio:
+        quando = f" (ultimo contatto {fmt(ricevuto)})" if ricevuto else ""
+        return dict(base, esito="non_collegato", allarme=False,
+                    dettaglio=f"Non si e' ancora collegato stamattina: spento o Gestionale Notifiche non avviato{quando}.")
+    ch = r.get("chiusura") or {}
+    note = []
+    rimandato, saltato = leggi(ch.get("spegnimento_rimandato")), leggi(ch.get("spegnimento_saltato"))
+    if saltato and saltato >= sera:
+        note.append(f"alle {fmt(saltato)} hanno scelto \"Non stasera\"")
+    elif rimandato and rimandato >= sera:
+        note.append(f"spegnimento rimandato alle {fmt(rimandato)}")
+    if not r.get("spegni_qui", True):
+        note.append("spegnimento serale disattivato su questo PC")
+    extra = (" (" + "; ".join(note) + ")") if note else ""
+    if avvio < sera:
+        return dict(base, esito="acceso_notte", allarme=True,
+                    dettaglio=f"Rimasto acceso tutta la notte: acceso dal {fmt(avvio)}{extra}.")
+    # spento (o riavviato) dopo la sera: come, dal registro eventi; se manca, da quello che ricorda il programma
+    eventi = sorted((e for e in (r.get("eventi") or []) if e.get("tipo") not in _ACCENSIONI
+                     and (leggi(e.get("quando")) or sera) >= sera
+                     and (leggi(e.get("quando")) or adesso) <= avvio + datetime.timedelta(minutes=10)),
+                    key=lambda e: (e.get("quando", ""), e.get("tipo") == "sospensione"))  # a pari ora conta chi ha spento
+    spento_gest = leggi(ch.get("spegnimento_ora"))
+    primo = next((e for e in eventi if e["tipo"] != "improvviso"), None) or (eventi[0] if eventi else None)
+    if primo:
+        come = _DESCRIZIONE_SPEGNIMENTO.get(primo["tipo"], "spento")
+        if primo.get("riavvio"):
+            come = come.replace("spento", "riavviato")
+        if primo["tipo"] == "programma" and primo.get("da"):
+            come += f" ({primo['da']})"
+        quando = leggi(primo.get("quando"))
+        spegnimento = f"{come[0].upper()}{come[1:]}" + (f" alle {fmt(quando)}" if quando and primo["tipo"] != "improvviso" else "")
+        esito = "gestionale" if primo["tipo"] == "gestionale" else "spento"
+    elif spento_gest and spento_gest >= sera:
+        spegnimento, esito = f"Spento dal gestionale (chiusura serale) alle {fmt(spento_gest)}", "gestionale"
+    else:
+        spegnimento, esito = "Spento", "spento"
+    # riacceso di notte (21:00-7:00): e' quello che va guardato (BIOS, Wake-on-LAN, aggiornamenti di Windows...)
+    notturno = avvio.hour >= 21 or avvio.hour < 7
+    verbo = "si e' risvegliato dalla sospensione" if risveglio else "si e' riacceso"
+    riacceso = (f"{verbo} da solo alle {fmt(avvio)}" if notturno else
+                f"{'risvegliato' if risveglio else 'acceso'} {'oggi' if avvio.date() == oggi else 'il'} alle {fmt(avvio)}")
+    return dict(base, esito="riacceso_notte" if notturno else esito, allarme=notturno,
+                dettaglio=f"{spegnimento}; {riacceso}{extra}.")
+
+
+def postazioni_registrate():
+    """I PC abilitati a Gestionale Notifiche (nome del PC), anche quelli che non hanno ancora mandato un rapporto."""
+    nomi = {t.get("pc") for t in _widget_tokens().values() if t.get("pc")}
+    return sorted(nomi | set(_leggi_json_file(POSTAZIONI_FILE, {}).keys()), key=str.lower)
+
+
+def controllo_postazioni(adesso=None):
+    """Il controllo del mattino: un esito per ogni postazione, salvato nel log (ultimi 60 giorni)."""
+    adesso = adesso or datetime.datetime.now()
+    rapporti = _leggi_json_file(POSTAZIONI_FILE, {})
+    esiti = []
+    for pc in postazioni_registrate():
+        r = rapporti.get(pc)
+        if r:
+            esiti.append(esito_postazione(r, adesso))
+        else:
+            esiti.append({"pc": pc, "utente": "", "versione": "", "esito": "non_collegato", "allarme": False,
+                          "dettaglio": "Nessun rapporto: Gestionale Notifiche su questo PC va aggiornato (dalla 3.5)."})
+    with _POSTAZIONI_LOCK:
+        log = _leggi_json_file(POSTAZIONI_LOG_FILE, {})
+        log[adesso.date().isoformat()] = {"ora": adesso.strftime("%H:%M"), "postazioni": esiti}
+        limite = (adesso.date() - datetime.timedelta(days=60)).isoformat()
+        log = {k: v for k, v in log.items() if k >= limite}
+        POSTAZIONI_LOG_FILE.write_text(json.dumps(log, indent=1, ensure_ascii=False), encoding="utf-8")
+    for e in esiti:
+        print(f"[postazioni] {e['pc']}: {e['dettaglio']}")
+    return esiti
+
+
+def avvia_controllo_postazioni():
+    """Ogni minuto: dopo ORA_CONTROLLO_POSTAZIONI, se oggi non e' ancora stato fatto, controlla le postazioni
+    e avvisa gli amministratori (con l'esito in breve)."""
+    def _giro():
+        while True:
+            try:
+                adesso = datetime.datetime.now()
+                ora = datetime.time(*map(int, ORA_CONTROLLO_POSTAZIONI.split(":")))
+                if adesso.time() >= ora and adesso.date().isoformat() not in _leggi_json_file(POSTAZIONI_LOG_FILE, {}):
+                    esiti = controllo_postazioni(adesso)
+                    if esiti:
+                        conta = lambda *k: sum(1 for e in esiti if e["esito"] in k)
+                        parti = [f"{conta('gestionale')} spenti dal gestionale", f"{conta('spento')} spenti in altro modo"]
+                        if conta("acceso_notte"):
+                            parti.append(f"{conta('acceso_notte')} rimasti accesi")
+                        if conta("riacceso_notte"):
+                            parti.append(f"{conta('riacceso_notte')} riaccesi di notte")
+                        if conta("non_collegato"):
+                            parti.append(f"{conta('non_collegato')} non collegati")
+                        testo = ("⚠️ " if any(e["allarme"] for e in esiti) else "🖥️ ") + "PC stanotte: " + ", ".join(parti)
+                        for u in load_users():
+                            if u.get("role") == "amministratore":
+                                add_notification(u["username"], testo, link="/impostazioni/google#postazioni", tipo="info")
+            except Exception as e:
+                print(f"[postazioni] Errore controllo: {e}")
+            time.sleep(60)
+    threading.Thread(target=_giro, daemon=True, name="ControlloPostazioni").start()
+
+
+@app.route("/impostazioni/postazioni/controlla", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_controlla_postazioni():
+    controllo_postazioni()
+    flash("Controllo delle postazioni aggiornato.", "success")
+    return redirect(url_for("impostazioni_google") + "#postazioni")
+
+
+@app.route("/api/widget/feed")
+def api_widget_feed():
+    """Novità per l'utente del widget: messaggi chat ricevuti e notifiche non lette.
+    ?msg=<ultimo id messaggio visto>; senza parametro restituisce solo il punto di partenza (niente arretrati)."""
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
+    user = _widget_user()
+    if not user:
+        # nessuno sta usando il gestionale da questo PC: niente messaggi personali
+        return jsonify({"ok": True, "segue_pc": True, "username": None, "full_name": None, "ultimo_msg_id": None,
+                        "messaggi": [], "messaggi_non_letti": 0, "notifiche": []})
+    me = user["username"]
+    db = _DBSession()
+    try:
+        from sqlalchemy import func
+        ultimo = db.query(func.max(_Message.id)).scalar() or 0
+        messaggi = []
+        if "msg" in request.args:
+            try:
+                dopo = int(request.args.get("msg", "0"))
+            except ValueError:
+                dopo = ultimo
+            rows = db.query(_Message).filter(_Message.to_user == me, _Message.id > dopo, _Message.read == False  # noqa: E712
+                                             ).order_by(_Message.id).limit(20).all()
+            messaggi = [{"id": m.id, "from": m.from_user, "from_name": m.from_name or m.from_user,
+                         "text": m.text or "", "allegato": m.original_filename or "", "ts": m.timestamp} for m in rows]
+        non_letti = db.query(_Message).filter(_Message.to_user == me, _Message.read == False).count()  # noqa: E712
+        notifiche = [{"id": n.id, "text": n.text or "", "link": n.link or "/", "ts": n.timestamp}
+                     for n in db.query(_Notification).filter(_Notification.target_user == me, _Notification.read == False  # noqa: E712
+                                                             ).limit(30).all()]
+    finally:
+        db.close()
+    return jsonify({"ok": True, "segue_pc": True, "username": me, "full_name": user["full_name"], "ultimo_msg_id": ultimo,
+                    "messaggi": messaggi, "messaggi_non_letti": non_letti, "notifiche": notifiche})
+
+@app.route("/api/widget/rispondi", methods=["POST"])
+def api_widget_rispondi():
+    """Risposta rapida dal widget: invia un messaggio chat e segna come letti quelli ricevuti da quel collega."""
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
+    data = request.get_json(silent=True) or {}
+    user = _widget_user()
+    # l'avviso era di un altro utente (nel frattempo al PC si è seduto un collega): non si risponde a suo nome
+    if not user or ("come" in data and data["come"] != user["username"]):
+        return jsonify({"ok": False, "error": "su questo PC ora c'è un altro utente"}), 409
+    to_user, text = str(data.get("to", "")), str(data.get("text", "")).strip()
+    if not to_user or not text:
+        return jsonify({"ok": False, "error": "Messaggio vuoto"}), 400
+    db = _DBSession()
+    try:
+        db.query(_Message).filter(_Message.to_user == user["username"], _Message.from_user == to_user,
+                                  _Message.read == False).update({_Message.read: True}, synchronize_session=False)  # noqa: E712
+        db.add(_Message(from_user=user["username"], from_name=user["full_name"], to_user=to_user, text=text,
+                        attachment="", original_filename="",
+                        timestamp=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), read=False))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[widget] Errore risposta: {e}")
+        return jsonify({"ok": False, "error": "Errore durante l'invio"}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/widget/notifica-letta", methods=["POST"])
+def api_widget_notifica_letta():
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
+    user = _widget_user()
+    if not user:
+        return jsonify({"ok": False, "error": "nessun utente su questo PC"}), 409
+    nid = str((request.get_json(silent=True) or {}).get("id", ""))
+    db = _DBSession()
+    try:
+        db.query(_Notification).filter(_Notification.id == nid, _Notification.target_user == user["username"]
+                                       ).update({_Notification.read: True}, synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/widget/rilascia", methods=["POST"])
+def api_widget_rilascia():
+    """Il widget segnala che il PC è bloccato o inattivo: da qui in poi nessun messaggio personale
+    finché qualcuno non torna a usare il gestionale da quel PC."""
+    if not _widget_autorizzato():
+        return _widget_risposta_non_autorizzato()
+    stacca_utente_dal_pc(request.remote_addr, (request.get_json(silent=True) or {}).get("user"))
+    return jsonify({"ok": True})
+
+@app.route("/health")
+def health():
+    """Controllo leggero usato dal widget del server per sapere se risponde."""
+    return jsonify({"ok": True, "version": APP_VERSION, "utenti_collegati": len(get_utenti_collegati())})
+
+# --- App sul telefono: il gestionale si installa dal browser sulla schermata Home (iOS e Android) ---
+_ICONE_APP = {}
+
+@app.route("/manifest.webmanifest")
+def manifest_app():
+    """Descrive l'app al telefono: nome, icona e apertura a schermo intero senza la barra del browser."""
+    icone = [{"src": url_for("icona_app", size=n), "sizes": f"{n}x{n}", "type": "image/png", "purpose": "any maskable"}
+             for n in (192, 512)]
+    dati = {"name": "Gestionale Cerlab", "short_name": "Cerlab", "lang": "it", "start_url": "/", "scope": "/",
+            "display": "standalone", "background_color": "#ffffff", "theme_color": "#ffffff", "icons": icone}
+    return app.response_class(json.dumps(dati), mimetype="application/manifest+json")
+
+@app.route("/icona-app-<int:size>.png")
+def icona_app(size):
+    """Icona dell'app: il logo su fondo bianco, con margine perché Android la ritaglia a cerchio."""
+    if size not in (180, 192, 512):
+        return "", 404
+    if size not in _ICONE_APP:
+        logo = Image.open(Path(app.static_folder) / "favicon.png").convert("RGBA")
+        lato = int(size * 0.6)
+        logo.thumbnail((lato, lato), Image.LANCZOS)
+        icona = Image.new("RGB", (size, size), "white")
+        icona.paste(logo, ((size - logo.width) // 2, (size - logo.height) // 2), logo)
+        buf = io.BytesIO()
+        icona.save(buf, "PNG")
+        _ICONE_APP[size] = buf.getvalue()
+    return app.response_class(_ICONE_APP[size], mimetype="image/png", headers={"Cache-Control": "max-age=86400"})
+
+# ### NUOVE ROUTE PER GESTIONE PASSWORD ###
+@app.route("/cambia-password", methods=["GET", "POST"])
+@login_required
+def cambia_password():
+    if request.method == "POST":
+        p1 = request.form.get("new_password1")
+        p2 = request.form.get("new_password2")
+        if not p1 or p1 != p2:
+            flash("Le password non coincidono. Riprova.", "error")
+            return redirect(url_for("cambia_password"))
+
+        users = load_users()
+        user_found = False
+        for user in users:
+            if user["username"] == session["user_id"]:
+                user["password_hash"] = generate_password_hash(p1)
+                user["force_password_reset"] = False # Rimuovi l'obbligo
+                user_found = True
+                break
+        
+        if user_found:
+            save_users(users)
+            session["force_password_reset"] = False # Aggiorna la sessione
+            flash("Password aggiornata con successo.", "success")
+            return redirect(url_for("dashboard"))
+        else:
+            flash("Errore: utente non trovato.", "error")
+
+    return render_template("cambia_password.html", title="Cambia Password")
+
+@app.route("/admin/utenti")
+@login_required
+def gestisci_utenti():
+    if session.get("user_role") not in ['amministratore', 'ceo']:
+        flash("Accesso non autorizzato.", "error")
+        return redirect(url_for("dashboard"))
+    
+    users = load_users()
+    return render_template("gestisci_utenti.html", title="Gestione Utenti", users=users)
+
+@app.route("/admin/reset_password/<username>")
+@login_required
+def reset_password(username):
+    if session.get("user_role") not in ['amministratore', 'ceo']:
+        flash("Accesso non autorizzato.", "error")
+        return redirect(url_for("dashboard"))
+
+    users = load_users()
+    user_to_reset = next((u for u in users if u["username"] == username), None)
+    if user_to_reset and user_to_reset.get("role") == 'amministratore':
+        flash("Impossibile resettare la password del amministratore.", "error")
+        return redirect(url_for("gestisci_utenti"))
+    user_found = False
+    for user in users:
+        if user["username"] == username:
+            new_temp_password = f"{username}123"
+            user["password_hash"] = generate_password_hash(new_temp_password)
+            user["force_password_reset"] = True # Obbliga al cambio password
+            user_found = True
+            break
+    
+    if user_found:
+        save_users(users)
+        flash(f"Password per {username} resettata a '{new_temp_password}'. L'utente dovrà cambiarla al prossimo accesso.", "success")
+    else:
+        flash("Utente non trovato.", "error")
+        
+    return redirect(url_for("gestisci_utenti"))
+
+def _ha_consegne_aperte(p):
+    """Stessa regola della dashboard Consegne: articoli confermati non ancora consegnati."""
+    if p.get("tipo_preventivo") == "edile":
+        return any(r.get("stato_consegna") != "Consegnato"
+                   for s in p.get("sezioni_edili", []) for r in s.get("righe", []))
+    righe = p.get("righe", [])
+    for o in _ordini_con_magazzino(p):
+        if not o.get("numero_conferma", "").strip():
+            continue
+        for i in o.get("indici_righe", []):
+            if 0 <= i < len(righe) and righe[i].get("stato_consegna") != "Consegnato":
+                return True
+    return False
+
+
+def _residuo_da_saldare(p):
+    """Stessa regola della dashboard Pagamenti: i pagamenti programmati non contano come incassati."""
+    pagato = sum(_to_float(x.get("importo")) for x in p.get("pagamenti", []) if not x.get("is_scheduled"))
+    if p.get("no_iva"):
+        pagato += _to_float(p.get("tot_iva"))
+    return round(_to_float(p.get("totale")) - pagato, 2)
+
+
+@app.route("/")
+@login_required
+def dashboard():
+    user_role = session.get("user_role")
+    full_name = session.get("user_name")
+    
+    # 1. Carichiamo TUTTI i preventivi, senza filtri
+    all_quotes_summary = get_all_quotes()
+    
+    my_active_quotes = []
+    grouped_active_quotes = {}
+    chiusi_visibili = []
+    today = datetime.date.today()
+    stati_ordine_validi = ["Confermato", "In Lavorazione"]
+
+    # 2. Iteriamo e filtriamo
+    for summary in all_quotes_summary:
+        p = load_quote(summary["numero"])
+        if not p: continue
+
+        # Filtro universale: Salta chiusi e annullati
+        if p.get("stato") in ["Chiuso", "Annullato"]:
+            # I chiusi contano comunque per Saldo e Fatture (come nelle rispettive dashboard)
+            if p.get("stato") == "Chiuso" and (user_role != 'venditore' or p.get("venditore") == full_name):
+                chiusi_visibili.append(p)
+            continue
+        
+        # Filtro segreteria: Salta bozze
+        if user_role == 'segreteria' and p.get("stato") == "Bozza":
+            continue
+
+        # --- INIZIO BLOCCO AGGIUNTO ---
+        # Visto che "Chiuso" e "Annullato" sono esclusi,
+        # controlliamo gli stati attivi per ricalcolare il saldo.
+        
+        stati_attivi_pagamento = ["Confermato", "In Lavorazione"]
+        
+        if p.get("stato") in stati_attivi_pagamento:
+            today = datetime.date.today()
+            totale_preventivo = _to_num(p.get("totale"))
+            
+            # Somma pagamenti
+            totale_pagato_effettivo = 0.0
+            for pag in p.get("pagamenti", []):
+                totale_pagato_effettivo += _to_num(pag.get("importo"))
+            
+            # Gestione No-IVA (IVA saldata virtualmente)
+            raw_no_iva = p.get("no_iva")
+            is_no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
+            if is_no_iva:
+                totale_pagato_effettivo += _to_num(p.get("tot_iva"))
+
+            # Rispetto flag SALDATO
+            if p.get("stato_pagamento_globale") == "Saldato":
+                 p["stato_pagamento_globale"] = "Saldato"
+            else:
+                da_saldare = totale_preventivo - totale_pagato_effettivo
+                if da_saldare <= 0.05: 
+                     p["stato_pagamento_globale"] = "Saldato"
+                else:
+                     p["stato_pagamento_globale"] = "Da Saldare"
+        
+        elif p.get("stato") in ["Bozza", "Inviato"]:
+            p["stato_pagamento_globale"] = "N/D"
+
+        if p.get("stato") in stati_ordine_validi:
+            totale_pagato_effettivo = 0.0
+            for pag in p.get("pagamenti", []):
+                if pag.get("is_scheduled"): 
+                    continue
+            righe_preventivo = p.get("righe", [])
+            indici_righe_valide = {i for i, r in enumerate(righe_preventivo) if r.get("articolo", "").strip() and r.get("unt", "").strip().upper() != "S"}
+            indici_gia_ordinati = set()
+            articoli_in_attesa_conferma = 0
+            
+            ordini_fornitore = _ordini_con_magazzino(p)
+            for ordine in ordini_fornitore:
+                indici_ordine = set(ordine.get("indici_righe", []))
+                indici_gia_ordinati.update(indici_ordine)
+                if not ordine.get("numero_conferma", "").strip():
+                    articoli_in_attesa_conferma += len(indici_ordine)
+
+            p["articoli_da_ordinare_count"] = len(indici_righe_valide - indici_gia_ordinati)
+            p["articoli_da_ordinare_totale"] = len(indici_righe_valide)
+            p["articoli_in_attesa_conferma"] = articoli_in_attesa_conferma
+        
+        else:
+            p["articoli_da_ordinare_count"] = 0
+            p["articoli_da_ordinare_totale"] = 0
+            p["articoli_in_attesa_conferma"] = 0
+        
+        venditore = p.get("venditore", "Sconosciuto")
+
+        # 3. Logica di smistamento
+        if user_role in ['amministratore', 'ceo']:
+            if venditore == full_name:
+                my_active_quotes.append(p)
+            else:
+                grouped_active_quotes.setdefault(venditore, []).append(p)
+        
+        elif user_role == 'segreteria':
+            grouped_active_quotes.setdefault(venditore, []).append(p)
+        
+        elif user_role == 'venditore':
+            if venditore == full_name:
+                my_active_quotes.append(p)
+
+    # 4. Contatori per le schede della home (sui preventivi visibili all'utente)
+    visibili = my_active_quotes + [q for lista in grouped_active_quotes.values() for q in lista]
+    attivi = [q for q in visibili if q.get("stato") in stati_ordine_validi]
+    home_stats = {
+        "aperti": len([q for q in visibili if q.get("stato") in ["Bozza", "Inviato"]]),
+        "attivi": len(attivi),
+        # Solo i preventivi personali dell'utente, per il saluto in testa alla home
+        "miei_attivi": len([q for q in my_active_quotes if q.get("stato") in stati_ordine_validi]),
+        "miei_aperti": len([q for q in my_active_quotes if q.get("stato") in ["Bozza", "Inviato"]]),
+        "da_ordinare": len([q for q in attivi if q.get("articoli_da_ordinare_count", 0) > 0 or q.get("articoli_in_attesa_conferma", 0) > 0]),
+        "da_consegnare": len([q for q in attivi if _ha_consegne_aperte(q)]),
+        "da_saldare": len([q for q in attivi + chiusi_visibili if _residuo_da_saldare(q) > 0.01]),
+        "da_fatturare": len([q for q in attivi + chiusi_visibili if q.get("stato_fattura") != "Fatturato"]),
+    }
+
+    return render_template("dashboard.html", 
+        title="Dashboard",
+        app_name=APP_NAME,
+        my_quotes=my_active_quotes, # Per 'venditore' e 'admin'/'ceo'
+        grouped_quotes=grouped_active_quotes, # Per 'segreteria' e 'admin'/'ceo'
+        home_stats=home_stats,
+        oggi=today
+    )
+@app.route("/allert")
+@login_required
+def allert_page():
+    """Pagina che raccoglie pagamenti scaduti e documenti mancanti solo per i clienti attivi."""
+    alerts = []
+    today = datetime.date.today()
+    today_str = today.strftime('%Y-%m-%d')
+    # I documenti del cliente servono solo quando il preventivo e' confermato (non per bozze e inviati)
+    active_statuses = ["Confermato", "In Lavorazione"]
+    active_client_ids = set()
+
+    # 1. Query bulk su DB: carica tutti i preventivi non chiusi/annullati
+    db = _DBSession()
+    try:
+        preventivi_db = db.query(_Preventivo).filter(
+            _Preventivo.stato.notin_(["Annullato", "Chiuso"])
+        ).all()
+        preventivi_data = [p.to_dict() for p in preventivi_db]
+
+        # Raccoglie anche i preventivi in stato attivo per identificare i clienti attivi
+        for p in preventivi_data:
+            if p.get("stato") in active_statuses:
+                active_client_ids.add(p.get("id_cliente"))
+
+        clienti_db = db.query(_Cliente).all()
+        clienti_data = [c.to_dict() for c in clienti_db]
+    finally:
+        db.close()
+
+    # 2. Scansione Preventivi per Pagamenti Scaduti, Merce
+    for p in preventivi_data:
+        try:
+            # --- ALERT PAGAMENTI ---
+            for pag in p.get("pagamenti", []):
+                if pag.get("is_scheduled") and pag.get("data") <= today_str:
+                    alerts.append({
+                        "tipo": "PAGAMENTO",
+                        "oggetto_id": p.get("numero"),
+                        "oggetto_nome": p.get("cliente"),
+                        "dettaglio": f"Pagamento da {money_ui(pag.get('importo'))} scaduto il {data_it_filter(pag.get('data'))}",
+                        "link_risoluzione": url_for('gestione_pagamenti', quote_id=p.get("numero")),
+                        "icona": "fas fa-hand-holding-usd",
+                        "colore": "text-danger"
+                    })
+
+            # --- ALERT MERCE & INSERIMENTO DATE ---
+            for ordine in p.get("ordini_fornitore", []):
+                data_creazione_ordine = ordine.get("data_ordine") 
+                data_prevista = ordine.get("data_arrivo")
+                
+                # 1. CONTROLLO INSERIMENTO DATA (Entro 3gg dalla creazione)
+                if data_creazione_ordine and not data_prevista:
+                    try:
+                        d_creazione = datetime.datetime.strptime(data_creazione_ordine, '%Y-%m-%d').date()
+                        scadenza_inserimento = d_creazione + datetime.timedelta(days=3)
+                        
+                        if today > scadenza_inserimento:
+                            alerts.append({
+                                "tipo": "ORDINE",
+                                "oggetto_id": p.get("numero"),
+                                "oggetto_nome": p.get("cliente"),
+                                "dettaglio": f"Manca data arrivo prevista per ordine {ordine.get('azienda')} (creato il {data_it_filter(data_creazione_ordine)})",
+                                "link_risoluzione": url_for('conferma_ordine', quote_id=p.get("numero")),
+                                "icona": "fas fa-calendar-times",
+                                "colore": "text-warning"
+                            })
+                    except (ValueError, TypeError): pass
+
+                # 2. CONTROLLO RITARDO ARRIVO (Con tolleranza 5gg)
+                if data_prevista:
+                    try:
+                        d_prevista = datetime.datetime.strptime(data_prevista, '%Y-%m-%d').date()
+                        data_limite_tolleranza = d_prevista + datetime.timedelta(days=5)
+                        
+                        if data_limite_tolleranza <= today:
+                            righe = p.get("righe", [])
+                            mancanti_in_ordine = []
+                            for idx in ordine.get("indici_righe", []):
+                                if 0 <= idx < len(righe):
+                                    riga = righe[idx]
+                                    if not riga.get("data_arrivo_in_house"):
+                                        mancanti_in_ordine.append(riga.get("articolo", "Articolo"))
+                            
+                            if mancanti_in_ordine:
+                                alerts.append({
+                                    "tipo": "MERCE",
+                                    "oggetto_id": p.get("numero"),
+                                    "oggetto_nome": p.get("cliente"),
+                                    "dettaglio": f"Ritardo da {ordine.get('azienda')} (previsto il {data_it_filter(data_prevista)}, {(today - d_prevista).days} giorni fa). {len(mancanti_in_ordine)} articoli mancanti.",
+                                    "link_risoluzione": url_for('gestione_consegna', quote_id=p.get("numero")),
+                                    "icona": "fas fa-truck-loading",
+                                    "colore": "text-blue"
+                                })
+                    except (ValueError, TypeError): continue
+        except: continue
+
+    # 3. Scansione Clienti per Documenti Mancanti (Solo se il cliente è attivo)
+    for c in clienti_data:
+        try:
+            client_id = c.get("id_cliente")
+
+            # Salta il controllo se il cliente non ha preventivi attivi
+            if client_id not in active_client_ids:
+                continue
+
+            mancanti = []
+            if not c.get("has_ci"): mancanti.append("Carta Identità")
+            if not c.get("has_privacy"): mancanti.append("Privacy")
+            if not c.get("has_contratto"): mancanti.append("Contratto")
+            
+            if mancanti:
+                alerts.append({
+                    "tipo": "DOCUMENTI",
+                    "oggetto_id": client_id,
+                    "oggetto_nome": c.get("cliente"),
+                    "dettaglio": "Mancano: " + ", ".join(mancanti),
+                    "link_risoluzione": url_for('dettaglio_cliente', client_id=client_id),
+                    "icona": "fas fa-id-card",
+                    "colore": "text-warning"
+                })
+        except: continue
+
+    # 4. Task oltre la data prevista di completamento (ETC) che riguardano l'utente
+    controlla_task_scadute()
+    me, my_role = session["user_id"], session["user_role"]
+    for t in load_tasks():
+        d = leggi_data_etc(t.get("etc"))
+        if not d or d >= today or t.get("status") not in ("open", "support"):
+            continue
+        # admin e CEO vedono tutte le scadute del team; gli altri solo quelle che li riguardano
+        if not (task_visibile(t, me, my_role) and (task_mi_riguarda(t, me, my_role) or my_role in ('amministratore', 'ceo'))):
+            continue
+        desc = re.sub(r"\s+", " ", t.get("description") or "").strip()
+        alerts.append({
+            "tipo": "TASK",
+            "oggetto_id": f"#{t['id']}",
+            "oggetto_nome": desc[:80] + ("…" if len(desc) > 80 else ""),
+            "dettaglio": f"Data prevista {d.strftime('%d/%m/%Y')} superata da {(today - d).days} giorni"
+                         + (" · task personale" if t.get("tipo") == "personale" else f" · creata da {t.get('created_by_name') or t.get('created_by')}"),
+            "link_risoluzione": url_for('tasks_page') + f"#{t['id']}",
+            "icona": "fas fa-hourglass-end",
+            "colore": "text-danger"
+        })
+
+    # Ordine di priorità: pagamenti, task scadute, merce, ordini, documenti
+    priorita = {"PAGAMENTO": 0, "TASK": 1, "MERCE": 2, "ORDINE": 3, "DOCUMENTI": 4}
+    alerts.sort(key=lambda a: priorita.get(a["tipo"], 9))
+
+    return render_template("allert.html", title="Centro Notifiche & Alert", alerts=alerts)
+
+
+@app.route("/admin/refresh-all-quotes")
+@login_required
+@role_required('amministratore', 'ceo')
+def refresh_all_quotes():
+    """
+    Cicla tutti i preventivi e ricalcola i loro stati globali (pagamento, consegna, avanzamento).
+    Questo corregge i dati "stale" che potrebbero essere rimasti inconsistenti.
+    """
+    print("--- INIZIO: Aggiornamento stati globali di tutti i preventivi ---")
+    db_ids = _DBSession()
+    try:
+        all_numeri = [r.numero for r in db_ids.query(_Preventivo.numero).all()]
+    finally:
+        db_ids.close()
+
+    processed_count = 0
+    updated_count = 0
+    
+    for numero in all_numeri:
+        try:
+            p = load_quote(numero)
+            if not p:
+                continue
+            
+            # Fai una copia per confrontare se ci sono state modifiche
+            p_original = copy.deepcopy(p)
+            
+            # Applica le funzioni di aggiornamento in ordine
+            aggiorna_stato_pagamento_globale(p)
+            aggiorna_stato_consegna_globale(p)
+            aggiorna_stato_avanzamento(p) # Questo dipende dai primi due
+            
+            processed_count += 1
+            
+            # Salva solo se i dati sono cambiati
+            if p != p_original:
+                save_quote(p["numero"], p)
+                updated_count += 1
+                
+        except Exception as e:
+            print(f"ERRORE: Impossibile aggiornare il preventivo {numero}. Dettagli: {e}")
+
+    print(f"--- FINE: Elaborati {processed_count}. Aggiornati {updated_count}. ---")
+    flash(f"Aggiornamento completato. Elaborati {processed_count}/{len(all_numeri)} preventivi. Aggiornati {updated_count}.", "success")
+    return redirect(url_for("dashboard"))
+
+def sincronizza_stati_tutti_preventivi():
+    """
+    Allinea in background gli stati globali di tutti i preventivi (pagamento, consegna, avanzamento).
+    Eseguito all'avvio dell'applicazione per garantire che nessun preventivo resti bloccato con stati obsoleti.
+    """
+    try:
+        updated_count = 0
+        db_ids = _DBSession()
+        try:
+            numeri = [r.numero for r in db_ids.query(_Preventivo.numero).all()]
+        finally:
+            db_ids.close()
+
+        for numero in numeri:
+            try:
+                p = load_quote(numero)
+                if not p:
+                    continue
+                p_original = copy.deepcopy(p)
+                aggiorna_stato_pagamento_globale(p)
+                aggiorna_stato_consegna_globale(p)
+                aggiorna_stato_avanzamento(p)
+                if p != p_original:
+                    save_quote(p.get("numero", numero), p)
+                    updated_count += 1
+            except Exception:
+                pass
+        if updated_count > 0:
+            print(f"INFO: Sincronizzazione automatica: aggiornati stati di {updated_count} preventivi.")
+    except Exception as e:
+        print(f"Avviso durante sincronizzazione automatica preventivi: {e}")
+
+@app.route("/admin/margini", methods=["GET", "POST"])
+@login_required
+@role_required('amministratore', 'ceo')
+def gestisci_margini():
+    """Pagina per visualizzare e modificare i margini di ricarico."""
+    if request.method == "POST":
+        try:
+            # --- INIZIO BLOCCO DINAMICO (CORRETTO) ---
+            
+            # 1. Carica la configurazione COMPLETA esistente (incluse le regole_colore)
+            config = load_margini_config()
+            
+            # 2. Itera su ogni fascia presente nella configurazione
+            for i, fascia in enumerate(config["fasce"]):
+                
+                # 3. Aggiorna i pallini leggendo i dati dal form usando l'indice
+                fascia["pallini"]["verde"] = int(request.form.get(f"verde_{i}"))
+                fascia["pallini"]["arancione"] = int(request.form.get(f"arancione_{i}"))
+                fascia["pallini"]["rosso"] = int(request.form.get(f"rosso_{i}"))
+
+                # 4. Aggiorna max_costo SOLO se non è l'ultima fascia
+                if i < len(config["fasce"]) - 1:
+                    fascia["max_costo"] = int(request.form.get(f"max_costo_{i}"))
+
+            # 5. Salva ogni fascia aggiornata nel DB (tabella config_margini)
+            db = _DBSession()
+            try:
+                for fascia in config["fasce"]:
+                    record = db.query(_ConfigMargini).filter_by(key=fascia["key"]).first()
+                    if record:
+                        record.pallino_verde     = fascia["pallini"]["verde"]
+                        record.pallino_arancione = fascia["pallini"]["arancione"]
+                        record.pallino_rosso     = fascia["pallini"]["rosso"]
+                        if "max_costo" in fascia:
+                            record.max_costo = fascia["max_costo"]
+                    else:
+                        print(f"[gestisci_margini] WARN: fascia '{fascia['key']}' non trovata nel DB.")
+                db.commit()
+            except Exception as db_err:
+                db.rollback()
+                raise db_err
+            finally:
+                db.close()
+
+            # --- FINE BLOCCO DINAMICO ---
+
+            flash("Configurazione dei margini salvata con successo.", "success")
+        except (ValueError, TypeError):
+            flash("Errore: Assicurati di inserire solo numeri interi per i margini e i costi.", "error")
+        return redirect(url_for('gestisci_margini'))
+
+    # La parte GET (che carica la pagina) rimane invariata
+    margini_config = load_margini_config()
+    return render_template("margini_ricarico.html", title="Gestione Margini", config=margini_config)
+
+
+@app.route("/archivio")
+@login_required
+def archivio_globale():
+    """Pagina di archivio che mostra la ricerca e l'elenco completo dei preventivi."""
+    
+    # 1. Chiamo get_all_quotes senza argomenti per ottenere tutti i preventivi senza filtri
+    all_quotes_summary = get_all_quotes()
+
+    # 2. Carico i dati completi di ogni preventivo per la visualizzazione
+    all_quotes_full = []
+    for summary in all_quotes_summary:
+        p = load_quote(summary["numero"])
+        if not p:
+            continue
+
+        # --- INIZIO BLOCCO MODIFICATO ---
+        # Filtra solo i preventivi che sono in uno stato "finale"
+        if p.get("stato") in ["Chiuso", "Annullato"]:
+            p["totale_num"] = _to_float(p.get("totale"))
+            all_quotes_full.append(p)
+        # --- FINE BLOCCO MODIFICATO ---
+
+    # Ordina i preventivi per numero (più recente prima)
+    all_quotes_full.sort(key=lambda x: x.get("numero", ""), reverse=True)
+
+    # 3. Rendo il template, passando la lista (ora filtrata)
+    return render_template("archivio_globale.html", 
+        title="Archivio Globale",
+        all_quotes=all_quotes_full
+    )
+
+@app.route("/anagrafica-clienti")
+@login_required
+def anagrafica_clienti():
+    """Mostra l'elenco completo dei dati anagrafici con flag per preventivi attivi."""
+    active_statuses = ["Bozza", "Inviato", "In Lavorazione"]
+
+    db = _DBSession()
+    try:
+        # 1. Trova gli id_cliente con almeno un preventivo in stato attivo
+        active_ids_rows = db.query(_Preventivo.id_cliente).filter(
+            _Preventivo.stato.in_(active_statuses)
+        ).distinct().all()
+        active_client_ids = {r.id_cliente for r in active_ids_rows}
+
+        # 2. Carica tutti i clienti dal DB
+        clienti_db = db.query(_Cliente).order_by(_Cliente.cliente).all()
+        clients = []
+        for c in clienti_db:
+            d = c.to_dict()
+            d["has_active_quote"] = c.id_cliente in active_client_ids
+            clients.append(d)
+    finally:
+        db.close()
+    
+    return render_template("anagrafica_clienti.html", 
+        title="Anagrafica Clienti", 
+        clients=clients
+    )
+
+@app.route("/preventivi-cliente")
+@login_required
+def dashboard_clienti():
+    """Pagina che raggruppa i preventivi aperti per cliente."""
+
+    tutti_i_preventivi = get_all_quotes()
+    clienti_preventivi = {}
+    today = datetime.date.today()
+
+# --- Intorno alla riga 650 (all'interno di dashboard_clienti) ---
+    for prev_summary in tutti_i_preventivi:
+        p = load_quote(prev_summary["numero"])
+        if not p:
+            continue
+
+        # Gestione differenziata per preventivi Edili
+        is_edile = p.get("tipo_preventivo") == "edile"
+        
+        if is_edile:
+            # --- MODIFICA: RIMOSSO IL RICALCOLO FORZATO ---
+            # Non sovrascriviamo più i totali (p["totale"], p["tot_iva"]).
+            # Utilizziamo i valori già calcolati e salvati nel file JSON
+            # (tot_imponibile_cliente, tot_iva, totale).
+            # Impostiamo solo i contatori degli ordini a 0 per la visualizzazione corretta.
+            
+            p["articoli_da_ordinare_count"] = 0
+            p["articoli_da_ordinare_totale"] = 0
+            p["articoli_in_attesa_conferma"] = 0
+            
+        # Se l'utente è segreteria, salta anche le bozze
+        if session.get("user_role") == 'segreteria' and p.get("stato") == "Bozza":
+            continue
+        
+        is_attivo = p.get("stato") not in ["Chiuso", "Annullato"]
+        if not is_attivo:
+            continue
+        
+        # Individua la sorgente delle righe in base al tipo
+        is_edile = p.get("tipo_preventivo") == "edile"
+        righe_preventivo = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
+        
+        cliente_nome = p.get("cliente", "Senza Nome")
+        if cliente_nome not in clienti_preventivi:
+
+            clienti_preventivi[cliente_nome] = {
+                "preventivi": [],
+                "totale_attivo": 0.0,
+                "id_cliente": p.get("id_cliente") # Aggiungiamo l'ID per i link
+            }
+
+        # --- 1. Calcolo Pagamenti (da dashboard_pagamenti) ---
+        righe_preventivo = p.get("righe", [])
+        indici_confermati = set()
+        stati_ordine_validi = ["Confermato", "In Lavorazione", "Chiuso"]
+        
+        # Definiamo il totale lordo (con IVA) come riferimento base
+        totale_preventivo = _to_num(p.get("totale"))
+        
+        if p.get("stato") in stati_ordine_validi:
+            totale_pagato_effettivo = 0.0
+            for pag in p.get("pagamenti", []):
+                if pag.get("is_scheduled"): 
+                    continue
+            totale_pagato_effettivo = 0.0
+            for pag in p.get("pagamenti", []):
+                importo_float = _to_num(pag.get("importo"))
+                try:
+                    payment_date = datetime.datetime.strptime(pag.get("data"), '%Y-%m-%d').date()
+                except (ValueError, TypeError, KeyError):
+                    payment_date = today 
+                
+                if payment_date <= today:
+                    totale_pagato_effettivo += importo_float
+            
+            # SE ESENTE IVA: Aggiungiamo il valore dell'IVA ai pagamenti effettuati
+            # per pareggiare il totale lordo (Logica identica a gestione_pagamenti)
+            if p.get("no_iva") is True:
+                totale_pagato_effettivo += _to_num(p.get("tot_iva"))
+
+            # Aggiorniamo i valori nel dizionario per il template
+            p["totale_pagato"] = round(totale_pagato_effettivo, 2)
+            p["totale_da_saldare"] = round(totale_preventivo - totale_pagato_effettivo, 2)
+            
+            # Rispetto del flag manuale o calcolato
+            if p.get("stato_pagamento_globale") == "Saldato" or p["totale_da_saldare"] <= 0.05:
+                p["totale_da_saldare"] = 0.0
+                p["stato_pagamento_globale"] = "Saldato"
+            else:
+                p["stato_pagamento_globale"] = "Da Saldare"
+
+        else:
+            # Se lo stato non è valido (Bozza, Inviato), imposta tutto a 0 e N/D
+            p["totale_pagato"] = 0.0
+            p["totale_da_saldare"] = 0.0
+            p["stato_pagamento_globale"] = "N/D"
+
+        # --- 2. Calcolo Ordini (da dashboard_ordini) ---
+        stati_ordine_validi = ["Confermato", "In Lavorazione", "Chiuso"]
+        if p.get("stato") in stati_ordine_validi:
+            
+            # Utilizza righe_preventivo (che ora punta alla lista corretta)
+            indici_righe_valide = {i for i, r in enumerate(righe_preventivo) if r.get("articolo", "").strip() and r.get("unt", "").strip().upper() != "S"}
+            indici_gia_ordinati = set()
+
+            articoli_in_attesa_conferma = 0
+            
+            ordini_fornitore = _ordini_con_magazzino(p)
+            for ordine in ordini_fornitore:
+                indici_ordine = set(ordine.get("indici_righe", []))
+                indici_gia_ordinati.update(indici_ordine)
+                if ordine.get("numero_conferma", "").strip():
+                    indici_confermati.update(indici_ordine)
+                else:
+                    articoli_in_attesa_conferma += len(indici_ordine)
+
+            p["articoli_da_ordinare_count"] = len(indici_righe_valide - indici_gia_ordinati)
+            p["articoli_da_ordinare_totale"] = len(indici_righe_valide)
+            p["articoli_in_attesa_conferma"] = articoli_in_attesa_conferma
+            p["articoli_in_attesa_conferma_totale"] = len(indici_gia_ordinati)
+        else:
+            # Se lo stato non è valido (es. Bozza, Inviato), imposta tutti i contatori a 0
+            p["articoli_da_ordinare_count"] = 0
+            p["articoli_da_ordinare_totale"] = 0
+            p["articoli_in_attesa_conferma"] = 0
+            p["articoli_in_attesa_conferma_totale"] = 0    
+
+        # --- 3. Calcolo Consegne (da dashboard_consegne) ---
+        if p.get("stato") in stati_ordine_validi:
+            # --- MODIFICA PER EDILIZIA ---
+            if is_edile:
+                righe_lavorazione = get_flat_righe_edili(p)
+                p["articoli_da_consegnare_totale"] = len(righe_lavorazione)
+                p["articoli_da_consegnare_count"] = sum(
+                    1 for r in righe_lavorazione if r.get("stato_consegna") != "Consegnato"
+                )
+            else:
+                # Logica standard per preventivi con articoli
+                articoli_da_consegnare_count = 0
+                for index in indici_confermati:
+                    if 0 <= index < len(righe_preventivo):
+                        riga = righe_preventivo[index]
+                        if riga.get("stato_consegna") != "Consegnato":
+                            articoli_da_consegnare_count += 1
+                
+                p["articoli_da_consegnare_count"] = articoli_da_consegnare_count
+                p["articoli_da_consegnare_totale"] = len(indici_confermati)
+
+        else:
+            # Se lo stato non è valido, imposta i contatori a 0
+            p["articoli_da_consegnare_count"] = 0
+            p["articoli_da_consegnare_totale"] = 0    
+        
+        # --- 4. Aggiungi alla lista ---
+        clienti_preventivi[cliente_nome]['preventivi'].append(p)
+        clienti_preventivi[cliente_nome]['totale_attivo'] += totale_preventivo
+
+    return render_template("dashboard_clienti.html", 
+        title="Preventivi per Cliente",
+        clienti_preventivi=clienti_preventivi
+    )
+@app.route("/cliente/dettaglio/<client_id>")
+@login_required
+def dettaglio_cliente(client_id):
+    """Pagina che mostra il dettaglio documentale, con modalità archivio opzionale."""
+    
+    client_data = load_client(client_id)
+    if not client_data:
+        flash("Cliente non trovato.", "error")
+        return redirect(url_for("dashboard"))
+    
+    # 1. Controlla se siamo arrivati da un preventivo specifico
+    source_quote_id = request.args.get('source_quote_id')
+    source_quote = load_quote(source_quote_id) if source_quote_id else None
+    
+    # 2. Controlla se siamo in modalità "Archivio"
+    is_archivio_mode = request.args.get('archivio') == '1'
+
+    # Controlla se siamo in modalità "Archivio" tramite un parametro nell'URL
+    is_archivio_mode = request.args.get('archivio') == '1'
+
+    tutti_i_preventivi = get_all_quotes()
+    
+    preventivi_cliente = []
+    for prev_summary in tutti_i_preventivi:
+        p = load_quote(prev_summary["numero"])
+        if p and p.get("id_cliente") == client_id:
+            # Se NON siamo in modalità archivio, applichiamo il filtro
+            if not is_archivio_mode and p.get("stato") in ["Chiuso", "Annullato"]:
+                continue
+            p["totale_num"] = _to_float(p.get("totale"))
+            preventivi_cliente.append(p)
+            
+    # Ordina i preventivi dal più recente al più vecchio
+    preventivi_cliente.sort(key=lambda x: x.get("numero", ""), reverse=True)
+
+    return render_template("dettaglio_cliente.html", 
+        title=f"Dettaglio Cliente {client_data.get('cliente')}",
+        cliente=client_data,
+        preventivi=preventivi_cliente,
+        is_archivio_mode=is_archivio_mode, # Passa la modalità al template
+        source_quote=source_quote,
+    )
+
+@app.route("/preventivo/<quote_id>/upload-riga-edile", methods=["POST"])
+@login_required
+@role_required('amministratore', 'ceo')
+def upload_riga_edile_ajax(quote_id):
+    """Upload tecnico per riga edile: salva il file ma non modifica il JSON."""
+    file = request.files.get('file')
+    if not file or file.filename == '':
+        return jsonify({"success": False, "error": "Nessun file selezionato"}), 400
+    
+    try:
+        quote_dir = ALLEGATI_DIR / quote_id
+        quote_dir.mkdir(parents=True, exist_ok=True)
+        
+        filename = secure_filename(file.filename)
+        file.save(quote_dir / filename)
+        
+        # Restituiamo solo il successo e il nome, il salvataggio nel JSON 
+        # avverrà al click su "Salva Modifiche" nel form principale.
+        return jsonify({"success": True, "filename": filename})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# --- Cerca la rotta allega_documento esistente (intorno alla 920) e assicurati che sia invariata per gli allegati generici ---
+@app.route("/cliente/<client_id>/allega", methods=["POST"])
+@login_required
+def allega_documento_cliente(client_id):
+    """Gestisce l'upload di documenti anagrafici per il cliente."""
+    c = load_client(client_id)
+    file = request.files.get('file')
+    tipo_doc = request.form.get("tipo_documento", "Altro")
+    
+    if file and file.filename != '':
+        client_dir = ALLEGATI_DIR / "clienti" / client_id
+        client_dir.mkdir(parents=True, exist_ok=True)
+        filename = secure_filename(file.filename)
+        file.save(client_dir / filename)
+        
+        if "documenti_anagrafici" not in c: 
+            c["documenti_anagrafici"] = []
+            
+        c["documenti_anagrafici"].append({
+            "filename": filename, 
+            "tipo": tipo_doc, 
+            "data_upload": datetime.date.today().strftime('%Y-%m-%d')
+        })
+
+        # --- GESTIONE FLAG ---
+        if tipo_doc == "Carta Identità":
+            c["has_ci"] = True
+        elif tipo_doc == "Autorizzazione Privacy":
+            c["has_privacy"] = True
+        elif tipo_doc == "Contratto Vendita":
+            c["has_contratto"] = True
+        # ---------------------
+
+        save_client(client_id, c)
+        flash(f"Documento '{tipo_doc}' caricato!", "success")
+    return redirect(request.referrer)
+@app.route("/cliente/<client_id>/elimina-documento", methods=["POST"])
+@login_required
+def elimina_documento_cliente(client_id):
+    """Elimina un documento anagrafico dal JSON e dal disco."""
+    c = load_client(client_id)
+    filename = request.form.get("filename")
+    
+    if c and filename:
+        # Rimuove il file dalla lista
+        c["documenti_anagrafici"] = [d for d in c.get("documenti_anagrafici", []) if d.get("filename") != filename]
+        
+        # --- RICALCOLO FLAG ---
+        documenti = c.get("documenti_anagrafici", [])
+        c["has_ci"] = any(d.get("tipo") == "Carta Identità" for d in documenti)
+        c["has_privacy"] = any(d.get("tipo") == "Autorizzazione Privacy" for d in documenti)
+        c["has_contratto"] = any(d.get("tipo") == "Contratto Vendita" for d in documenti)
+        # ----------------------
+
+        try:
+            file_path = ALLEGATI_DIR / "clienti" / client_id / filename
+            if file_path.exists(): os.remove(file_path)
+        except: pass
+        
+        save_client(client_id, c)
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Dati mancanti"})
+
+@app.route("/api/messages/download/<filename>")
+@login_required
+def download_chat_attachment(filename):
+    return send_from_directory(CHAT_ATTACHMENTS_DIR, filename)
+
+@app.route("/allegati/cliente/<client_id>/<path:filename>")
+@login_required
+def serve_allegato_cliente(client_id, filename):
+    """Serve i file caricati nell'anagrafica cliente."""
+    directory = (ALLEGATI_DIR / "clienti" / client_id).resolve()
+    action = request.args.get('action', 'download')
+    return send_from_directory(directory, filename, as_attachment=(action != 'view'))
+
+
+@app.route("/preventivo/<quote_id>/allega", methods=["POST"])
+@login_required
+def allega_documento(quote_id):
+    """Gestisce l'upload di un nuovo allegato per un preventivo."""
+    p = load_quote(quote_id)
+    if not p:
+        if request.form.get("is_ajax") == "1": return jsonify({"success": False, "error": "Non trovato"}), 404
+        flash("Preventivo non trovato.", "error")
+        return redirect(request.referrer or url_for('dashboard'))
+
+    if 'file' not in request.files:
+        if request.form.get("is_ajax") == "1": return jsonify({"success": False, "error": "No file"}), 400
+        flash("Nessun file selezionato.", "error")
+        return redirect(request.referrer)
+
+    file = request.files['file']
+    descrizione = request.form.get("descrizione", "Nessuna descrizione")
+
+    if file.filename == '':
+        if request.form.get("is_ajax") == "1": return jsonify({"success": False, "error": "No filename"}), 400
+        flash("Nessun file selezionato.", "error")
+        return redirect(request.referrer)
+
+    if file:
+        quote_allegati_dir = ALLEGATI_DIR / quote_id
+        quote_allegati_dir.mkdir(exist_ok=True)
+        
+        filename = secure_filename(file.filename)
+        file.save(quote_allegati_dir / filename)
+
+        if "allegati" not in p:
+            p["allegati"] = []
+        
+        p["allegati"].append({
+            "filename": filename,
+            "descrizione": descrizione,
+            "data_upload": datetime.date.today().strftime('%Y-%m-%d')
+        })
+        save_quote(quote_id, p)
+        
+        if request.form.get("is_ajax") == "1":
+            return jsonify({"success": True, "filename": filename})
+            
+        flash("Documento allegato con successo!", "success")
+
+    return redirect(request.referrer)
+
+@app.route("/preventivo/<quote_id>/elimina-allegato", methods=["POST"])
+@login_required
+def elimina_allegato(quote_id):
+    p = load_quote(quote_id)
+    if not p:
+        return jsonify({"success": False, "error": "Preventivo non trovato"})
+
+    filename = request.form.get("filename")
+    if not filename:
+        return jsonify({"success": False, "error": "Nome file non specificato"})
+
+    allegati_originali = p.get("allegati", [])
+    allegati_filtrati = [att for att in allegati_originali if att.get("filename") != filename]
+
+    if len(allegati_filtrati) == len(allegati_originali):
+        return jsonify({"success": False, "error": "Allegato non trovato nel preventivo."})
+
+    # 1. Aggiorna la lista nel preventivo
+    p["allegati"] = allegati_filtrati
+    
+    # 2. Ora, elimina il file fisico dal disco
+    try:
+        # Usiamo secure_filename per sicurezza nel costruire il percorso
+        file_path = ALLEGATI_DIR / quote_id / secure_filename(filename)
+        if file_path.exists():
+            os.remove(file_path)
+        else:
+            print(f"ATTENZIONE: File da eliminare non trovato su disco: {file_path}")
+    except Exception as e:
+        print(f"ERRORE: Impossibile eliminare il file {filename}. Dettagli: {e}")
+        # Non blocchiamo l'operazione se il file non c'è, continuiamo a salvare il JSON
+    
+    save_quote(quote_id, p)
+    return jsonify({"success": True})
+
+@app.route("/allegati/<quote_id>/<path:filename>")
+@login_required
+def serve_allegato(quote_id, filename):
+    """Permette di scaricare/visualizzare un file allegato."""
+    directory = (ALLEGATI_DIR / quote_id).resolve()
+    
+    # Controlla se l'URL richiede di 'visualizzare' o 'scaricare' il file
+    action = request.args.get('action', 'download') # Default a 'download'
+    
+    # Se l'azione NON è 'view', forza il download. Altrimenti, visualizza.
+    should_download = action != 'view'
+    
+    return send_from_directory(directory, filename, as_attachment=should_download)
+
+# --- LOGICA: Recupera l'azione sia dal link (GET) che dal form (POST) ---
+@app.route("/cliente/cerca", methods=["GET", "POST"])
+@login_required
+def cerca_cliente():
+    # Recupera l'azione: se non c'è nel form (POST), cercala nell'URL (GET)
+    action = request.form.get('action') or request.args.get('action') or 'open_archive'
+    
+    if request.method == "POST":
+        search_term = request.form.get("search_term", "")
+        clients = find_clients_by_term(search_term)
+
+        return render_template(
+            "risultati_ricerca_cliente.html", 
+            title="Risultati Ricerca", 
+            clients=clients, 
+            search_term=search_term,
+            action=action  # Assicurati di passare l'action ai risultati
+        )
+        
+    return render_template("cerca_cliente.html", title="Cerca Cliente", action=action)
+@app.route("/cliente/cerca/live")
+@login_required
+def cerca_cliente_live():
+    """Endpoint API per la ricerca live dei clienti."""
+    term = request.args.get("term", "").strip()
+    
+    # Restituisce una lista vuota se il termine è più corto di 3 caratteri
+    if len(term) < 3:
+        return jsonify([])
+    
+    clients = find_clients_by_term(term)
+    return jsonify(clients)
+
+@app.route("/cliente/crea", methods=["GET", "POST"])
+@login_required
+def crea_cliente():
+    # Recupera l'azione dalla query string (GET) o dal form (POST)
+    action = request.args.get('action') or request.form.get('action') or 'new_quote'
+    
+    if request.method == "POST":
+        new_client_id = get_new_client_id()
+        client_data = { "id_cliente": new_client_id }
+        form_keys = ["cliente", "rag_sociale", "p_iva", "indirizzo", "cap", "comune", "provincia", "regione", "regione_nome", "email", "telefono", "codice_univoco"]
+        for key in form_keys: client_data[key] = request.form.get(key, "")
+        save_client(new_client_id, client_data)
+        flash("Nuovo cliente creato con successo.")
+        
+        # Reindirizza al tipo di preventivo corretto in base all'azione
+        if action == 'new_quote_edile':
+            return redirect(url_for("nuovo_preventivo_edile", client_id=new_client_id))
+        return redirect(url_for("nuovo_preventivo", client_id=new_client_id))
+        
+    return render_template("crea_cliente.html", title="Crea Nuovo Cliente", geo_data=GEO_DATA, action=action)
+
+@app.route("/cliente/modifica/<client_id>", methods=["GET", "POST"])
+@login_required
+def modifica_cliente(client_id):
+    client_data = load_client(client_id)
+    if not client_data:
+        flash("Cliente non trovato.", "error")
+        return redirect(url_for("anagrafica_clienti"))
+        
+    if request.method == "POST":
+        form_keys = ["cliente", "rag_sociale", "p_iva", "indirizzo", "cap", "comune", "provincia", "regione", "regione_nome", "email", "telefono", "codice_univoco"]
+        for key in form_keys: 
+            client_data[key] = request.form.get(key, "")
+        save_client(client_id, client_data)
+        flash("Dati anagrafici aggiornati con successo.", "success")
+        return redirect(url_for("anagrafica_clienti"))
+        
+    # Aggiungiamo il parametro 'id' ai dati inviati al template per far commutare il bottone in "Salva Modifiche"
+    client_data["id"] = client_id
+    return render_template("crea_cliente.html", title="Modifica Cliente", geo_data=GEO_DATA, p=client_data, action="edit")
+
+@app.route("/cliente/elimina/<client_id>", methods=["POST"])
+@login_required
+def elimina_cliente(client_id):
+    client_data = load_client(client_id)
+    if not client_data:
+        return jsonify({"success": False, "error": "Cliente non trovato."})
+
+    db = _DBSession()
+    try:
+        # Verifica preventivi attivi via DB
+        has_active = db.query(_Preventivo).filter(
+            _Preventivo.id_cliente == client_id,
+            _Preventivo.stato.notin_(["Annullato", "annullato"])
+        ).first() is not None
+
+        if has_active:
+            return jsonify({"success": False, "error": "Preventivi presenti per questo cliente, annullare tutti i preventivi o contattare l'amministratore di sistema."})
+
+        # Elimina il record dal DB
+        cliente_obj = db.query(_Cliente).filter_by(id_cliente=client_id).first()
+        if not cliente_obj:
+            return jsonify({"success": False, "error": "Cliente non trovato nel database."})
+        db.delete(cliente_obj)
+        db.commit()
+        return jsonify({"success": True, "message": "Cliente eliminato con successo."})
+    except Exception as e:
+        db.rollback()
+        print(f"[elimina_cliente] Errore: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/preventivo-edile/nuovo/<client_id>")
+@login_required
+@role_required('amministratore', 'ceo')
+def nuovo_preventivo_edile(client_id):
+    client_data = load_client(client_id)
+    if not client_data:
+        flash("Cliente non trovato.")
+        return redirect(url_for("dashboard"))
+
+    venditore_sigla = session.get("user_sigla", "XX")
+    full_name = session.get("user_name", "Sconosciuto")
+    
+    # Genera ID con prefisso ED (Edile) per tenerlo separato
+    now = datetime.datetime.now()
+    new_quote_id = f"EDIL-{venditore_sigla.upper()}-{now.strftime('%d%m%y%H%M')}"
+    
+    p = EMPTY_STATE.copy()
+    p.update(client_data)
+    p["numero"] = new_quote_id
+    p["tipo_preventivo"] = "edile"
+    p["venditore"] = full_name
+    p["data"] = now.strftime('%Y-%m-%d')
+    # Inizializziamo con una sezione predefinita vuota
+    p["sezioni_edili"] = [{"titolo": "Computo Metrico / Lavorazioni", "righe": []}] 
+    
+    save_quote(new_quote_id, p)
+    return redirect(url_for("editor_preventivo_edile", quote_id=new_quote_id))
+
+@app.route("/preventivo-edile/edit/<quote_id>")
+@login_required
+@role_required('amministratore', 'ceo')
+def editor_preventivo_edile(quote_id):
+    p = load_quote(quote_id)
+    if p is None: 
+        flash(f"Preventivo Edile '{quote_id}' non trovato.")
+        return redirect(url_for("dashboard"))
+    
+    # Migrazione/Inizializzazione per compatibilità con vecchi preventivi
+    if "sezioni_edili" not in p:
+        if "righe_edili" in p and p["righe_edili"]:
+            p["sezioni_edili"] = [{"titolo": "Computo Metrico / Lavorazioni", "righe": p["righe_edili"]}]
+        else:
+            p["sezioni_edili"] = [{"titolo": "Computo Metrico / Lavorazioni", "righe": []}]
+    
+    return render_template("editor_edile.html", title=f"Edile - {quote_id}", p=p, geo_data=GEO_DATA)
+
+@app.route("/salva-righe-edili/<quote_id>", methods=["POST"])
+@login_required
+@role_required('amministratore', 'ceo')
+def salva_righe_edili(quote_id):
+    p = load_quote(quote_id)
+    if not p: return jsonify({"success": False, "error": "Non trovato"}), 404
+    
+    form = request.form
+    
+    # Inizializzazione di sicurezza per prevenire KeyError su vecchi preventivi
+    if "sezioni_edili" not in p:
+        if "righe_edili" in p:
+            p["sezioni_edili"] = [{"titolo": "Computo Metrico / Lavorazioni", "righe": p.get("righe_edili", [])}]
+        else:
+            p["sezioni_edili"] = []
+
+    if form.get("is_locked") != 'true':
+        p["data"] = form.get("data", p.get("data"))
+        p["referente"] = form.get("referente", p.get("referente"))
+        p["riepilogo"] = form.get("riepilogo", p.get("riepilogo", ""))
+        p["no_iva"] = True if form.get("no_iva") else False 
+
+    nuove_sezioni = []
+    pat = re.compile(r"^s\[(\d+)\](?:\[titolo\]|\[costi_vivi_json\]|\[r\]\[(\d+)\]\[(.+)\])$")
+    
+    sez_map = {}
+    for key, val in form.items():
+        m = pat.match(key)
+        if m:
+            s_idx = int(m.group(1))
+            sez_map.setdefault(s_idx, {"titolo": "", "costi_vivi_json": "[]", "righe": {}})
+            
+            if "[titolo]" in key:
+                sez_map[s_idx]["titolo"] = val
+            elif "[costi_vivi_json]" in key:
+                sez_map[s_idx]["costi_vivi_json"] = val
+            else:
+                r_idx = int(m.group(2))
+                field = m.group(3)
+                sez_map[s_idx]["righe"].setdefault(r_idx, {})[field] = val
+
+    if sez_map:
+        for s_i in sorted(sez_map.keys()):
+            r_list = []
+            righe_dic = sez_map[s_i]["righe"]
+            for r_i in sorted(righe_dic.keys()):
+                r_list.append(righe_dic[r_i])
+            nuove_sezioni.append({"titolo": sez_map[s_i]["titolo"], "costi_vivi_json": sez_map[s_i].get("costi_vivi_json", "[]"), "righe": r_list})
+        p["sezioni_edili"] = nuove_sezioni
+
+    # 1. Recupera azioni di AGGIUNTA dall'URL (Query String via formaction)
+    action_add_section = request.args.get("add_section")
+    action_add_row_to = request.args.get("add_row")
+    
+    # 2. Recupera azioni di ELIMINAZIONE dal corpo del FORM (via JS hidden inputs)
+    del_s_idx = form.get("delete_section")
+    del_r_idx = form.get("delete_row")
+    del_whole_s_idx = form.get("delete_whole_section")
+
+    if action_add_section == "1":
+        p["sezioni_edili"].append({"titolo": "Nuova Sezione", "righe": []})
+    
+    elif action_add_row_to is not None:
+        try:
+            s_idx = int(action_add_row_to)
+            if 0 <= s_idx < len(p["sezioni_edili"]):
+                p["sezioni_edili"][s_idx]["righe"].append({
+                    "articolo": "", 
+                    "prezzo_vendita": "0", 
+                    "iva_pct": "10", 
+                    "costo_stimato": "0"
+                })
+        except ValueError:
+            pass
+
+    elif del_s_idx is not None and del_r_idx is not None:
+        try:
+            s_idx = int(del_s_idx)
+            r_idx = int(del_r_idx)
+            if 0 <= s_idx < len(p["sezioni_edili"]):
+                if 0 <= r_idx < len(p["sezioni_edili"][s_idx]["righe"]):
+                    p["sezioni_edili"][s_idx]["righe"].pop(r_idx)
+        except ValueError:
+            pass
+
+    elif del_whole_s_idx is not None:
+        try:
+            s_idx = int(del_whole_s_idx)
+            if 0 <= s_idx < len(p["sezioni_edili"]):
+                p["sezioni_edili"].pop(s_idx)
+        except ValueError:
+            pass
+    
+    # --- FINE LOGICA CORRETTA AZIONI ---
+
+    # Sincronizzazione dell'elenco piatto righe_edili per ripulire il JSON dai dati eliminati
+    flat_righe = []
+    for sezione in p.get("sezioni_edili", []):
+        for riga in sezione.get("righe", []):
+            flat_righe.append(riga)
+    p["righe_edili"] = flat_righe
+        
+    save_quote(quote_id, p)
+    if form.get("is_ajax") == "1": return jsonify({"success": True})
+    return redirect(url_for("editor_preventivo_edile", quote_id=quote_id))
+
+@app.route("/preventivo/nuovo/<client_id>")
+@login_required
+def nuovo_preventivo(client_id):
+    if session.get("user_role") == 'segreteria':
+        flash("Non disponi delle autorizzazioni per eseguire questa azione.", "error")
+        return redirect(url_for("dashboard"))
+    client_data = load_client(client_id)
+    if not client_data:
+        flash("Cliente non trovato.")
+        return redirect(url_for("dashboard"))
+
+    venditore_sigla = session.get("user_sigla", "XX")
+    # Prendiamo sia lo username che il nome completo dalla sessione
+    username = session.get("user_id", "sconosciuto")
+    full_name = session.get("user_name", "Sconosciuto")
+    
+    new_quote_id = get_new_quote_id(venditore_sigla)
+    p = EMPTY_STATE.copy()
+    p.update(client_data)
+    p["numero"] = new_quote_id
+    p["data"] = datetime.date.today().strftime('%Y-%m-%d')
+    # Salviamo lo USERNAME nel campo "venditore"
+    p["venditore"] = full_name
+    p["righe"] = []
+    p["default_iva_switch"] = "22"
+    
+    save_quote(new_quote_id, p)
+    return redirect(url_for("editor_preventivo", quote_id=new_quote_id))
+@app.route("/preventivo/edit/<quote_id>")
+@login_required
+def editor_preventivo(quote_id):
+    p = load_quote(quote_id)
+    if p is None: flash(f"Preventivo '{quote_id}' non trovato."); return redirect(url_for("dashboard"))
+    margini_config = load_margini_config()
+    return render_template("editor.html", title=f"Modifica {p.get('numero', 'Preventivo')}", app_name=APP_NAME, data_dir=str(DATA_DIR.resolve()), p=p, geo_data=GEO_DATA, margini_config=margini_config)
+@app.route("/salva-righe/<quote_id>", methods=["POST"])
+@login_required
+def salva_righe(quote_id):
+    if session.get("user_role") == 'segreteria':
+        flash("Non disponi delle autorizzazioni per eseguire questa azione.", "error")
+        return redirect(url_for("dashboard"))
+    p = load_quote(quote_id)
+    if not p:
+        flash(f"Preventivo '{quote_id}' non trovato.")
+        return redirect(url_for("dashboard"))
+    
+    form = request.form
+    iva_selezionata_dal_form = form.get("default-iva-switch", "22")
+    header_keys = ["venditore", "numero", "data", "cliente", "regione", "regione_nome", "indirizzo", "comune", "provincia", "email", "telefono", "referente", "fee_pct", "rag_sociale", "p_iva", "codice_univoco" , "cap", "default_iva_switch"]
+    for key in header_keys:
+        if key in form: p[key] = form.get(key, "")
+    p["default_iva_switch"] = iva_selezionata_dal_form    
+    p.pop("iva_pct", None)
+
+    # --- MODIFICA CHIAVE PER LA PERSISTENZA DEI DATI ---
+    # Non ricostruiamo le righe da zero. Invece, le aggiorniamo.
+    righe_esistenti = p.get("righe", [])
+    nuove_righe_mappate = {}
+    pat = re.compile(r"^r\[(\d+)\]\[(.+)\]$")
+    for key, val in form.items():
+        m = pat.match(key)
+        if m:
+            i, field = int(m.group(1)), m.group(2)
+            if field == 'spese_incasso' and val:
+                # Se riceviamo ancora il vecchio campo, lo trattiamo come 'extra'
+                nuove_righe_mappate.setdefault(i, {})['extra'] = val
+            else:
+                nuove_righe_mappate.setdefault(i, {})[field] = val
+    
+    righe_aggiornate = []
+    num_righe_form = len(nuove_righe_mappate)
+    
+    for i in range(max(len(righe_esistenti), num_righe_form)):
+        # Prendi la riga esistente se c'è, altrimenti un dizionario vuoto
+        riga = righe_esistenti[i] if i < len(righe_esistenti) else {}
+        # Aggiorna la riga con i nuovi dati dal form, se presenti
+        if i in nuove_righe_mappate:
+            riga.update(nuove_righe_mappate[i])
+        righe_aggiornate.append(riga)
+
+    p["righe"] = righe_aggiornate
+    # --- FINE MODIFICA CHIAVE ---
+
+    def _to_num(x, default=0.0):
+        if x is None: return float(default)
+        s = re.sub(r"[€%\s]", "", str(x));
+        if not s: return float(default)
+        if "," in s and "." in s: s = s.replace(".", "") if s.rfind(".") < s.rfind(",") else s.replace(",", "")
+        s = s.replace(",", ".");
+        try: return float(s)
+        except ValueError: return float(default)
+    def _fmt_price(n: float) -> str: return f"{float(n):.2f}".replace(".", ",")
+    
+    fee_effettiva = _to_num(p.get("fee_pct")) / 100
+    if fee_effettiva > 0: fee_effettiva *= 1.166
+    
+    imponibili_per_iva = {}
+    tot_imponibile_negozio_globale = 0.0
+    # Rimuoviamo le righe che non hanno più un articolo
+    p["righe"] = [r for r in p["righe"] if str(r.get("articolo", "")).strip()]
+
+    for r in p["righe"]:
+        qt = _to_num(r.get("qt", 0)); incasso = _to_num(r.get("spese_incasso", 0))
+        extra = _to_num(r.get("extra", 0))
+        ric = _to_num(r.get("ricarico_pct", 0)) / 100; trasp = _to_num(r.get("costo_trasporto", 0))
+        unt = r.get("unt", "").strip().upper(); iva_riga_pct = _to_num(r.get("iva_pct", 22))
+        # Variabili che popoleremo nell'if/else
+        tot_unit_imponibile = 0.0
+        tot_riga_imponibile = 0.0
+        tot_riga_negozio = 0.0
+
+        if unt == "S":
+            # --- INIZIO BLOCCO MODIFICATO ---
+            qt = 1.0 # Forza la quantità a 1
+            r["qt"] = "1"
+            
+            # Leggiamo i valori
+            ric = _to_num(r.get("ricarico_pct", 0)) / 100
+            prezzo_catalogo_val = _to_num(r.get("prezzo_catalogo"))
+
+            if ric > 0:
+                # CASO 1: Ricarico PRESENTE (P.Catalogo è un COSTO)
+                costo_negozio = prezzo_catalogo_val
+                # Applichiamo fee E ricarico
+                prezzo_con_fee_e_ricarico = costo_negozio * (1 + fee_effettiva) * (1 + ric)
+                
+                tot_unit_imponibile = round(prezzo_con_fee_e_ricarico, 2)
+                tot_riga_imponibile = tot_unit_imponibile * qt
+                tot_riga_negozio = costo_negozio * qt
+                prezzo_con_margini_o_fee = prezzo_con_fee_e_ricarico
+            
+            else:
+                # CASO 2: Ricarico ASSENTE (P.Catalogo è GUADAGNO PURO)
+                prezzo_servizio = prezzo_catalogo_val
+                # Applichiamo solo la fee (se presente)
+                prezzo_con_fee = prezzo_servizio * (1 + fee_effettiva) 
+            
+                tot_unit_imponibile = round(prezzo_con_fee, 2)
+                tot_riga_imponibile = tot_unit_imponibile * qt
+                tot_riga_negozio = 0.0 # Costo negozio è zero
+                prezzo_con_margini_o_fee = prezzo_con_fee
+
+            # Azzera solo i campi non pertinenti per S
+            r["costo_trasporto"] = "0"
+            r["extra"] = "0"
+            r["spese_incasso"] = "0"
+            r["s1"] = "0"
+            r["s2"] = "0"
+            r["s3"] = "0"
+            # --- FINE BLOCCO MODIFICATO ---
+
+        else:
+            # CASO 2: È UN ARTICOLO NORMALE (PZ, MQ, ML)
+            prezzo_scontato = (_to_num(r.get("prezzo_catalogo")) * (1 - _to_num(r.get("s1"))/100) * (1 - _to_num(r.get("s2"))/100) * (1 - _to_num(r.get("s3"))/100))
+            prezzo_con_margini = prezzo_scontato * (1 + fee_effettiva) * (1 + ric)
+            trasp_con_margini = trasp * (1 + fee_effettiva) * (1 + ric)
+            extra_con_margini = extra * (1 + fee_effettiva) * (1 + ric)
+            
+            subtotale_unitario = 0
+            if unt == "MQ": subtotale_unitario = prezzo_con_margini + trasp_con_margini
+            elif unt in ["PZ", "ML"]: subtotale_unitario = prezzo_con_margini + (trasp_con_margini / qt if qt > 0 else 0)
+            else: subtotale_unitario = prezzo_con_margini
+            
+            extra_per_unita_con_margini = (extra_con_margini / qt if qt > 0 else 0)
+            tot_unit_imponibile = subtotale_unitario + extra_per_unita_con_margini
+            tot_unit_imponibile = round(tot_unit_imponibile, 2)
+            tot_riga_imponibile = tot_unit_imponibile * qt
+
+            # Aggiungi questo blocco dentro al ciclo, dopo il calcolo di 'tot_riga_imponibile'
+            costo_unitario_negozio = prezzo_scontato
+            if unt == "MQ":
+                costo_unitario_negozio += trasp
+            elif unt in ["PZ", "ML"]:
+                costo_unitario_negozio += (trasp / qt if qt > 0 else 0)
+            costo_unitario_negozio += (incasso / qt if qt > 0 else 0)
+
+            costo_unitario_negozio += (extra / qt if qt > 0 else 0)
+            costo_unitario_negozio = round(costo_unitario_negozio, 2)
+            tot_riga_negozio = costo_unitario_negozio * qt
+            prezzo_con_margini_o_fee = prezzo_con_margini
+        
+        tot_imponibile_negozio_globale += tot_riga_negozio
+            
+        iva_unitaria_val = tot_unit_imponibile * (iva_riga_pct / 100)
+        tot_iva_riga_val = tot_riga_imponibile * (iva_riga_pct / 100)
+
+        r["prezzo"] = _fmt_price(prezzo_con_margini_o_fee)
+        r["tot_prezzo_unitario"] = _fmt_price(tot_unit_imponibile)
+        r["tot_prezzo"] = _fmt_price(tot_riga_imponibile)
+        r["iva_pct"] = f"{int(iva_riga_pct)} %"
+        r["iva_unitaria"] = _fmt_price(iva_unitaria_val) 
+        r["tot_iva_riga"] = _fmt_price(tot_iva_riga_val)
+
+        aliquota_key = str(int(iva_riga_pct))
+        imponibili_per_iva.setdefault(aliquota_key, 0.0)
+        imponibili_per_iva[aliquota_key] += tot_riga_imponibile
+
+    #  blocco di salvataggio dei totali 
+    tot_imponibile_cliente_globale = sum(imponibili_per_iva.values())
+    tot_iva_globale = sum(valore * (int(aliquota)/100) for aliquota, valore in imponibili_per_iva.items())
+
+    p["imponibili_iva"] = {k: _fmt_price(v) for k, v in imponibili_per_iva.items()}
+    p["tot_iva_dettaglio"] = {k: _fmt_price(v * (int(k)/100)) for k, v in imponibili_per_iva.items()}
+
+    # Salvataggio dei nuovi totali
+    p["tot_imponibile_negozio"] = _fmt_price(tot_imponibile_negozio_globale)
+    p["tot_imponibile_cliente"] = _fmt_price(tot_imponibile_cliente_globale)
+    p["tot_iva"] = _fmt_price(tot_iva_globale)
+    p["totale"] = _fmt_price(tot_imponibile_cliente_globale + tot_iva_globale)
+
+    # Calcolo e salvataggio ricarico medio
+    totale_guadagno = tot_imponibile_cliente_globale - tot_imponibile_negozio_globale
+    if tot_imponibile_negozio_globale > 0:
+        ricarico_medio_pct = (totale_guadagno / tot_imponibile_negozio_globale) * 100
+    else:
+        ricarico_medio_pct = 0.0
+    p["ricarico_medio_pct"] = f"{ricarico_medio_pct:.2f}".replace('.', ',') + " %"
+
+    # Rimuoviamo la vecchia chiave per pulizia
+    p.pop("tot_imponibile", None)
+    
+    # --- MODIFICA: Imposta flag no_iva manuale ---
+    # Se il preventivo è bloccato (is_locked='true'), i checkbox disabilitati non vengono inviati dal browser.
+    # In questo caso NON dobbiamo toccare il valore esistente (altrimenti si resetterebbe a False).
+    # Aggiorniamo il valore SOLO se l'editor è sbloccato.
+    if form.get("is_locked") != 'true':
+        p["no_iva"] = True if form.get("no_iva") else False
+    # --- FINE MODIFICA ---
+
+    aggiorna_stato_consegna_globale(p)
+    aggiorna_stato_pagamento_globale(p)
+    aggiorna_stato_avanzamento(p)
+    
+    # Gestione eliminazione riga (deve lavorare con la lista aggiornata)
+    if request.args.get('delete_row') is not None:
+        idx = int(request.args.get('delete_row'))
+        if 0 <= idx < len(p["righe"]):
+            p["righe"].pop(idx)
+        anchor = 'ancora-fine-righe'
+# Gestione aggiunta riga
+    elif request.args.get('add_row') == '1':
+        # --- INIZIO MODIFICA: Leggi l'IVA di default dal form ---
+        
+        # 1. Leggi il valore dal selettore (es. "22"), con un default di sicurezza
+        default_iva_value = iva_selezionata_dal_form
+        
+        # 2. Crea il dizionario base per la nuova riga
+        new_row = {k: "" for k in ["articolo", "unt", "qt", "prezzo_catalogo", "costo_trasporto", "spese_incasso", "s1", "s2", "s3", "ricarico_pct"]}
+        
+        # 3. Imposta l'iva_pct in base al valore letto, formattandolo
+        new_row["iva_pct"] = f"{default_iva_value} %"
+        
+        # 4. Aggiungi la nuova riga al preventivo
+        p["righe"].append(new_row)
+        anchor = 'ancora-fine-righe'
+        # --- FINE MODIFICA ---
+    else: 
+        flash("Preventivo Salvato.")
+        anchor = 'ancora-fine-righe'
+    
+    save_quote(quote_id, p)
+    
+    if request.form.get("is_ajax") == "1": return jsonify({"success": True})
+    return redirect(url_for("editor_preventivo", quote_id=quote_id, _anchor=anchor))
+
+def _to_num(x, default=0.0):
+    if x is None or isinstance(x, Undefined) or str(x).strip() == "": return float(default)
+    try:
+        s = str(x).strip().replace("€", "").replace("%", "").strip()
+        if "," in s and "." in s:
+            s = s.replace(".", "") if s.rfind(".") < s.rfind(",") else s.replace(",", "")
+        s = s.replace(",", ".")
+        return float(s)
+    except (ValueError, TypeError):
+        return float(default)
+    
+@app.route("/preventivo/<quote_id>/clona")
+@login_required
+def clona_preventivo(quote_id):
+    """
+    Crea una copia esatta di un preventivo esistente (Edile o Standard),
+    gestendo correttamente la struttura a sezioni.
+    """
+    # 1. Carica il preventivo originale
+    p_originale = load_quote(quote_id)
+    if not p_originale:
+        return jsonify({"success": False, "error": "Preventivo originale non trovato."})
+
+    # 2. Crea una copia profonda
+    p_clonato = copy.deepcopy(p_originale)
+
+    # 3. Genera nuovo ID
+    venditore_sigla = session.get("user_sigla", "XX")
+    nuovo_id = get_new_quote_id(venditore_sigla)
+    
+    p_clonato["numero"] = nuovo_id
+    p_clonato["data"] = datetime.date.today().strftime('%Y-%m-%d')
+    p_clonato["stato"] = "Bozza"
+    p_clonato["is_locked"] = False
+    
+    # 4. Copia esplicita della struttura a sezioni (fondamentale per Edili)
+    if "sezioni_edili" in p_originale:
+        p_clonato["sezioni_edili"] = copy.deepcopy(p_originale["sezioni_edili"])
+    
+    # 5. Pulizia dati specifici del vecchio preventivo
+    campi_da_rimuovere = [
+        "pdf_attivo", "storico_pdf", "pagamenti", "bolle", 
+        "fatture_allegate", "ordini_fornitore", "data_conferma", "data_chiusura",
+        # Campi conservati dalla migrazione V2 (colonna 'extra'): non vanno ereditati dal clone.
+        # Gli allegati sono file nella cartella del vecchio preventivo, nel clone sarebbero link rotti.
+        "fatture_per_iva", "stati_fattura_iva", "stato_fattura", "data_annullamento",
+        "allegati", "totale_pagato", "totale_da_saldare"
+    ]
+    for campo in campi_da_rimuovere:
+        p_clonato.pop(campo, None)
+    
+    # Resetta stato consegna righe (sia standard che edili)
+    if "righe" in p_clonato:
+        for r in p_clonato["righe"]:
+            r.pop("stato_consegna", None); r.pop("bolla_id", None); r.pop("data_consegna", None)
+            r.pop("magazzino_scaricato", None)
+            
+    if "sezioni_edili" in p_clonato:
+        for sez in p_clonato["sezioni_edili"]:
+            for r in sez.get("righe", []):
+                r.pop("stato_consegna", None); r.pop("bolla_id", None); r.pop("data_consegna", None)
+
+    # 6. Salva
+    save_quote(nuovo_id, p_clonato)
+
+    # 7. Restituisci JSON strutturato correttamente
+    return jsonify({
+        "success": True, 
+        "vecchio_id": quote_id, 
+        "nuovo_id": nuovo_id,
+        "new_url": url_for('editor_preventivo_edile', quote_id=nuovo_id) if p_clonato.get("tipo_preventivo") == "edile" else url_for('editor_preventivo', quote_id=nuovo_id)
+    })
+
+@app.route("/preventivo/<quote_id>/conferma-ordine") 
+@login_required
+def conferma_ordine(quote_id):
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.")
+        return redirect(url_for("dashboard"))
+    
+    ordini_fornitore = p.get("ordini_fornitore", [])
+    needs_saving = False
+    for ordine in ordini_fornitore:
+        if "ordine_id" not in ordine or not ordine["ordine_id"]:
+            ordine["ordine_id"] = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+            ordine["data_ordine"] = datetime.date.today().strftime('%Y-%m-%d')
+            needs_saving = True
+
+    if needs_saving:
+        save_quote(quote_id, p)
+        print(f"INFO: Aggiunti ID ordine mancanti per preventivo {quote_id}")
+
+    righe_preventivo = p.get("righe", [])
+    tutti_gli_indici_validi = {
+        i for i, r in enumerate(righe_preventivo) 
+        if r.get("articolo", "").strip() and r.get("unt", "").strip().upper() != "S"}
+    # Le righe prese dal magazzino non vanno ordinate al fornitore
+    tutti_gli_indici_validi -= _indici_righe_magazzino(p)
+
+    # Funzioni helper per i calcoli, ora include anche le spese di incasso
+    def _get_shop_cost(riga):
+        prezzo_scontato = (_to_num(riga.get("prezzo_catalogo")) * (1 - _to_num(riga.get("s1"))/100) * (1 - _to_num(riga.get("s2"))/100) * (1 - _to_num(riga.get("s3"))/100))
+        return prezzo_scontato * _to_num(riga.get("qt", 1))
+
+    def _get_transport_cost(riga):
+        trasp_riga = _to_num(riga.get("costo_trasporto", 0))
+        qt_riga = _to_num(riga.get("qt", 1))
+        unt_riga = riga.get("unt", "").strip().upper()
+        if unt_riga == "MQ":
+            return trasp_riga * qt_riga
+        return trasp_riga
+
+    indici_gia_ordinati = set()
+    tutti_gli_ordini = p.get("ordini_fornitore", [])
+    ordini_confermati = []
+    ordini_in_attesa = []
+
+    # 1. Associa articoli e calcola i totali per ogni ordine
+    for ordine in tutti_gli_ordini:
+        # --- LOGICA CORRETTA PER POPOLARE GLI ARTICOLI ---
+        items_in_ordine = []
+        for item_index in ordine.get("indici_righe", []):
+            if 0 <= item_index < len(righe_preventivo):
+                riga = righe_preventivo[item_index].copy() 
+                riga["original_index"] = item_index
+                riga["costo_presunto_articolo"] = _get_shop_cost(riga)
+                items_in_ordine.append(riga)
+                indici_gia_ordinati.add(item_index)
+        
+        ordine["articoli"] = items_in_ordine 
+        # --- FINE LOGICA ARTICOLI ---
+
+        # --- 1. CALCOLA COSTI PREVENTIVATI (ORA FUNZIONANTE) ---
+        costo_netto_articoli = sum(item["costo_presunto_articolo"] for item in items_in_ordine)
+        costo_trasporto_preventivato = sum(_get_transport_cost(item) for item in items_in_ordine)
+        
+        # --- 2. LOGICA COSTI EFFETTIVI (BLOCCO INVARIATO) ---
+        trasporto_incluso = ordine.get("trasporto_incluso", True) 
+        importo_articoli_lordo_salvato = _to_num(ordine.get("importo_articoli"))
+        importo_trasporto_lordo_salvato = _to_num(ordine.get("importo_trasporto"))
+        importo_totale_lordo_salvato = _to_num(ordine.get("importo")) # Vecchio campo (solo articoli)
+        
+        costo_effettivo_articoli_imponibile = 0.0
+        costo_effettivo_trasporto_imponibile = 0.0
+
+        if "importo_articoli" in ordine:
+            # CASO 1: Ordine "Nuovo" (o già modificato)
+            ordine["importo_articoli_form"] = ordine.get("importo_articoli", "0")
+            ordine["importo_trasporto_form"] = ordine.get("importo_trasporto", "0")
+            
+            if trasporto_incluso:
+                # Il trasporto è INCLUSO. L'importo articoli è il totale.
+                costo_effettivo_articoli_imponibile = importo_articoli_lordo_salvato / 1.22
+                costo_effettivo_trasporto_imponibile = 0.0 # È già dentro, quindi il costo separato è 0
+            else:
+                # Il trasporto è SEPARATO.
+                costo_effettivo_articoli_imponibile = importo_articoli_lordo_salvato / 1.22
+                if importo_trasporto_lordo_salvato > 0:
+                    # Se è stato specificato un costo trasporto, usa quello
+                    costo_effettivo_trasporto_imponibile = importo_trasporto_lordo_salvato / 1.22
+                else:
+                    # Altrimenti (è 0 o vuoto), usa il fallback del costo presunto
+                    costo_effettivo_trasporto_imponibile = costo_trasporto_preventivato
+
+        else:
+            # CASO 2: Ordine "Legacy" (Logica precedente)
+            costo_effettivo_articoli_imponibile = importo_totale_lordo_salvato / 1.22
+            costo_effettivo_trasporto_imponibile = costo_trasporto_preventivato # Fallback
+
+            # Popoliamo i campi per il bottone "Modifica"
+            ordine["importo_articoli_form"] = ordine.get("importo", "0") 
+            ordine["importo_trasporto_form"] = f"{(costo_effettivo_trasporto_imponibile * 1.22):.2f}".replace(".", ",")
+            
+            # Sovrascriviamo il flag per il JS, così la modale si apre in modalità "separata"
+            trasporto_incluso = False 
+
+        # Aggiungiamo il flag per passarlo al bottone "Modifica"
+        ordine["trasporto_incluso_flag"] = trasporto_incluso
+        
+        # --- 3. CALCOLO FINALE (PULITO) ---
+        costo_totale_effettivo_imponibile = costo_effettivo_articoli_imponibile + costo_effettivo_trasporto_imponibile
+        
+        # Ricalcoliamo l'importo totale lordo (IVA incl.)
+        importo_totale_lordo_usato = (costo_effettivo_articoli_imponibile * 1.22) + (costo_effettivo_trasporto_imponibile * 1.22)
+
+        # L'IVA calcolata è la differenza tra il lordo e il netto
+        iva_calcolata = importo_totale_lordo_usato - costo_totale_effettivo_imponibile
+
+        # Assegna i valori per il template
+        ordine["costo_effettivo_articoli_imponibile"] = costo_effettivo_articoli_imponibile
+        ordine["costo_effettivo_trasporto_imponibile"] = costo_effettivo_trasporto_imponibile
+        ordine["costo_totale_effettivo_imponibile"] = costo_totale_effettivo_imponibile
+        ordine["iva_calcolata"] = iva_calcolata
+        
+        # Assegna i totali preventivati (calcolati sopra)
+        ordine["costo_netto_articoli"] = costo_netto_articoli
+        ordine["costo_trasporto_preventivato"] = costo_trasporto_preventivato
+        ordine["costo_totale_preventivato"] = costo_netto_articoli + costo_trasporto_preventivato
+
+        # Suddivide gli ordini in "attesa" o "confermati"
+        if ordine.get("numero_conferma", "").strip():
+            ordini_confermati.append(ordine)
+        else:
+            ordini_in_attesa.append(ordine)
+
+    # 2. Isola gli articoli non ancora ordinati (logica invariata)
+    indici_non_ordinati = sorted(list(tutti_gli_indici_validi - indici_gia_ordinati))
+    righe_non_ordinate = []
+    for item_index in indici_non_ordinati:
+        riga = righe_preventivo[item_index]
+        riga["original_index"] = item_index
+        riga["costo_presunto_articolo"] = _get_shop_cost(riga)
+        righe_non_ordinate.append(riga)
+
+    # 3. Calcola i totali globali, aggiungendo le spese incasso
+    totale_presunto_globale = sum(
+        _get_shop_cost(r) + _get_transport_cost(r)
+        for i, r in enumerate(righe_preventivo) if i in tutti_gli_indici_validi
+    )
+    totale_effettivo_globale = sum(o.get("costo_totale_effettivo_imponibile", 0) for o in tutti_gli_ordini)
+
+    # 4. Righe prese dal magazzino: confermate in automatico, non si ordinano al fornitore
+    ordine_magazzino = None
+    indici_magazzino = sorted(_indici_righe_magazzino(p))
+    if indici_magazzino:
+        db = _DBSession()
+        try:
+            articoli_mag = {a.id: a for a in db.query(_ArticoloMagazzino).filter(
+                _ArticoloMagazzino.id.in_([_id_articolo_riga(righe_preventivo[i]) for i in indici_magazzino])).all()}
+        finally:
+            db.close()
+        voci = []
+        for i in indici_magazzino:
+            r = righe_preventivo[i]
+            art = articoli_mag.get(_id_articolo_riga(r))
+            voci.append({"articolo": r.get("articolo", ""), "unt": r.get("unt", ""), "qt": r.get("qt", ""),
+                         "scaricato": bool(r.get("magazzino_scaricato")),
+                         "giacenza": _fmt_qt(art.giacenza) if art else "",
+                         "codice": (art.codice if art and hasattr(art, "codice") else "") or ""})
+        ordine_magazzino = {"articoli": voci, "tutti_scaricati": all(v["scaricato"] for v in voci)}
+
+
+    return render_template("conferma_ordine.html", 
+        title="Gestione Ordini", p=p,
+        righe_non_ordinate=righe_non_ordinate,
+        ordine_magazzino=ordine_magazzino,
+        ordini_confermati=ordini_confermati, 
+        ordini_in_attesa=ordini_in_attesa,   
+        totale_presunto=totale_presunto_globale,
+        totale_effettivo=totale_effettivo_globale
+    )
+
+@app.route("/preventivo/<quote_id>/salva-ordine", methods=["POST"])
+@login_required
+def salva_ordine(quote_id):
+    p = load_quote(quote_id)
+    if not p:
+        return jsonify({"success": False, "error": "Preventivo non trovato"})
+
+    form_data = request.form
+
+    # Le righe scelte: solo articoli veri, non gia' in un altro ordine e non presi dal magazzino
+    gia_ordinati = {i for o in p.get("ordini_fornitore", []) for i in o.get("indici_righe", [])}
+    try:
+        indici = sorted({int(i) for i in form_data.getlist("indici_righe[]")})
+    except ValueError:
+        return jsonify({"success": False, "error": "Articoli non validi."})
+    righe = p.get("righe", [])
+    indici = [i for i in indici if 0 <= i < len(righe) and i not in gia_ordinati and i not in _indici_righe_magazzino(p)]
+    if not indici:
+        return jsonify({"success": False, "error": "Seleziona almeno un articolo ancora da ordinare."})
+    if not (form_data.get("azienda") or "").strip():
+        return jsonify({"success": False, "error": "Scrivi il fornitore."})
+
+    # --- INIZIO MODIFICA: Leggiamo i costi separati ---
+    importo_articoli_val = _to_num(form_data.get("importo_articoli"))
+    importo_trasporto_val = _to_num(form_data.get("importo_trasporto"))
+    importo_totale_val = importo_articoli_val + importo_trasporto_val # Somma
+
+    # L'IVA viene calcolata sul totale
+    iva_calcolata = importo_totale_val - (importo_totale_val / 1.22)
+    # --- FINE MODIFICA ---
+
+    # Crea un nuovo oggetto "Ordine Fornitore"
+    nuovo_ordine = {
+        "ordine_id": f"ORD-{uuid.uuid4().hex[:8].upper()}",
+        "data_ordine": datetime.date.today().strftime('%Y-%m-%d'),
+        "azienda": (form_data.get("azienda") or "").strip(),
+        "numero_conferma": (form_data.get("numero_conferma") or "").strip(),
+        
+        # --- INIZIO MODIFICA: Salviamo i nuovi campi ---
+        "importo": f"{importo_totale_val:.2f}".replace(".", ","), # Manteniamo il totale per compatibilità
+        "importo_articoli": form_data.get("importo_articoli"),
+        "importo_trasporto": form_data.get("importo_trasporto"),
+        "iva_ordine": iva_calcolata,
+        # prima non si salvava: un ordine col trasporto a parte veniva contato come trasporto incluso
+        "trasporto_incluso": form_data.get("trasporto_incluso", "true") == "true",
+        # --- FINE MODIFICA ---
+
+        "data_arrivo": form_data.get("data_arrivo"),
+        "indici_righe": indici
+    }
+
+    # Aggiunge il nuovo ordine alla lista
+    if "ordini_fornitore" not in p:
+        p["ordini_fornitore"] = []
+    p["ordini_fornitore"].append(nuovo_ordine)
+    aggiorna_stato_avanzamento(p)
+
+    if nuovo_ordine["numero_conferma"]:
+        aggiorna_stato_consegna_globale(p)
+
+    save_quote(quote_id, p)
+    return jsonify({"success": True})
+
+@app.route("/preventivo/<quote_id>/modifica-ordine", methods=["POST"])
+@login_required
+def modifica_ordine(quote_id):
+    p = load_quote(quote_id)
+    if not p:
+        return jsonify({"success": False, "error": "Preventivo non trovato"})
+
+    form_data = request.form
+    ordine_id_da_modificare = form_data.get("ordine_id")
+    ordine_trovato = None
+
+    # Cerca l'ordine da modificare
+    for ordine in p.get("ordini_fornitore", []):
+        if ordine.get("ordine_id") == ordine_id_da_modificare:
+            ordine_trovato = ordine
+            break
+
+    if ordine_trovato:
+        trasporto_incluso = form_data.get("trasporto_incluso") == 'true'
+        # --- INIZIO MODIFICA: Leggiamo i costi separati ---
+        importo_articoli_val = _to_num(form_data.get("importo_articoli"))
+        importo_trasporto_val = _to_num(form_data.get("importo_trasporto"))
+        importo_totale_val = importo_articoli_val + importo_trasporto_val # Somma
+        
+        # L'IVA viene calcolata sul totale
+        iva_calcolata = importo_totale_val - (importo_totale_val / 1.22)
+        # --- FINE MODIFICA ---
+
+        # Aggiorna i dati dell'ordine
+        ordine_trovato["azienda"] = (form_data.get("azienda") or "").strip()
+        ordine_trovato["numero_conferma"] = (form_data.get("numero_conferma") or "").strip()
+        
+        # --- INIZIO MODIFICA: Salviamo i nuovi campi ---
+        ordine_trovato["importo"] = f"{importo_totale_val:.2f}".replace(".", ",")
+        ordine_trovato["importo_articoli"] = form_data.get("importo_articoli")
+        ordine_trovato["importo_trasporto"] = form_data.get("importo_trasporto")
+        ordine_trovato["iva_ordine"] = iva_calcolata
+        ordine_trovato["trasporto_incluso"] = trasporto_incluso
+        # --- FINE MODIFICA ---
+        
+        ordine_trovato["data_arrivo"] = form_data.get("data_arrivo")
+
+        aggiorna_stato_consegna_globale(p)
+        save_quote(quote_id, p)
+        flash("Ordine fornitore modificato con successo.")
+        return jsonify({"success": True})
+    
+    return jsonify({"success": False, "error": "L'ordine originale non è stato trovato nel preventivo."})
+
+@app.route("/preventivo/<quote_id>/svincola-articolo", methods=["POST"])
+@login_required
+def svincola_articolo(quote_id):
+    p = load_quote(quote_id)
+    if not p: return jsonify({"success": False, "error": "Preventivo non trovato"})
+    
+    data = request.json
+    ordine_id_target = data.get("ordine_id")
+    item_index = data.get("item_index")
+
+    ordine_trovato = next((o for o in p.get("ordini_fornitore", []) if o.get("ordine_id") == ordine_id_target), None)
+    
+    if not ordine_trovato:
+        return jsonify({"success": False, "error": "Ordine non trovato"})
+
+    if int(item_index) in ordine_trovato.get("indici_righe", []):
+        ordine_trovato["indici_righe"].remove(int(item_index))
+        save_quote(quote_id, p)
+        return jsonify({"success": True})
+    
+    return jsonify({"success": False, "error": "Articolo non trovato nell'ordine"})
+
+@app.route("/preventivo/<quote_id>/aggiungi-a-ordine", methods=["POST"])
+@login_required
+def aggiungi_a_ordine(quote_id):
+    p = load_quote(quote_id)
+    if not p: return jsonify({"success": False, "error": "Preventivo non trovato"})
+
+    form_data = request.form
+    target_ordine_id = form_data.get("target_ordine_id")
+    indici_da_aggiungere = [int(i) for i in form_data.getlist("indici_righe[]")]
+
+    ordine_trovato = next((o for o in p.get("ordini_fornitore", []) if o.get("ordine_id") == target_ordine_id), None)
+    
+    if not ordine_trovato:
+        return jsonify({"success": False, "error": "Ordine di destinazione non trovato"})
+    
+    # Aggiunge i nuovi indici assicurandosi che non ci siano duplicati
+    ordine_trovato["indici_righe"] = sorted(list(set(ordine_trovato.get("indici_righe", []) + indici_da_aggiungere)))
+    
+    save_quote(quote_id, p)
+    return jsonify({"success": True})
+
+
+@app.route("/preventivo/<quote_id>/elimina-ordine", methods=["POST"])
+@login_required
+def elimina_ordine(quote_id):
+    p = load_quote(quote_id)
+    if not p: return jsonify({"success": False, "error": "Preventivo non trovato"})
+
+    ordine_id_da_eliminare = request.form.get("ordine_id")
+    ordini_originali = p.get("ordini_fornitore", [])
+    ordini_filtrati = [o for o in ordini_originali if o.get("ordine_id") != ordine_id_da_eliminare]
+
+    if len(ordini_filtrati) < len(ordini_originali):
+        p["ordini_fornitore"] = ordini_filtrati
+        save_quote(quote_id, p)
+        return jsonify({"success": True})
+    else:
+        return jsonify({"success": False, "error": "Ordine non trovato"})
+@app.route("/cliente/<client_id>/indirizzi-cantiere")
+@login_required
+def get_indirizzi_cantiere(client_id):
+    """Restituisce gli indirizzi cantiere di un cliente in formato JSON."""
+    client_data = load_client(client_id)
+    if not client_data:
+        return jsonify({"error": "Cliente non trovato"}), 404
+    
+    return jsonify({"indirizzi": client_data.get("indirizzi_cantiere", [])})
+
+@app.route("/preventivo/<quote_id>/allega-a-ordine", methods=["POST"])
+@login_required
+def allega_a_ordine(quote_id):
+    """Gestisce l'upload di un allegato per uno specifico ordine fornitore."""
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.", "error")
+        return redirect(request.referrer or url_for('dashboard'))
+
+    # Dati dal form
+    ordine_id_target = request.form.get("ordine_id")
+    descrizione = request.form.get("descrizione", "Conferma d'ordine")
+    file = request.files.get('file')
+
+    if not all([ordine_id_target, file, file.filename]):
+        flash("Dati mancanti: assicurati di selezionare un file e che l'ID ordine sia presente.", "error")
+        return redirect(request.referrer)
+
+    # Trova l'ordine corretto
+    ordine_trovato = next((o for o in p.get("ordini_fornitore", []) if o.get("ordine_id") == ordine_id_target), None)
+    if not ordine_trovato:
+        flash("Ordine fornitore non trovato.", "error")
+        return redirect(request.referrer)
+
+    # Logica di salvataggio del file
+    quote_allegati_dir = ALLEGATI_DIR / quote_id
+    quote_allegati_dir.mkdir(exist_ok=True)
+    
+    filename = secure_filename(file.filename)
+    file.save(quote_allegati_dir / filename)
+
+    # Aggiungi il riferimento al file nel JSON dell'ordine
+    if "allegati" not in ordine_trovato:
+        ordine_trovato["allegati"] = []
+    
+    ordine_trovato["allegati"].append({
+        "filename": filename,
+        "descrizione": descrizione,
+        "data_upload": datetime.date.today().strftime('%Y-%m-%d')
+    })
+
+    save_quote(quote_id, p)
+    flash("Conferma d'ordine allegata con successo!", "success")
+    return redirect(request.referrer)
+
+@app.route("/cliente/<client_id>/salva-indirizzo-cantiere", methods=["POST"])
+@login_required
+def salva_indirizzo_cantiere(client_id):
+    """Salva o aggiorna un indirizzo cantiere per un cliente."""
+    client_data = load_client(client_id)
+    if not client_data:
+        return jsonify({"success": False, "error": "Cliente non trovato"})
+
+    if "indirizzi_cantiere" not in client_data:
+        client_data["indirizzi_cantiere"] = []
+
+    form = request.form
+    address_id = form.get("id")
+    
+    address_data = {
+        "descrizione": form.get("descrizione"),
+        "indirizzo": form.get("indirizzo"),
+        "regione": form.get("regione"),
+        "regione_nome": form.get("regione_nome"),
+        "provincia": form.get("provincia"),
+        "comune": form.get("comune"),
+        "cap": form.get("cap"),
+    }
+
+    if address_id:
+        # Aggiorna indirizzo esistente
+        found = False
+        for addr in client_data["indirizzi_cantiere"]:
+            if addr.get("id") == address_id:
+                addr.update(address_data)
+                found = True
+                break
+        if not found:
+            return jsonify({"success": False, "error": "ID indirizzo non trovato"})
+    else:
+        # Aggiungi nuovo indirizzo
+        address_id = f"CANT-{uuid.uuid4().hex[:6].upper()}"
+        address_data["id"] = address_id
+        client_data["indirizzi_cantiere"].append(address_data)
+
+    save_client(client_id, client_data)
+    return jsonify({"success": True, "new_address_id": address_id})
+
+
+@app.route("/admin/utenti/aggiungi", methods=["GET", "POST"])
+@login_required
+def aggiungi_utente():
+    if session.get("user_role") != 'amministratore':
+        flash("Accesso non autorizzato.", "error")
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        users = load_users()
+        username = request.form.get("username")
+        
+        # Controlla se l'utente esiste già
+        if any(u["username"] == username for u in users):
+            flash(f"Errore: L'utente '{username}' esiste già.", "error")
+            return redirect(url_for("aggiungi_utente"))
+
+        # Crea il nuovo utente
+        new_password = f"{username}123"
+        new_user = {
+            "username": username,
+            "password_hash": generate_password_hash(new_password),
+            "full_name": request.form.get("full_name"),
+            "role": request.form.get("role"),
+            "sigla": request.form.get("sigla", "").upper(),
+            "force_password_reset": True,
+            **dati_email_utente(request.form)
+        }
+        users.append(new_user)
+        save_users(users)
+        flash(f"Utente '{username}' creato con successo.", "success")
+        return redirect(url_for("gestisci_utenti"))
+
+    return render_template("aggiungi_utente.html", title="Aggiungi Utente")
+def dati_email_utente(form):
+    """Email e avvisi email dal modulo utente (gestione utenze)."""
+    email = (form.get("email") or "").strip()
+    return {"email": email, "email_report": bool(email and form.get("email_report")),
+            "email_admin": bool(email and form.get("email_admin"))}
+
+
+@app.route("/admin/utenti/elimina/<username>")
+@login_required
+def elimina_utente(username):
+    if session.get("user_role") != 'amministratore':
+        flash("Accesso non autorizzato.", "error")
+        return redirect(url_for("dashboard"))
+
+    if username == session["user_id"]:
+        flash("Non puoi eliminare te stesso.", "error")
+        return redirect(url_for("gestisci_utenti"))
+
+    users = load_users()
+    users_filtered = [user for user in users if user["username"] != username]
+
+    if len(users) == len(users_filtered):
+        flash(f"Errore: Utente '{username}' non trovato.", "error")
+    else:
+        save_users(users_filtered)
+        flash(f"Utente '{username}' eliminato con successo.", "success")
+        
+    return redirect(url_for("gestisci_utenti"))
+@app.route("/admin/utenti/modifica/<username>", methods=["GET", "POST"])
+@login_required
+def modifica_utente(username):
+    if session.get("user_role") != 'amministratore':
+        flash("Accesso non autorizzato.", "error")
+        return redirect(url_for("dashboard"))
+
+    users = load_users()
+    user_to_edit = next((u for u in users if u["username"] == username), None)
+
+    if not user_to_edit:
+        flash("Utente non trovato.", "error")
+        return redirect(url_for("gestisci_utenti"))
+
+    if request.method == "POST":
+        user_to_edit["full_name"] = request.form.get("full_name")
+        user_to_edit["sigla"] = request.form.get("sigla", "").upper()
+        if user_to_edit["role"] != "amministratore":  # un amministratore non si declassa da qui
+            user_to_edit["role"] = request.form.get("role")
+        user_to_edit.update(dati_email_utente(request.form))
+        
+        save_users(users)
+        flash(f"Dati dell'utente '{username}' aggiornati con successo.", "success")
+        return redirect(url_for("gestisci_utenti"))
+    return render_template("modifica_utente.html", title="Modifica Utente", user=user_to_edit)
+@app.route("/preventivo/<quote_id>/sblocca", methods=["POST"])
+
+@login_required
+def sblocca_preventivo(quote_id):
+    if session.get("user_role") == 'segreteria':
+        flash("Non disponi delle autorizzazioni per eseguire questa azione.", "error")
+        return redirect(url_for("dashboard"))
+    p = load_quote(quote_id)
+    if not p:
+        return jsonify({"success": False, "error": "Preventivo non trovato"})
+
+    password = request.json.get("password")
+    if not password:
+        return jsonify({"success": False, "error": "Password non fornita"})
+
+    users = load_users()
+    user = next((u for u in users if u["username"] == session["user_id"]), None)
+
+    if user and check_password_hash(user["password_hash"], password):
+        # Password corretta: sblocca, imposta a Bozza E ANNULLA IL PDF ATTIVO
+        p["stato"] = "Bozza"
+        p["is_locked"] = False
+        p.pop("pdf_attivo", None) # <-- MODIFICA CHIAVE: Rimuove il riferimento al PDF attivo
+
+        save_quote(quote_id, p)
+        return jsonify({"success": True})
+    else:
+        return jsonify({"success": False, "error": "Password errata. Riprova."})
+    
+@app.route("/preventivo/<quote_id>/invia", methods=["POST"])
+@login_required
+def invia_preventivo(quote_id):
+    if session.get("user_role") == 'segreteria':
+        flash("Non disponi delle autorizzazioni per eseguire questa azione.", "error")
+        return redirect(url_for("dashboard"))
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.", "error")
+        return redirect(url_for("dashboard"))
+    
+    p["stato"] = "Inviato"
+    p["is_locked"] = True
+    save_quote(quote_id, p)
+    flash("Preventivo impostato come 'Inviato' e bloccato.", "success")
+    return redirect(url_for("editor_preventivo", quote_id=quote_id))    
+
+# --- File: gestionale.py (intorno alla riga 1680) ---
+
+@app.route("/preventivo/<quote_id>/conferma", methods=["POST"])
+@login_required
+def conferma_preventivo(quote_id):
+    if session.get("user_role") == 'segreteria':
+        flash("Non disponi delle autorizzazioni per eseguire questa azione.", "error")
+        return redirect(url_for("dashboard"))
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.", "error")
+        return redirect(url_for("dashboard"))
+    
+    p["stato"] = "Confermato"
+    p["is_locked"] = True
+    # Un preventivo già confermato e riportato in Bozza per modifiche mantiene la data
+    # di conferma originale: riconfermarlo non deve spostarlo in un altro periodo.
+    if not p.get("data_conferma"):
+        p["data_conferma"] = datetime.date.today().strftime('%Y-%m-%d')
+
+    # Se Edile, marca come Pronto per Consegna le righe non ancora avviate
+    # (senza toccare righe già in bolla/consegnate né le date di arrivo già registrate)
+    if p.get("tipo_preventivo") == "edile":
+        for riga in p.get("righe_edili", []):
+            if riga.get("stato_consegna") not in ("Consegnato", "In Bolla", "Pronto per Consegna"):
+                riga["stato_consegna"] = "Pronto per Consegna"
+            if not riga.get("data_arrivo_in_house"):
+                riga["data_arrivo_in_house"] = datetime.date.today().strftime('%Y-%m-%d')
+    else:
+        # Le righe prese dal magazzino sono gia' in sede: pronte per la consegna
+        for i in _indici_righe_magazzino(p):
+            riga = p["righe"][i]
+            if riga.get("stato_consegna") not in ("Consegnato", "In Bolla", "Pronto per Consegna"):
+                riga["stato_consegna"] = "Pronto per Consegna"
+            if not riga.get("data_arrivo_in_house"):
+                riga["data_arrivo_in_house"] = datetime.date.today().strftime('%Y-%m-%d')
+
+    # --- BLOCCO AGGIUNTO ---
+    # Aggiorniamo lo stato di pagamento, che passerà a "Da Pagare" se era "Non Definito"
+    aggiorna_stato_pagamento_globale(p)
+
+
+    save_quote(quote_id, p)
+    flash("Preventivo confermato e bloccato.", "success")
+    return redirect(url_for("editor_preventivo", quote_id=quote_id))
+
+@app.route("/preventivo/<quote_id>/annulla", methods=["POST"])
+@login_required
+def annulla_preventivo(quote_id):
+    if session.get("user_role") == 'segreteria':
+        flash("Non disponi delle autorizzazioni per eseguire questa azione.", "error")
+        return redirect(url_for("dashboard"))
+    
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.", "error")
+        return redirect(url_for("dashboard"))
+
+    # Annullato dalla cartella del cliente: si torna li', e da li' solo bozze e inviati
+    torna = request.form.get("torna") or ""
+    if not torna.startswith("/cliente/dettaglio/"):
+        torna = ""
+    if torna and p.get("stato") not in ("Bozza", "Inviato"):
+        flash("Dalla cartella del cliente si annullano solo i preventivi in bozza o inviati: apri il preventivo.", "error")
+        return redirect(torna)
+
+    p["stato"] = "Annullato"
+    p["is_locked"] = True
+    
+    # --- RIGA AGGIUNTA ---
+    p["data_annullamento"] = datetime.date.today().strftime('%Y-%m-%d')
+    # --- FINE RIGA AGGIUNTA ---
+
+    save_quote(quote_id, p)
+    flash(f"Preventivo {quote_id} annullato." if torna else "Preventivo annullato.", "warning")
+    return redirect(torna or url_for("editor_preventivo", quote_id=quote_id))
+
+# ===============================================
+# === MAGAZZINO ===
+# ===============================================
+# Gli articoli stanno in 'magazzino_articoli'. Una riga di un preventivo commerciale presa dal
+# magazzino porta il campo 'id_articolo_magazzino': finche' non e' consegnata la sua quantita'
+# risulta "prenotata"; quando la consegna viene registrata la giacenza viene scalata e la riga
+# riceve 'magazzino_scaricato' (quantita' scaricata), cosi' non viene scalata due volte.
+
+# Il magazzino e' aperto a tutti gli utenti collegati: consultazione, uso nei preventivi,
+# nuovi articoli, carichi, modifiche ed eliminazioni (basta il login).
+UNITA_MAGAZZINO = ('PZ', 'ML', 'MQ')
+
+
+def _fmt_qt(n):
+    """Quantita' in formato italiano senza decimali inutili (3 -> '3', 2.5 -> '2,5')."""
+    n = round(float(n or 0), 3)
+    return (f"{n:.3f}".rstrip("0").rstrip(".")).replace(".", ",") if n % 1 else str(int(n))
+
+
+def _id_articolo_riga(r):
+    try:
+        return int(str(r.get("id_articolo_magazzino") or "").strip())
+    except ValueError:
+        return None
+
+
+def _indici_righe_magazzino(p):
+    """Indici delle righe di un preventivo commerciale prese dal magazzino."""
+    if p.get("tipo_preventivo") == "edile":
+        return set()
+    return {i for i, r in enumerate(p.get("righe", []))
+            if _id_articolo_riga(r) and str(r.get("articolo", "")).strip()}
+
+
+def _ordini_con_magazzino(p):
+    """Ordini fornitore piu' un ordine 'virtuale' gia' confermato con le righe prese dal magazzino.
+    Non viene mai salvato: serve a far seguire a queste righe il flusso consegne senza ordinarle."""
+    ordini = list(p.get("ordini_fornitore", []))
+    indici = sorted(_indici_righe_magazzino(p))
+    if indici:
+        ordini.append({
+            "ordine_id": "MAGAZZINO", "numero_conferma": "MAGAZZINO", "azienda": "Magazzino interno",
+            "indici_righe": indici, "data_arrivo": "", "da_magazzino": True,
+        })
+    return ordini
+
+
+def calcola_prenotazioni_magazzino():
+    """articolo_id -> {"qt": totale prenotato, "preventivi": [...]}.
+    Prenotano le righe non ancora scaricate dei preventivi commerciali non annullati."""
+    prenotazioni = {}
+    db = _DBSession()
+    try:
+        rows = db.query(_Preventivo.numero, _Preventivo.cliente, _Preventivo.stato,
+                        _Preventivo.tipo_preventivo, _Preventivo.righe).all()
+    finally:
+        db.close()
+    for numero, cliente, stato, tipo, righe in rows:
+        if stato == "Annullato" or tipo == "edile":
+            continue
+        for r in righe or []:
+            aid = _id_articolo_riga(r)
+            if not aid or r.get("magazzino_scaricato") or not str(r.get("articolo", "")).strip():
+                continue
+            qt = _to_num(r.get("qt"))
+            if qt <= 0:
+                continue
+            voce = prenotazioni.setdefault(aid, {"qt": 0.0, "preventivi": []})
+            voce["qt"] += qt
+            voce["preventivi"].append({"numero": numero, "cliente": cliente or "", "stato": stato or "", "qt": qt})
+    return prenotazioni
+
+
+def _articoli_magazzino_con_disponibilita():
+    prenotazioni = calcola_prenotazioni_magazzino()
+    db = _DBSession()
+    try:
+        articoli = db.query(_ArticoloMagazzino).filter(_ArticoloMagazzino.attivo != False) \
+                     .order_by(_ArticoloMagazzino.descrizione).all()
+        lista = [a.to_dict() for a in articoli]
+    finally:
+        db.close()
+    for a in lista:
+        pren = prenotazioni.get(a["id"], {"qt": 0.0, "preventivi": []})
+        a["prenotato"] = pren["qt"]
+        a["prenotazioni"] = pren["preventivi"]
+        a["disponibile"] = a["giacenza"] - pren["qt"]
+        a["valore"] = a["giacenza"] * a["costo"]
+    return lista
+
+
+def _registra_movimento(db, articolo, delta, tipo, preventivo_id="", note="", costo_unitario=None):
+    articolo.giacenza = (articolo.giacenza or 0.0) + delta
+    articolo.aggiornato_il = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+    mov = _MovimentoMagazzino(
+        articolo_id=articolo.id, data=articolo.aggiornato_il, tipo=tipo, quantita=delta,
+        giacenza_dopo=articolo.giacenza,
+        costo_unitario=(articolo.costo or 0.0) if costo_unitario is None else costo_unitario,
+        preventivo_id=preventivo_id,
+        utente=session.get("user_name", "") if session else "", note=note)
+    db.add(mov)
+    return mov
+
+
+def scarica_righe_magazzino(p, indici):
+    """Scala dalla giacenza le righe consegnate prese dal magazzino (una volta sola per riga)."""
+    if p.get("tipo_preventivo") == "edile":
+        return
+    righe = p.get("righe", [])
+    db = _DBSession()
+    try:
+        for i in indici:
+            if not (0 <= i < len(righe)):
+                continue
+            r = righe[i]
+            aid = _id_articolo_riga(r)
+            if not aid or r.get("magazzino_scaricato"):
+                continue
+            art = db.get(_ArticoloMagazzino, aid)
+            qt = _to_num(r.get("qt"))
+            if not art or qt <= 0:
+                continue
+            _registra_movimento(db, art, -qt, "scarico", p.get("numero", ""), "Consegna al cliente")
+            r["magazzino_scaricato"] = _fmt_qt(qt)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def storna_righe_magazzino(p, indici):
+    """Se una consegna viene annullata, rimette in giacenza quanto era stato scaricato."""
+    if p.get("tipo_preventivo") == "edile":
+        return
+    righe = p.get("righe", [])
+    db = _DBSession()
+    try:
+        for i in indici:
+            if not (0 <= i < len(righe)):
+                continue
+            r = righe[i]
+            aid = _id_articolo_riga(r)
+            scaricato = _to_num(r.get("magazzino_scaricato"))
+            if not aid or scaricato <= 0:
+                continue
+            art = db.get(_ArticoloMagazzino, aid)
+            if art:
+                _registra_movimento(db, art, scaricato, "storno", p.get("numero", ""), "Consegna annullata")
+            r.pop("magazzino_scaricato", None)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def costo_righe_magazzino(p):
+    """Costo delle righe di un preventivo prese dal magazzino (quantita' x costo salvato sulla riga).
+    Nei conti CEO vale come costo reale del preventivo, al pari degli ordini fornitore."""
+    costo = 0.0
+    for i in _indici_righe_magazzino(p):
+        r = p["righe"][i]
+        prezzo = _to_num(r.get("prezzo_catalogo"))
+        for s in ("s1", "s2", "s3"):
+            prezzo *= 1 - _to_num(r.get(s)) / 100
+        costo += prezzo * _to_num(r.get("qt"))
+    return round(costo, 2)
+
+
+def acquisti_magazzino(start_date, end_date):
+    """Spesa per la merce messa in magazzino nel periodo (logica di cassa, come gli ordini fornitore):
+    la quantita' iniziale di un articolo nuovo al suo costo e ogni "Carico merce" al prezzo pagato.
+    Le correzioni da "Modifica" (errori, inventario), le consegne e gli storni non sono spese."""
+    db = _DBSession()
+    try:
+        rows = (db.query(_MovimentoMagazzino, _ArticoloMagazzino.descrizione, _ArticoloMagazzino.codice)
+                  .join(_ArticoloMagazzino, _ArticoloMagazzino.id == _MovimentoMagazzino.articolo_id)
+                  .filter(_MovimentoMagazzino.tipo.in_(["creazione", "carico"])).all())
+    finally:
+        db.close()
+    out = []
+    for m, descrizione, codice in rows:
+        d = _str_to_date((m.data or "")[:10])
+        importo = round((m.quantita or 0.0) * (m.costo_unitario or 0.0), 2)
+        if d and start_date <= d <= end_date and importo:
+            out.append({"data": d, "articolo": descrizione or "", "codice": codice or "",
+                        "quantita": m.quantita or 0.0, "costo_unitario": m.costo_unitario or 0.0,
+                        "importo": importo, "note": m.note or ""})
+    return out
+
+
+@app.route("/magazzino")
+@login_required
+def dashboard_magazzino():
+    articoli = _articoli_magazzino_con_disponibilita()
+    return render_template("dashboard_magazzino.html",
+        title="Magazzino",
+        articoli=articoli,
+        unita=UNITA_MAGAZZINO,
+        puo_modificare=True)
+
+
+@app.route("/api/magazzino/articoli")
+@login_required
+def api_magazzino_articoli():
+    return jsonify({"ok": True, "articoli": _articoli_magazzino_con_disponibilita()})
+
+
+@app.route("/magazzino/articolo/salva", methods=["POST"])
+@login_required
+def salva_articolo_magazzino():
+    data = request.get_json(silent=True) or request.form
+    descrizione = str(data.get("descrizione", "")).strip()
+    if not descrizione:
+        return jsonify({"ok": False, "error": "La descrizione e' obbligatoria."}), 400
+    unita = str(data.get("unita", "PZ")).strip().upper()
+    if unita not in UNITA_MAGAZZINO:
+        unita = "PZ"
+    costo = _to_num(data.get("costo"))
+    giacenza = _to_num(data.get("giacenza"))
+    if costo < 0 or giacenza < 0:
+        return jsonify({"ok": False, "error": "Costo e quantita' non possono essere negativi."}), 400
+
+    db = _DBSession()
+    try:
+        articolo_id = str(data.get("id", "")).strip()
+        adesso = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        if articolo_id:
+            art = db.get(_ArticoloMagazzino, int(articolo_id))
+            if not art or art.attivo is False:
+                return jsonify({"ok": False, "error": "Articolo non trovato."}), 404
+        else:
+            art = _ArticoloMagazzino(descrizione=descrizione, giacenza=0.0, attivo=True, creato_il=adesso)
+            db.add(art)
+            db.flush()
+        art.codice = str(data.get("codice", "")).strip()
+        art.descrizione = descrizione
+        art.unita = unita
+        art.costo = round(costo, 2)
+        art.note = str(data.get("note", "")).strip()
+        art.aggiornato_il = adesso
+        delta = round(giacenza - (art.giacenza or 0.0), 3)
+        if delta:
+            _registra_movimento(db, art, delta, "rettifica" if articolo_id else "creazione",
+                                note=str(data.get("nota_movimento", "")).strip())
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[magazzino] Errore salvataggio articolo: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True})
+
+
+def costo_medio_ponderato(giacenza, costo, quantita, prezzo):
+    """Costo medio dopo un carico: la merce gia' in magazzino pesa al suo costo, quella arrivata al prezzo pagato."""
+    giacenza = max(giacenza or 0.0, 0.0)
+    if giacenza + quantita <= 0:
+        return prezzo
+    return (giacenza * (costo or 0.0) + quantita * prezzo) / (giacenza + quantita)
+
+
+@app.route("/magazzino/articolo/<int:articolo_id>/carico", methods=["POST"])
+@login_required
+def carico_articolo_magazzino(articolo_id):
+    """Arrivo merce: aumenta la giacenza, registra la spesa al prezzo pagato e porta il costo
+    dell'articolo al costo medio ponderato."""
+    data = request.get_json(silent=True) or request.form
+    quantita = _to_num(data.get("quantita"))
+    prezzo = _to_num(data.get("prezzo"))
+    if quantita <= 0:
+        return jsonify({"ok": False, "error": "Inserisci la quantita' arrivata."}), 400
+    if prezzo < 0:
+        return jsonify({"ok": False, "error": "Il prezzo non puo' essere negativo."}), 400
+    db = _DBSession()
+    try:
+        art = db.get(_ArticoloMagazzino, articolo_id)
+        if not art or art.attivo is False:
+            return jsonify({"ok": False, "error": "Articolo non trovato."}), 404
+        costo_prima = art.costo or 0.0
+        art.costo = round(costo_medio_ponderato(art.giacenza, art.costo, quantita, prezzo), 2)
+        mov = _registra_movimento(db, art, quantita, "carico", note=str(data.get("note", "")).strip(),
+                                  costo_unitario=round(prezzo, 2))
+        mov.costo_precedente = costo_prima
+        db.commit()
+        nuovo_costo = art.costo
+    except Exception as e:
+        db.rollback()
+        print(f"[magazzino] Errore carico articolo: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True, "costo": nuovo_costo})
+
+
+@app.route("/magazzino/articolo/<int:articolo_id>/elimina", methods=["POST"])
+@login_required
+def elimina_articolo_magazzino(articolo_id):
+    if calcola_prenotazioni_magazzino().get(articolo_id):
+        return jsonify({"ok": False, "error": "L'articolo e' prenotato su uno o piu' preventivi: libera prima le prenotazioni."}), 400
+    db = _DBSession()
+    try:
+        art = db.get(_ArticoloMagazzino, articolo_id)
+        if not art:
+            return jsonify({"ok": False, "error": "Articolo non trovato."}), 404
+        # Disattivato e non cancellato: le righe dei preventivi e lo storico continuano a puntarci.
+        art.attivo = False
+        art.aggiornato_il = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        db.commit()
+    finally:
+        db.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/magazzino/articolo/<int:articolo_id>/movimenti")
+@login_required
+def api_movimenti_magazzino(articolo_id):
+    db = _DBSession()
+    try:
+        movimenti = db.query(_MovimentoMagazzino).filter_by(articolo_id=articolo_id) \
+                      .order_by(_MovimentoMagazzino.id.desc()).limit(100).all()
+        ultimo = _ultimo_carico(db, articolo_id)
+        lista = []
+        for m in movimenti:
+            d = m.to_dict()
+            d["modificabile"] = bool(ultimo and m.id == ultimo.id)
+            lista.append(d)
+        return jsonify({"ok": True, "movimenti": lista})
+    finally:
+        db.close()
+
+
+def _ultimo_carico(db, articolo_id):
+    """L'ultimo ingresso di merce (carico o quantita' iniziale): e' l'unico che si puo' correggere,
+    perche' il costo medio dei carichi successivi dipende da quelli precedenti."""
+    return db.query(_MovimentoMagazzino) \
+             .filter(_MovimentoMagazzino.articolo_id == articolo_id,
+                     _MovimentoMagazzino.tipo.in_(["creazione", "carico"])) \
+             .order_by(_MovimentoMagazzino.id.desc()).first()
+
+
+@app.route("/magazzino/movimento/<int:movimento_id>/correggi", methods=["POST"])
+@login_required
+def correggi_carico_magazzino(movimento_id):
+    """Corregge (quantita'/prezzo) o elimina l'ultimo carico di un articolo.
+    Giacenza, costo medio e spesa nel cashflow si ricalcolano; le righe dei preventivi no."""
+    data = request.get_json(silent=True) or request.form
+    elimina = str(data.get("elimina", "")).lower() in ("1", "true")
+    db = _DBSession()
+    try:
+        mov = db.get(_MovimentoMagazzino, movimento_id)
+        if not mov or mov.tipo not in ("creazione", "carico"):
+            return jsonify({"ok": False, "error": "Carico non trovato."}), 404
+        ultimo = _ultimo_carico(db, mov.articolo_id)
+        if not ultimo or ultimo.id != mov.id:
+            return jsonify({"ok": False, "error": "Si puo' correggere solo l'ultimo carico dell'articolo."}), 400
+        if elimina and mov.tipo == "creazione":
+            return jsonify({"ok": False, "error": "La quantita' iniziale si corregge, non si elimina."}), 400
+        art = db.get(_ArticoloMagazzino, mov.articolo_id)
+        quantita = 0.0 if elimina else _to_num(data.get("quantita"))
+        prezzo = (mov.costo_unitario or 0.0) if elimina else _to_num(data.get("prezzo"))
+        if not elimina and (quantita <= 0 or prezzo < 0):
+            return jsonify({"ok": False, "error": "Inserisci quantita' e prezzo validi."}), 400
+        delta = round(quantita - (mov.quantita or 0.0), 3)
+        if (art.giacenza or 0.0) + delta < -1e-9:
+            return jsonify({"ok": False, "error": "Una parte di questo carico e' gia' stata consegnata: "
+                                                  "la giacenza andrebbe sotto zero."}), 400
+
+        # Costo medio ricalcolato come se il carico fosse stato registrato giusto
+        giacenza_prima = (mov.giacenza_dopo or 0.0) - (mov.quantita or 0.0)
+        if mov.tipo == "creazione":
+            costo_prima = 0.0
+        elif mov.costo_precedente is not None:
+            costo_prima = mov.costo_precedente
+        else:
+            costo_prima = art.costo or 0.0
+        art.costo = round(costo_medio_ponderato(giacenza_prima, costo_prima, quantita, prezzo), 2) if quantita else costo_prima
+        art.giacenza = (art.giacenza or 0.0) + delta
+        art.aggiornato_il = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        # Le giacenze mostrate nello storico dopo questo carico si spostano della differenza
+        for m in db.query(_MovimentoMagazzino).filter(_MovimentoMagazzino.articolo_id == art.id,
+                                                      _MovimentoMagazzino.id > mov.id).all():
+            m.giacenza_dopo = (m.giacenza_dopo or 0.0) + delta
+        if elimina:
+            db.delete(mov)
+        else:
+            nota = f"Corretto da {session.get('user_name', '')}: era {_fmt_qt(mov.quantita)} x {money_ui(mov.costo_unitario)}"
+            mov.quantita = quantita
+            mov.costo_unitario = round(prezzo, 2)
+            mov.giacenza_dopo = giacenza_prima + quantita
+            mov.note = (f"{mov.note} · " if mov.note else "") + nota
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[magazzino] Errore correzione carico: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True})
+
+
+# === CAMPIONARI ===
+# Catalogo dei campioni fisici in sala e delle foto di bagni realizzati (ex app "Campionari").
+# I record stanno nella tabella 'campionari'; le immagini in DATA_DIR/campionari/immagini,
+# con gli stessi nomi dell'app originale (<codice>.jpg, <codice>_bagno_N.jpg).
+# Per portare i dati dell'app originale basta copiare il contenuto della sua cartella 'dati'
+# in DATA_DIR/campionari: catalogo.json viene importato al primo avvio e rinominato.
+
+CAMPIONARI_DIR = DATA_DIR / "campionari"
+CAMPIONARI_IMG_DIR = CAMPIONARI_DIR / "immagini"
+CAMPIONARI_CATEGORIE_FILE = CAMPIONARI_DIR / "categorie.json"
+CAMPIONARI_FOTO_BAGNI = "Foto bagni reali"
+CAMPIONARI_CATEGORIE_DEFAULT = [
+    "Piastrelle", "Sanitari", "Mobili bagno", "Top", "Rubinetteria", "Colori",
+    "Texture", "Illuminazione", "Specchi", CAMPIONARI_FOTO_BAGNI,
+]
+RUOLI_ELIMINA_CAMPIONARI = ('segreteria', 'ceo', 'amministratore')
+_CAMPIONARI_DATA_URL_RE = re.compile(r'^data:image/(png|jpeg|jpg|webp|gif);base64,(.+)$', re.S)
+_CAMPIONARI_LOCK = threading.Lock()
+
+
+def categorie_campionari():
+    """Gruppi del catalogo: modificabili da DATA_DIR/campionari/categorie.json."""
+    try:
+        with open(CAMPIONARI_CATEGORIE_FILE, encoding="utf-8") as f:
+            cats = json.load(f)
+        if isinstance(cats, list) and cats:
+            return [str(c) for c in cats]
+    except (OSError, ValueError):
+        pass
+    return list(CAMPIONARI_CATEGORIE_DEFAULT)
+
+
+def _prefisso_campionario(categoria):
+    """Prime tre lettere della categoria, es. Piastrelle -> PIA, Foto bagni reali -> BAG."""
+    if categoria == CAMPIONARI_FOTO_BAGNI:
+        return "BAG"
+    return (re.sub(r"[^A-Za-z]", "", categoria).upper() + "XXX")[:3]
+
+
+def _nuovo_codice_campionario(db, categoria):
+    pre = _prefisso_campionario(categoria)
+    cont = db.get(_ContatoreCampionari, pre)
+    if not cont:
+        cont = _ContatoreCampionari(prefisso=pre, ultimo=0)
+        db.add(cont)
+    n = cont.ultimo or 0
+    for (codice,) in db.query(_Campione.codice).filter(_Campione.codice.like(pre + "-%")):
+        m = re.match(re.escape(pre) + r"-(\d+)$", codice or "")
+        if m:
+            n = max(n, int(m.group(1)))
+    cont.ultimo = n + 1
+    return f"{pre}-{n + 1:03d}"
+
+
+def _salva_immagine_campionario(data_url, nome):
+    m = _CAMPIONARI_DATA_URL_RE.match(data_url or "")
+    if not m:
+        return None
+    ext = "jpg" if m.group(1) == "jpeg" else m.group(1)
+    filename = f"{nome}.{ext}"
+    with open(CAMPIONARI_IMG_DIR / filename, "wb") as f:
+        f.write(base64.b64decode(m.group(2)))
+    return filename
+
+
+def _cancella_immagini_campionario(nomi):
+    for fn in nomi:
+        if fn and os.path.basename(fn) == fn:
+            try:
+                (CAMPIONARI_IMG_DIR / fn).unlink()
+            except OSError:
+                pass
+
+
+def importa_catalogo_campionari():
+    """Importa una volta il catalogo.json dell'app Campionari originale, se copiato in DATA_DIR/campionari."""
+    sorgente = CAMPIONARI_DIR / "catalogo.json"
+    if not sorgente.exists():
+        return
+    try:
+        with open(sorgente, encoding="utf-8") as f:
+            catalogo = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"[campionari] catalogo.json non leggibile, import saltato: {e}")
+        return
+    db = _DBSession()
+    try:
+        importati = 0
+        for p in catalogo.get("prodotti", []):
+            codice = str(p.get("codice", "")).strip()
+            if not codice or db.get(_Campione, codice):
+                continue
+            db.add(_Campione(
+                codice=codice, categoria=p.get("categoria", ""), nome=p.get("nome", ""),
+                prezzo=p.get("prezzo"), unita=p.get("unita") or "mq",
+                descrizione=p.get("descrizione") or "", note=p.get("note") or "",
+                immagine=p.get("immagine") or None, foto_bagni=p.get("foto_bagni") or [],
+                creato_il=p.get("creato") or "", utente=""))
+            importati += 1
+        for pre, n in (catalogo.get("contatori") or {}).items():
+            cont = db.get(_ContatoreCampionari, pre)
+            if not cont:
+                db.add(_ContatoreCampionari(prefisso=pre, ultimo=int(n)))
+            elif (cont.ultimo or 0) < int(n):
+                cont.ultimo = int(n)
+        db.commit()
+        sorgente.replace(sorgente.with_name("catalogo.importato.json"))
+        print(f"[campionari] Importati {importati} elementi dall'app Campionari.")
+    except Exception as e:
+        db.rollback()
+        print(f"[campionari] Errore import catalogo: {e}")
+    finally:
+        db.close()
+
+
+CAMPIONARI_IMG_DIR.mkdir(parents=True, exist_ok=True)
+if not CAMPIONARI_CATEGORIE_FILE.exists():
+    with open(CAMPIONARI_CATEGORIE_FILE, "w", encoding="utf-8") as _f:
+        json.dump(CAMPIONARI_CATEGORIE_DEFAULT, _f, ensure_ascii=False, indent=2)
+importa_catalogo_campionari()
+
+
+@app.route("/campionari")
+@login_required
+def dashboard_campionari():
+    return render_template("dashboard_campionari.html", title="Campionari",
+        foto_bagni=CAMPIONARI_FOTO_BAGNI,
+        puo_eliminare=session.get("user_role") in RUOLI_ELIMINA_CAMPIONARI)
+
+
+@app.route("/api/campionari")
+@login_required
+def api_campionari():
+    db = _DBSession()
+    try:
+        prodotti = [c.to_dict() for c in db.query(_Campione).order_by(_Campione.codice).all()]
+        contatori = {c.prefisso: c.ultimo for c in db.query(_ContatoreCampionari).all()}
+    finally:
+        db.close()
+    return jsonify({"ok": True, "categorie": categorie_campionari(), "prodotti": prodotti, "contatori": contatori})
+
+
+@app.route("/api/campionari", methods=["POST"])
+@login_required
+def salva_campionario():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "Dati non validi."}), 400
+    nome = str(data.get("nome") or "").strip()
+    categoria = str(data.get("categoria") or "").strip()
+    unita = str(data.get("unita") or "pz").strip()
+    immagine = data.get("immagine") or ""
+    foto_bagni = data.get("foto_bagni") or []
+    if not nome:
+        return jsonify({"ok": False, "error": "Il nome e' obbligatorio."}), 400
+    if categoria not in categorie_campionari():
+        return jsonify({"ok": False, "error": "Categoria non valida."}), 400
+    if unita not in ("mq", "pz"):
+        return jsonify({"ok": False, "error": "Unita' non valida."}), 400
+    prezzo = None
+    if str(data.get("prezzo") if data.get("prezzo") is not None else "").strip():
+        try:
+            prezzo = float(str(data.get("prezzo")).replace(",", "."))
+        except ValueError:
+            prezzo = -1
+        if prezzo < 0:
+            return jsonify({"ok": False, "error": "Prezzo non valido."}), 400
+    if immagine and not _CAMPIONARI_DATA_URL_RE.match(immagine):
+        return jsonify({"ok": False, "error": "Immagine non valida."}), 400
+    if not isinstance(foto_bagni, list) or not all(isinstance(f, str) and _CAMPIONARI_DATA_URL_RE.match(f) for f in foto_bagni):
+        return jsonify({"ok": False, "error": "Foto non valide."}), 400
+    if categoria == CAMPIONARI_FOTO_BAGNI and not foto_bagni:
+        return jsonify({"ok": False, "error": "Aggiungi almeno una foto del bagno."}), 400
+
+    with _CAMPIONARI_LOCK:
+        db = _DBSession()
+        salvate = []
+        try:
+            codice = _nuovo_codice_campionario(db, categoria)
+            img = _salva_immagine_campionario(immagine, codice) if immagine else None
+            if img:
+                salvate.append(img)
+            for i, fb in enumerate(foto_bagni, start=1):
+                salvate.append(_salva_immagine_campionario(fb, f"{codice}_bagno_{i}"))
+            camp = _Campione(
+                codice=codice, categoria=categoria, nome=nome, prezzo=prezzo, unita=unita,
+                descrizione=str(data.get("descrizione") or "").strip(), note=str(data.get("note") or "").strip(),
+                immagine=img, foto_bagni=[f for f in salvate if f != img],
+                creato_il=datetime.datetime.now().isoformat(timespec="seconds"),
+                utente=session.get("user_name", ""))
+            db.add(camp)
+            db.commit()
+            record = camp.to_dict()
+        except Exception as e:
+            db.rollback()
+            _cancella_immagini_campionario(salvate)
+            print(f"[campionari] Errore salvataggio: {e}")
+            return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+        finally:
+            db.close()
+    return jsonify({"ok": True, "prodotto": record})
+
+
+@app.route("/campionari/<codice>/elimina", methods=["POST"])
+@login_required
+def elimina_campionario(codice):
+    if session.get("user_role") not in RUOLI_ELIMINA_CAMPIONARI:
+        return jsonify({"ok": False, "error": "Non disponi delle autorizzazioni."}), 403
+    with _CAMPIONARI_LOCK:
+        db = _DBSession()
+        try:
+            camp = db.get(_Campione, codice)
+            if not camp:
+                return jsonify({"ok": False, "error": "Elemento non trovato."}), 404
+            immagini = [camp.immagine] + list(camp.foto_bagni or [])
+            db.delete(camp)
+            db.commit()
+        finally:
+            db.close()
+    _cancella_immagini_campionario(immagini)
+    return jsonify({"ok": True})
+
+
+@app.route("/campionari/immagini/<path:filename>")
+@login_required
+def immagine_campionario(filename):
+    return send_from_directory(CAMPIONARI_IMG_DIR, filename)
+
+
+# === CATALOGO (BOZZA, SOLA CONSULTAZIONE) ===
+# Catalogo interno ricavato dai preventivi: articoli con ultimo listino, sconti a cascata,
+# prezzi di vendita e margini, piu' gli sconti per marca. Il file non fa parte del programma
+# (contiene dati dei preventivi) e sta in DATA_DIR/catalogo/catalogo.db: la bozza iniziale si copia
+# a mano, poi ogni preventivo standard salvato lo aggiorna da solo (catalogo_auto.py).
+# Se il file non c'e' viene creato vuoto al primo salvataggio. La pagina lo apre in sola lettura.
+
+CATALOGO_DIR = DATA_DIR / "catalogo"
+CATALOGO_DB = CATALOGO_DIR / "catalogo.db"
+CATALOGO_DIR.mkdir(parents=True, exist_ok=True)
+CATALOGO_CATEGORIE = {
+    "piastrelle": "Piastrelle", "battiscopa_profili": "Battiscopa e profili", "sanitari": "Sanitari",
+    "rubinetteria": "Rubinetteria", "box_doccia": "Box doccia", "piatti_doccia": "Piatti doccia",
+    "vasche": "Vasche", "mobili_bagno": "Mobili bagno", "specchi_illuminazione": "Specchi e illuminazione",
+    "termoarredi": "Termoarredi", "accessori": "Accessori", "porte": "Porte",
+    "lavorazioni_servizi": "Lavorazioni e servizi", "trasporto_spese": "Trasporto e spese", "altro": "Altro",
+}
+_CATALOGO_COLONNE = ("id", "nome", "marca", "categoria", "unita", "listino_ultimo", "data_listino_ultimo",
+                     "sconti_ultimi", "costo_netto_ultimo", "n_preventivi", "n_vendite", "prezzo_vendita_mediano",
+                     "prezzo_vendita_min", "prezzo_vendita_max", "margine_mediano_pct", "stato_bozza", "dubbio")
+
+
+def aggiorna_catalogo_in_background(p):
+    """Porta nel catalogo le righe del preventivo appena salvato, senza rallentare il salvataggio.
+    Un errore qui non deve mai bloccare il preventivo: viene solo scritto nel log."""
+    if not p or (p.get("tipo_preventivo") or "standard") != "standard":
+        return
+    copia = json.loads(json.dumps(p, default=str))
+
+    def _lavora():
+        try:
+            db = _DBSession()
+            try:
+                costi = {a.id: a.costo for a in db.query(_ArticoloMagazzino).all() if a.costo}
+            finally:
+                db.close()
+            _catalogo_auto.aggiorna_da_preventivo(CATALOGO_DB, copia, costi)
+        except Exception as e:
+            print(f"[catalogo] Aggiornamento da '{copia.get('numero')}' non riuscito: {e}")
+
+    threading.Thread(target=_lavora, daemon=True).start()
+
+
+def _catalogo_connessione():
+    """Connessione in sola lettura al catalogo, o None se il file non c'e'."""
+    import sqlite3
+    if not CATALOGO_DB.exists():
+        return None
+    con = sqlite3.connect(f"file:{CATALOGO_DB.as_posix()}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def _categoria_catalogo(c):
+    return CATALOGO_CATEGORIE.get(c or "", (c or "Altro").replace("_", " ").capitalize())
+
+
+@app.route("/catalogo")
+@login_required
+def dashboard_catalogo():
+    con = _catalogo_connessione()
+    if con is None:
+        return render_template("dashboard_catalogo.html", title="Catalogo", disponibile=False,
+                               percorso_db=str(CATALOGO_DB))
+    try:
+        articoli = [dict(r) for r in con.execute(
+            f"select {', '.join(_CATALOGO_COLONNE)}, nomi_originali from articoli order by categoria, marca, nome")]
+        marche = [dict(r) for r in con.execute(
+            "select marca, sconti_ultimi, data_ultima, sconti_piu_usati, quota_piu_usati_pct, n_righe, nota "
+            "from condizioni_marca order by n_righe desc, marca")]
+        info = {r["chiave"]: r["valore"] for r in con.execute("select chiave, valore from info")}
+    except Exception as e:
+        print(f"[catalogo] File non leggibile: {e}")
+        return render_template("dashboard_catalogo.html", title="Catalogo", disponibile=False,
+                               percorso_db=str(CATALOGO_DB))
+    finally:
+        con.close()
+    for a in articoli:
+        a["categoria"] = _categoria_catalogo(a["categoria"])
+        # testo per la ricerca: nome, marca, categoria e come e' stato scritto nei preventivi
+        originali = " ".join(json.loads(a.pop("nomi_originali") or "[]"))
+        a["cerca"] = " ".join((a["nome"] or "", a["marca"] or "", a["categoria"], originali)).lower()
+    aggiornato_il = datetime.datetime.fromtimestamp(CATALOGO_DB.stat().st_mtime).strftime("%d/%m/%Y")
+    return render_template("dashboard_catalogo.html", title="Catalogo", disponibile=True,
+        articoli=articoli, marche=marche, info=info, aggiornato_il=aggiornato_il,
+        categorie=sorted({a["categoria"] for a in articoli}),
+        elenco_marche=sorted({a["marca"] for a in articoli if a["marca"]}, key=str.lower),
+        url_editor=url_for("editor_preventivo", quote_id="__ID__"))
+
+
+@app.route("/api/catalogo/<int:articolo_id>")
+@login_required
+def api_catalogo_articolo(articolo_id):
+    con = _catalogo_connessione()
+    if con is None:
+        return jsonify({"ok": False, "error": "Catalogo non caricato."}), 404
+    try:
+        art = con.execute("select nome, nomi_originali from articoli where id = ?", (articolo_id,)).fetchone()
+        if not art:
+            return jsonify({"ok": False, "error": "Articolo non trovato."}), 404
+        righe = con.execute(
+            "select data, preventivo, stato, venduto, articolo_originale, qt, listino, s1, s2, s3, prezzo_vendita "
+            "from righe where articolo_id = ? order by data desc, preventivo desc", (articolo_id,)).fetchall()
+    finally:
+        con.close()
+    fmt = lambda v: f"{v:g}" if v else "0"
+    return jsonify({"ok": True,
+        "articolo": {"nome": art["nome"], "nomi_originali": json.loads(art["nomi_originali"] or "[]")},
+        "righe": [{"data": r["data"], "preventivo": r["preventivo"], "stato": r["stato"], "venduto": bool(r["venduto"]),
+                   "articolo_originale": r["articolo_originale"], "qt": r["qt"], "listino": r["listino"],
+                   "sconti": "+".join(fmt(r[k]) for k in ("s1", "s2", "s3")), "prezzo_vendita": r["prezzo_vendita"]}
+                  for r in righe]})
+
+
+# ===============================================
+# === NUOVE ROUTE PER GESTIONE CONSEGNE/BOLLE ===
+# ===============================================
+
+def get_delivery_status(riga):
+    """Helper per determinare lo stato di consegna di una riga."""
+    status = riga.get("stato_consegna", "Da Consegnare")
+    # Aggiunto un controllo per assicurarsi che 'status' sia una stringa
+    if isinstance(status, str) and status.startswith("BOLLA-"):
+        parts = status.split('-')
+        # Controlla che il formato sia corretto (es. BOLLA-2024-123)
+        if len(parts) == 3 and parts[2].isdigit():
+            return f"Bolla N.{parts[2]}"
+        else:
+            return status # Restituisce l'ID se il formato non è standard
+    return status
+
+def _calculate_profits_from_quote(p):
+    """
+    Funzione helper che ricalcola l'utile e le fee per un singolo preventivo.
+    Replica la logica di calcolo di salva_righe per estrarre i margini.
+    """
+    # Helper interni per la conversione sicura dei numeri
+    def _to_num(x, default=0.0):
+        if x is None: return float(default)
+        s = re.sub(r"[€%\s]", "", str(x))
+        if not s: return float(default)
+        if "," in s and "." in s: s = s.replace(".", "") if s.rfind(".") < s.rfind(",") else s.replace(",", "")
+        s = s.replace(",", ".")
+        try: return float(s)
+        except ValueError: return float(default)
+    
+    quote_profit = 0.0
+    quote_fee_value = 0.0
+    
+    fee_pct = _to_num(p.get("fee_pct"))
+    fee_effettiva = fee_pct / 100 * 1.166 if fee_pct > 0 else 0
+
+    for r in p.get("righe", []):
+        if not r.get("articolo", "").strip(): continue
+
+        # Costo di acquisto netto per l'articolo
+        prezzo_scontato = (_to_num(r.get("prezzo_catalogo")) * (1 - _to_num(r.get("s1"))/100) * (1 - _to_num(r.get("s2"))/100) * (1 - _to_num(r.get("s3"))/100))
+        
+        costo_trasporto = _to_num(r.get("costo_trasporto"))
+        ricarico_pct = _to_num(r.get("ricarico_pct")) / 100
+        qt = _to_num(r.get("qt"))
+        
+        # Calcolo del valore della fee
+        fee_su_prezzo = prezzo_scontato * fee_effettiva
+        fee_su_trasporto = costo_trasporto * fee_effettiva
+        quote_fee_value += (fee_su_prezzo + fee_su_trasporto) * qt
+
+        # Calcolo del valore del ricarico
+        prezzo_post_fee = prezzo_scontato * (1 + fee_effettiva)
+        trasporto_post_fee = costo_trasporto * (1 + fee_effettiva)
+        ricarico_su_prezzo = prezzo_post_fee * ricarico_pct
+        ricarico_su_trasporto = trasporto_post_fee * ricarico_pct
+        quote_profit += (ricarico_su_prezzo + ricarico_su_trasporto) * qt
+
+    return {"profitto": quote_profit, "fee": quote_fee_value}
+def _get_ordine_costo_effettivo_netto(ordine):
+    """
+    Calcola il costo totale effettivo NETTO (imponibile) di un ordine, 
+    gestendo sia la nuova logica (campi separati) sia la vecchia (campo unico).
+    """
+    # Leggiamo i campi effettivi *salvati* (che sono LORDI, IVA INCLUSA)
+    importo_articoli_lordo_salvato = _to_num(ordine.get("importo_articoli"))
+    importo_trasporto_lordo_salvato = _to_num(ordine.get("importo_trasporto"))
+    importo_totale_lordo_salvato = _to_num(ordine.get("importo")) # Vecchio campo
+    
+    costo_totale_lordo_da_usare = 0.0
+
+    if "importo_articoli" in ordine:
+        # CASO 1: Ordine "Nuovo" (o già modificato)
+        costo_totale_lordo_da_usare = importo_articoli_lordo_salvato + importo_trasporto_lordo_salvato
+    else:
+        # CASO 2: Ordine "Legacy" (ha solo 'importo' totale)
+        costo_totale_lordo_da_usare = importo_totale_lordo_salvato
+
+    # Scorpora l'IVA (assumendo 22%) per ottenere il costo NETTO
+    costo_netto = costo_totale_lordo_da_usare / 1.22
+    
+    return round(costo_netto, 2)
+
+
+
+def _to_float(val):
+    """Helper globale per conversione numeri"""
+    if val is None or str(val).strip() == "": return 0.0
+    if isinstance(val, (int, float)): return float(val)
+    s = str(val).replace("€", "").replace("%", "").strip()
+    if "," in s: s = s.replace(".", "").replace(",", ".")
+    try: return float(s)
+    except ValueError: return 0.0
+
+def _get_netto_ordine(ordine):
+    """
+    Calcola il costo NETTO di un ordine.
+    Se c'è l'IVA esplicita salvata, la sottrae.
+    Altrimenti scorpora il 22% dal totale.
+    """
+    imp_lordo = _to_float(ordine.get("importo", 0))
+    # Se abbiamo salvato l'IVA specifica dell'ordine, usiamo quella per avere il netto esatto.
+    # Nel DB V3 la chiave 'iva_ordine' c'e' sempre (0 se mai inserita): conta solo se valorizzata.
+    iva = _to_float(ordine.get("iva_ordine", 0))
+    if iva:
+        return imp_lordo - iva
+    # Fallback: scorporo 22% forfettario
+    return imp_lordo / 1.22
+
+
+def _ratio_netto_incassi(p):
+    """Quota netta (senza IVA) di ogni euro incassato sul preventivo.
+    Esente IVA: il cliente paga solo l'imponibile, quindi tutto l'incasso e' netto."""
+    if p.get("no_iva") is True or str(p.get("no_iva")).lower() == "true":
+        return 1.0
+    imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
+    totale = _to_float(p.get("totale", 0))
+    return (imponibile / totale) if totale > 0 else 1.0
+
+
+def _costo_manuale_edile(p):
+    """Costi stimati inseriti a mano sulle righe di un preventivo edile (unico costo reale degli edili)."""
+    if p.get("tipo_preventivo") != "edile":
+        return 0.0
+    return sum(_to_float(r.get("costo_stimato")) for r in p.get("righe_edili", []))
+
+
+def _data_transazione_ordine(ordine, p_date):
+    """Data di cassa di un ordine fornitore: caricamento conferma d'ordine, poi data arrivo, poi data preventivo."""
+    try:
+        return datetime.datetime.strptime(ordine["allegati"][0]["data_upload"], "%Y-%m-%d").date()
+    except Exception:
+        pass
+    try:
+        return datetime.datetime.strptime(ordine.get("data_arrivo"), "%Y-%m-%d").date()
+    except Exception:
+        return p_date
+
+@app.route("/dashboard/ceo")
+@login_required
+def dashboard_ceo():
+    if session.get("user_role") not in ["amministratore", "ceo"]:
+        flash("Accesso negato.", "error")
+        return redirect(url_for("dashboard"))
+
+    # --- 1. GESTIONE DATE ---
+    today = datetime.date.today()
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+    MIN_DATE = datetime.date(2025, 9, 1)
+
+    if start_date_str:
+        start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
+    else:
+        start_date = today.replace(day=1)
+    if start_date < MIN_DATE:
+        start_date = MIN_DATE
+
+    if end_date_str:
+        end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+    else:
+        next_month = today.replace(day=28) + datetime.timedelta(days=4)
+        end_date = next_month - datetime.timedelta(days=next_month.day)
+
+    # --- 2. CARICAMENTO DATI: UNICA QUERY CON EAGER LOAD ORDINI ---
+    from sqlalchemy.orm import joinedload
+    db = _DBSession()
+    try:
+        all_preventivi = (
+            db.query(_Preventivo)
+            .options(
+                joinedload(_Preventivo.ordini_rel),
+                joinedload(_Preventivo.bolle_rel)
+            )
+            .all()
+        )
+    finally:
+        db.close()
+
+    # --- 3. INIZIALIZZAZIONE STRUTTURE ---
+    kpi = {
+        "imponibile_totale": 0.0, "costi_preventivati_totali": 0.0, "costi_reali_totali": 0.0,
+        "scostamento_totale": 0.0, "fee_versata": 0.0, "utile_netto_finale": 0.0,
+        "margine_medio_pct": 0.0, "marginalita_totale_pct": 0.0
+    }
+    cashflow = {
+        "incassato_netto": 0.0, "in_attesa_netto": 0.0, "da_saldare_netto": 0.0,
+        "costi_preventivi_in_corso": 0.0,
+        "iva_preventivi": 0.0, "iva_ordini": 0.0, "iva_esente": 0.0,
+        "fee_versata": 0.0,
+        "bilancio": 0.0, "bilancio_iva": 0.0
+    }
+    funnel = {"creati": 0, "inviati": 0, "confermati": 0, "annullati": 0,
+              "valore_in_trattativa": 0.0, "tasso_firma": 0.0}
+    venditori_dict = {}
+    referenti_dict = {}
+    future_payments = []
+    daily_stats = {}
+
+    # --- 4. SINGOLO CICLO SU TUTTI I PREVENTIVI ---
+    for prev_obj in all_preventivi:
+        p = prev_obj.to_dict()  # Converte in dict compatibile col codice esistente
+
+        st = p.get("stato", "")
+
+        # Data di riferimento per la competenza
+        raw_date = (
+            p.get("data_conferma")
+            if st in ["Confermato", "In Lavorazione", "Chiuso"] and p.get("data_conferma")
+            else p.get("data")
+        )
+        try:
+            p_date = datetime.datetime.strptime(raw_date, "%Y-%m-%d").date()
+        except Exception:
+            continue
+
+        imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
+        tot_lordo = _to_float(p.get("totale", 0))
+        fee_pct = _to_float(p.get("fee_pct", 0))
+        raw_no_iva = p.get("no_iva")
+        is_no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
+        ratio_netto = _ratio_netto_incassi(p)
+
+        # == A. LOGICA COMPETENZA (filtro su data preventivo nel range) ==
+        in_periodo = start_date <= p_date <= end_date
+        if in_periodo:
+            funnel["creati"] += 1
+            if st == "Bozza":
+                funnel["valore_in_trattativa"] += imponibile
+            elif st == "Inviato":
+                funnel["inviati"] += 1
+                funnel["valore_in_trattativa"] += imponibile
+            elif st in ["Confermato", "In Lavorazione", "Chiuso"]:
+                funnel["inviati"] += 1
+                funnel["confermati"] += 1
+            elif st == "Annullato":
+                funnel["annullati"] += 1
+
+        # KPI solo per preventivi confermati/lavorazione/chiusi
+        if st in ["Confermato", "In Lavorazione", "Chiuso"]:
+            if in_periodo:
+                c_presunto = _to_float(p.get("tot_imponibile_negozio", 0))
+                c_reale = 0.0
+
+                # Costo edile: costo_stimato dalle righe_edili
+                if p.get("tipo_preventivo") == "edile":
+                    c_reale += sum(
+                        _to_float(r.get("costo_stimato"))
+                        for r in p.get("righe_edili", [])
+                    )
+
+                # Costo delle righe prese dal magazzino (vale come un ordine fornitore)
+                c_reale += costo_righe_magazzino(p)
+
+                # Costo da ordini fornitore (usati gli oggetti ORM gia caricati)
+                for ordine_obj in prev_obj.ordini_rel:
+                    ordine = ordine_obj.to_dict()
+                    imp_lordo = _to_float(ordine.get("importo", 0))
+                    iva_ord = _to_float(ordine.get("iva_ordine", 0))
+                    c_ord_netto = (imp_lordo - iva_ord) if iva_ord else imp_lordo / 1.22
+                    c_reale += c_ord_netto
+
+                fee_val = imponibile * (fee_pct / 100.0) if fee_pct > 0 else 0.0
+                c_rif = c_reale if c_reale > 0 else c_presunto
+                margine = imponibile - c_rif
+
+                kpi["imponibile_totale"] += imponibile
+                kpi["costi_preventivati_totali"] += c_presunto
+                kpi["costi_reali_totali"] += c_reale
+                kpi["fee_versata"] += fee_val
+                kpi["utile_netto_finale"] += margine
+
+                # Statistiche per venditore (con tasso conversione)
+                vnd = p.get("venditore", "N/D")
+                if vnd not in venditori_dict:
+                    venditori_dict[vnd] = {
+                        "nome": vnd, "count": 0, "imponibile": 0.0,
+                        "utile": 0.0, "inviati": 0, "tasso_conv": 0.0
+                    }
+                venditori_dict[vnd]["count"] += 1
+                venditori_dict[vnd]["imponibile"] += imponibile
+                venditori_dict[vnd]["utile"] += margine
+
+                # Referenti
+                ref = p.get("referente", "")
+                if ref:
+                    if ref not in referenti_dict:
+                        referenti_dict[ref] = {"nome": ref, "preventivo": 0, "imponibile": 0.0, "fee": 0.0}
+                    referenti_dict[ref]["preventivo"] += 1
+                    referenti_dict[ref]["imponibile"] += imponibile
+                    referenti_dict[ref]["fee"] += fee_val
+
+                # Statistiche giornaliere per grafico
+                d_str = raw_date
+                if d_str not in daily_stats:
+                    daily_stats[d_str] = {"imp": 0, "marg": 0, "fee": 0, "c_reale": 0, "c_pres": 0}
+                daily_stats[d_str]["imp"] += imponibile
+                daily_stats[d_str]["marg"] += margine
+                daily_stats[d_str]["fee"] += fee_val
+                daily_stats[d_str]["c_reale"] += c_rif
+                daily_stats[d_str]["c_pres"] += c_presunto
+
+                # Residuo da saldare
+                # (pagamenti programmati compresi: quelli sono gia' "in attesa", non "da saldare")
+                inc_tot_quote = sum(_to_float(x.get("importo", 0)) for x in p.get("pagamenti", []))
+                dovuto_lordo = imponibile if is_no_iva else tot_lordo
+                cashflow["da_saldare_netto"] += (dovuto_lordo - inc_tot_quote) * ratio_netto
+
+            # == B. LOGICA CASSA (data pagamento, senza filtro periodo competenza) ==
+            for pag in p.get("pagamenti", []):
+                val_lordo = _to_float(pag.get("importo", 0))
+                try:
+                    d_pag = datetime.datetime.strptime(pag.get("data"), "%Y-%m-%d").date()
+                except Exception:
+                    d_pag = today
+
+                val_netto = val_lordo * ratio_netto
+                quota_iva = val_lordo - val_netto
+                fee_su_incasso = val_netto * (fee_pct / 100.0) if fee_pct > 0 else 0.0
+
+                if start_date <= d_pag <= end_date and not pag.get("is_scheduled"):
+                    cashflow["incassato_netto"] += val_netto
+                    cashflow["fee_versata"] += fee_su_incasso
+                    if not is_no_iva:
+                        cashflow["iva_preventivi"] += quota_iva
+                    elif imponibile > 0:
+                        # IVA esente per cassa: quota dell'IVA non applicata corrispondente all'incasso
+                        cashflow["iva_esente"] += val_netto * _to_float(p.get("tot_iva", 0)) / imponibile
+
+                if pag.get("is_scheduled"):
+                    cashflow["in_attesa_netto"] += val_netto
+                    future_payments.append({
+                        "data": d_pag,
+                        "cliente": p.get("cliente"),
+                        "preventivo": p.get("numero"),
+                        "importo_netto": val_netto,
+                        "note": pag.get("note", "")
+                    })
+
+            # Uscite ordini fornitore (logica cassa: data transazione)
+            for ordine_obj in prev_obj.ordini_rel:
+                ordine = ordine_obj.to_dict()
+                d_trans = _data_transazione_ordine(ordine, p_date)
+                if start_date <= d_trans <= end_date:
+                    cashflow["costi_preventivi_in_corso"] += _get_netto_ordine(ordine)
+                    # IVA ordini per cassa: data conferma ordine (allegato) o arrivo, come in V2
+                    cashflow["iva_ordini"] += _to_float(ordine.get("iva_ordine", 0))
+
+            # Uscite edili: i costi stimati a mano sono l'unico costo reale degli edili,
+            # alla data di conferma (come nell'export cashflow)
+            if start_date <= p_date <= end_date:
+                cashflow["costi_preventivi_in_corso"] += _costo_manuale_edile(p)
+
+        # Conteggio preventivi inviati per tasso conversione venditore
+        elif st == "Inviato" and in_periodo:
+            vnd = p.get("venditore", "N/D")
+            if vnd in venditori_dict:
+                venditori_dict[vnd]["inviati"] += 1
+
+    # Uscite per la merce caricata in magazzino (logica cassa: data del carico, come gli ordini)
+    cashflow["acquisti_magazzino"] = sum(a["importo"] for a in acquisti_magazzino(start_date, end_date))
+    cashflow["costi_preventivi_in_corso"] += cashflow["acquisti_magazzino"]
+
+    # --- 5. CALCOLI FINALI ---
+    # Tasso conversione per venditore
+    for v in venditori_dict.values():
+        tot = v["count"] + v["inviati"]
+        v["tasso_conv"] = round((v["count"] / tot) * 100, 1) if tot > 0 else 0.0
+
+    # Bilancio cassa
+    cashflow["bilancio"] = (
+        cashflow["incassato_netto"]
+        - cashflow["costi_preventivi_in_corso"]
+        - cashflow["fee_versata"]
+    )
+    cashflow["bilancio_iva"] = cashflow["iva_preventivi"] - cashflow["iva_ordini"]
+
+    # Finalizzazione KPI
+    kpi["scostamento_totale"] = kpi["costi_preventivati_totali"] - kpi["costi_reali_totali"]
+    if kpi["imponibile_totale"] > 0:
+        kpi["marginalita_totale_pct"] = (kpi["utile_netto_finale"] / kpi["imponibile_totale"]) * 100
+        costi_netti = kpi["imponibile_totale"] - kpi["utile_netto_finale"]
+        if costi_netti > 0:
+            kpi["margine_medio_pct"] = (kpi["utile_netto_finale"] / costi_netti) * 100
+    if funnel["creati"] > 0:
+        funnel["tasso_firma"] = (funnel["confermati"] / funnel["creati"]) * 100
+
+    venditori_list = sorted(venditori_dict.values(), key=lambda x: x["imponibile"], reverse=True)
+    referenti_list = sorted(referenti_dict.values(), key=lambda x: x["fee"], reverse=True)
+    future_payments.sort(key=lambda x: x["data"])
+    sorted_dates = sorted(daily_stats.keys())
+
+    grafico_out = {
+        "labels": sorted_dates,
+        "imponibile": [daily_stats[d]["imp"] for d in sorted_dates],
+        "utile": [daily_stats[d]["marg"] for d in sorted_dates],
+        "fee": [daily_stats[d]["fee"] for d in sorted_dates],
+        "costi_effettivi": [daily_stats[d]["c_reale"] for d in sorted_dates],
+        "costi_presunti": [daily_stats[d]["c_pres"] for d in sorted_dates]
+    }
+
+    return render_template("dashboard_ceo.html",
+        title="Dashboard Direzionale",
+        start_date=start_date.strftime("%Y-%m-%d"),
+        end_date=end_date.strftime("%Y-%m-%d"),
+        kpi=kpi, cashflow=cashflow, funnel=funnel,
+        venditori=venditori_list, referenti=referenti_list,
+        future_payments=future_payments,
+        grafico=grafico_out
+    )
+
+def _periodo_ceo():
+    """Periodo richiesto dalla dashboard CEO (stesse regole e stessa data minima della dashboard)."""
+    today = datetime.date.today()
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date() if start_date_str else today.replace(day=1)
+    start_date = max(start_date, datetime.date(2025, 9, 1))
+    if end_date_str:
+        end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+    else:
+        next_month = today.replace(day=28) + datetime.timedelta(days=4)
+        end_date = next_month - datetime.timedelta(days=next_month.day)
+    return start_date, end_date, start_date_str, end_date_str
+
+
+def _preventivi_attivi_ceo():
+    """Preventivi confermati / in lavorazione / chiusi, con la data di competenza (conferma, altrimenti data)."""
+    db = _DBSession()
+    try:
+        from sqlalchemy.orm import joinedload
+        prevs = db.query(_Preventivo).options(joinedload(_Preventivo.ordini_rel), joinedload(_Preventivo.bolle_rel)).all()
+        out = []
+        for prev_obj in prevs:
+            p = prev_obj.to_dict()
+            if p.get("stato") not in ("Confermato", "In Lavorazione", "Chiuso"):
+                continue
+            p_date = _str_to_date(p.get("data_conferma")) or _str_to_date(p.get("data"))
+            if p_date:
+                out.append((p, p_date))
+        return out
+    finally:
+        db.close()
+
+
+def _scrivi_foglio_tabella(ws, righe, formati_colonna=None):
+    """Scrive le righe (dict con chiavi = intestazioni del modello) sotto l'intestazione del foglio,
+    copiando il formato numerico dell'intestazione, e allarga la Tabella Excel del modello."""
+    intestazioni = [c.value for c in ws[1]]
+    formati = [c.number_format for c in ws[1]]
+    chiavi = [str(h).strip() if h is not None else None for h in intestazioni]
+    if ws.max_row > 1:
+        ws.delete_rows(2, amount=ws.max_row - 1)
+    righe = [{str(k).strip(): v for k, v in riga.items()} for riga in righe]
+    for r_idx, riga in enumerate(righe, start=2):
+        for c_idx, chiave in enumerate(chiavi, start=1):
+            if chiave is None:
+                continue
+            cell = ws.cell(row=r_idx, column=c_idx, value=riga.get(chiave))
+            fmt = (formati_colonna or {}).get(chiave) or formati[c_idx - 1]
+            if isinstance(cell.value, (datetime.date, datetime.datetime)):
+                fmt = "dd/mm/yyyy"
+            if fmt and fmt != "General":
+                cell.number_format = fmt
+    for table in ws.tables.values():
+        table.ref = f"A1:{get_column_letter(len(intestazioni))}{max(len(righe), 1) + 1}"
+    ws.freeze_panes = "A2"
+    for c_idx, chiave in enumerate(chiavi, start=1):
+        valori = [riga.get(chiave) for riga in righe[:500]]
+        lung = max([len(str(chiave or ""))] + [len(f"{v:,.2f}") if isinstance(v, float) else len(str(v or "")) for v in valori])
+        ws.column_dimensions[get_column_letter(c_idx)].width = min(max(lung + 2, 10), 45)
+
+
+def _invia_workbook(wb, filename):
+    # Le formule del foglio CALCOLI vanno ricalcolate all'apertura (openpyxl non le calcola)
+    wb.calculation.fullCalcOnLoad = True
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
+_FMT_EURO = '#,##0.00\\ "€"'
+_FMT_PCT = '0.0%'
+_FMT_INT = '0'
+
+
+class _FoglioCalcoli:
+    """Costruisce il foglio CALCOLI di un export: sezioni con voci e tabelle di formule Excel
+    che leggono la tabella dati (Tabella1), cosi' i totali seguono eventuali filtri o modifiche."""
+
+    def __init__(self, wb, titolo, sottotitolo):
+        from openpyxl.styles import Font, PatternFill, Alignment
+        self.Font, self.PatternFill, self.Alignment = Font, PatternFill, Alignment
+        idx = len(wb.sheetnames)
+        if "CALCOLI" in wb.sheetnames:
+            idx = wb.sheetnames.index("CALCOLI")
+            del wb["CALCOLI"]
+        self.ws = wb.create_sheet("CALCOLI", idx)
+        self.ws.sheet_view.showGridLines = False
+        self.ws["A1"] = titolo
+        self.ws["A1"].font = Font(bold=True, size=14, color="1F2937")
+        self.ws["A2"] = sottotitolo
+        self.ws["A2"].font = Font(italic=True, size=10, color="6B7280")
+        self.ws.column_dimensions["A"].width = 38
+        for col in "BCDEFGHI":
+            self.ws.column_dimensions[col].width = 17
+        self.row = 4
+
+    @staticmethod
+    def col(nome):
+        """Riferimento strutturato a una colonna di Tabella1 (doppie parentesi: vale anche con spazi e simboli)."""
+        return f"Tabella1[[{nome}]]"
+
+    def sezione(self, titolo, larghezza=2):
+        self.row += 1
+        for c in range(1, larghezza + 1):
+            cell = self.ws.cell(row=self.row, column=c)
+            cell.fill = self.PatternFill("solid", fgColor="1F2937")
+            cell.font = self.Font(bold=True, color="FFFFFF")
+        self.ws.cell(row=self.row, column=1, value=titolo)
+        self.row += 1
+
+    def voce(self, etichetta, formula, fmt=_FMT_EURO, nota=None, evidenzia=False):
+        a = self.ws.cell(row=self.row, column=1, value=etichetta)
+        b = self.ws.cell(row=self.row, column=2, value=formula)
+        b.number_format = fmt
+        if evidenzia:
+            for cell in (a, b):
+                cell.font = self.Font(bold=True)
+                cell.fill = self.PatternFill("solid", fgColor="DCFCE7")
+        if nota:
+            n = self.ws.cell(row=self.row, column=3, value=nota)
+            n.font = self.Font(italic=True, size=9, color="6B7280")
+        ref = f"B{self.row}"
+        self.row += 1
+        return ref
+
+    def tabella(self, intestazioni, righe, formati):
+        """righe: lista di (etichetta, valore_prima_colonna_o_None, funzione(riga_excel, cella_etichetta) -> lista formule)."""
+        self.row += 1
+        for c, h in enumerate(intestazioni, start=1):
+            cell = self.ws.cell(row=self.row, column=c, value=h)
+            cell.font = self.Font(bold=True)
+            cell.fill = self.PatternFill("solid", fgColor="E5E7EB")
+            cell.alignment = self.Alignment(wrap_text=True, vertical="center")
+        self.row += 1
+        prima = self.row
+        for etichetta, fmt_etichetta, formule in righe:
+            cell = self.ws.cell(row=self.row, column=1, value=etichetta)
+            if fmt_etichetta:
+                cell.number_format = fmt_etichetta
+                cell.alignment = self.Alignment(horizontal="left")
+            for c, (f, fmt) in enumerate(zip(formule(self.row, f"$A{self.row}"), formati), start=2):
+                x = self.ws.cell(row=self.row, column=c, value=f)
+                x.number_format = fmt
+            self.row += 1
+        return prima, self.row - 1
+
+    def riga_totale(self, prima, ultima, colonne, formati):
+        cell = self.ws.cell(row=self.row, column=1, value="Totale")
+        cell.font = self.Font(bold=True)
+        for col, fmt in zip(colonne, formati):
+            x = self.ws[f"{col}{self.row}"]
+            x.value = f"=SUM({col}{prima}:{col}{ultima})"
+            x.number_format = fmt
+            x.font = self.Font(bold=True)
+        self.row += 1
+
+
+def _mesi_periodo(start_date, end_date, max_mesi=36):
+    mesi, d = [], start_date.replace(day=1)
+    while d <= end_date and len(mesi) < max_mesi:
+        mesi.append(d)
+        d = (d.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+    return mesi
+
+
+def _calcoli_cashflow(wb, start_date, end_date, righe, n_programmati):
+    C = _FoglioCalcoli.col
+    f = _FoglioCalcoli(
+        wb, "Riepilogo cashflow (per cassa)",
+        f"Periodo {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')} | generato il "
+        f"{datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} | stesse regole della dashboard CEO")
+    E, U, FEE, T, ID = C("ENTRATE NETTE (€)"), C("USCITE NETTE (€)"), C("FEE VERSATA "), C("TIPO"), C("ID (Rif.)")
+    IVA_O, IVA_P, IVA_E, DT, VEN = C("IVA ORDINE (€)"), C("IVA PREVENTIVO (€)"), C("IVA ESENTE (€)"), C("DATA TRANSAZIONE"), C("VENDITORE")
+
+    f.sezione("BILANCIO DI CASSA")
+    entrate = f.voce("Entrate nette (incassi)", f"=SUM({E})", nota="Pagamenti incassati nel periodo, IVA esclusa; rettifiche comprese")
+    f.voce("  Uscite ordini fornitore", f'=SUMIFS({U},{ID},"Ord.*")', nota="Alla data di conferma d'ordine o di arrivo")
+    f.voce("  Uscite costi edili", f'=SUMIFS({U},{ID},"Costi Stimati*")', nota="Costi manuali dei preventivi edili, alla data di conferma")
+    f.voce("  Uscite carichi magazzino", f'=SUMIFS({U},{ID},"Mag.*")', nota="Merce messa in magazzino, alla data del carico")
+    uscite = f.voce("Totale uscite nette", f"=SUM({U})")
+    fee = f.voce("Fee versata", f"=SUM({FEE})", nota="Calcolata sugli incassi")
+    f.voce("BILANCIO (entrate - uscite - fee)", f"={entrate}-{uscite}-{fee}", evidenzia=True, nota="Uguale al riquadro Bilancio della dashboard CEO")
+
+    f.sezione("IVA")
+    iva_p = f.voce("IVA incassata sui preventivi", f"=SUM({IVA_P})")
+    iva_o = f.voce("IVA pagata sugli ordini", f"=SUM({IVA_O})")
+    f.voce("BILANCIO IVA (incassata - pagata)", f"={iva_p}-{iva_o}", evidenzia=True, nota="Positivo = IVA a debito")
+    f.voce("IVA esente (non applicata sugli incassi)", f"=SUM({IVA_E})", nota="Solo informativa")
+
+    f.sezione("MOVIMENTI")
+    f.voce("Numero incassi", f'=COUNTIFS({T},"INCASSO")', fmt=_FMT_INT)
+    f.voce("  di cui rettifiche", f'=COUNTIFS({ID},"Rettifica*")', fmt=_FMT_INT)
+    f.voce("Numero uscite", f'=COUNTIFS({T},"USCITA")', fmt=_FMT_INT)
+
+    f.sezione("INCASSI PROGRAMMATI (non ancora incassati, esclusi dal bilancio)")
+    ultima = max(n_programmati, 1) + 1
+    f.voce("Numero pagamenti programmati", f"=COUNTA(Programmati!A2:A{ultima})", fmt=_FMT_INT, nota="Dettaglio nel foglio Programmati")
+    f.voce("Importo programmato (lordo)", f"=SUM(Programmati!F2:F{ultima})")
+    f.voce("Importo programmato (netto)", f"=SUM(Programmati!G2:G{ultima})")
+
+    f.sezione("ANDAMENTO MENSILE", larghezza=8)
+    def _mese(r, a):
+        fine = f"EOMONTH({a},0)"
+        crit = f'{DT},">="&{a},{DT},"<="&{fine}'
+        return [f"=SUMIFS({E},{crit})", f"=SUMIFS({U},{crit})", f"=SUMIFS({FEE},{crit})",
+                f"=B{r}-C{r}-D{r}", f"=SUMIFS({IVA_P},{crit})", f"=SUMIFS({IVA_O},{crit})", f"=F{r}-G{r}"]
+    p, u = f.tabella(["Mese", "Entrate nette", "Uscite nette", "Fee", "Bilancio", "IVA incassata", "IVA ordini", "Bilancio IVA"],
+                     [(m, "mmmm yyyy", _mese) for m in _mesi_periodo(start_date, end_date)], [_FMT_EURO] * 7)
+    f.riga_totale(p, u, "BCDEFGH", [_FMT_EURO] * 7)
+
+    venditori = sorted({(x.get("VENDITORE") or "N/D") for x in righe if x.get("TIPO") == "INCASSO"})
+    if venditori:
+        f.sezione("ENTRATE PER VENDITORE", larghezza=4)
+        f.tabella(["Venditore", "Entrate nette", "Fee", "% sulle entrate"],
+                  [(v, None, lambda r, a: [f"=SUMIFS({E},{VEN},{a})", f"=SUMIFS({FEE},{VEN},{a})",
+                                           f"=IF({entrate}=0,0,B{r}/{entrate})"]) for v in venditori],
+                  [_FMT_EURO, _FMT_EURO, _FMT_PCT])
+
+
+def _calcoli_analisi(wb, start_date, end_date, righe):
+    C = _FoglioCalcoli.col
+    f = _FoglioCalcoli(
+        wb, "Riepilogo analisi preventivi (per competenza)",
+        f"Preventivi confermati dal {start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')} | generato il "
+        f"{datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} | stesse regole dei KPI della dashboard CEO")
+    N, TOT, IMP, IVA = C("N. Preventivo"), C("Totale Preventivo (€)"), C("Imponibile Cliente (€)"), C("IVA (€)")
+    COS, IVO, PRE, MAR = C("Costi da Ordini (€)"), C("IVA su Ordini (€)"), C("Costo Negozio Stimato (€)"), C("Margine (€)")
+    FEE, INC, DAI, PRG = C("FEE (€)"), C("Incassato (€)"), C("Da Incassare (€)"), C("Programmato Futuro (€)")
+    ST, STP, VEN, DATA, ES = C("Stato"), C("Stato Pagamento"), C("Venditore"), C("Data"), C("Esente IVA")
+
+    f.sezione("PREVENTIVI")
+    f.voce("Numero preventivi", f"=COUNTA({N})", fmt=_FMT_INT)
+    f.voce("  di cui esenti IVA", f'=COUNTIFS({ES},"SÌ")', fmt=_FMT_INT)
+    f.voce("Totale preventivi (IVA inclusa)", f"=SUM({TOT})")
+    imp = f.voce("Imponibile clienti", f"=SUM({IMP})")
+    f.voce("IVA sui preventivi", f"=SUM({IVA})")
+
+    f.sezione("COSTI E MARGINE")
+    reali = f.voce("Costi reali (ordini netti + costi edili)", f"=SUM({COS})")
+    f.voce("IVA sugli ordini", f"=SUM({IVO})")
+    presunti = f.voce("Costi presunti (da preventivo)", f"=SUM({PRE})")
+    f.voce("Scostamento (presunti - reali)", f"={presunti}-{reali}", nota="Include i preventivi ancora senza ordini")
+    marg = f.voce("MARGINE", f"=SUM({MAR})", evidenzia=True, nota="Imponibile meno costi reali (o presunti se non ci sono ordini)")
+    f.voce("Margine % sull'imponibile", f"=IF({imp}=0,0,{marg}/{imp})", fmt=_FMT_PCT)
+    f.voce("Fee", f"=SUM({FEE})")
+
+    f.sezione("INCASSI")
+    inc = f.voce("Incassato", f"=SUM({INC})", nota="Importi lordi, rettifiche comprese")
+    dai = f.voce("Da incassare", f"=SUM({DAI})", evidenzia=True)
+    prg = f.voce("  di cui gia' programmato", f"=SUM({PRG})")
+    f.voce("  di cui da programmare", f"={dai}-{prg}")
+
+    def _gruppo(colonna):
+        return lambda r, a: [f"=COUNTIFS({colonna},{a})", f"=SUMIFS({IMP},{colonna},{a})",
+                             f"=SUMIFS({MAR},{colonna},{a})", f"=IF(C{r}=0,0,D{r}/C{r})", f"=SUMIFS({DAI},{colonna},{a})"]
+    intest = ["", "Preventivi", "Imponibile", "Margine", "Margine %", "Da incassare"]
+    formati = [_FMT_INT, _FMT_EURO, _FMT_EURO, _FMT_PCT, _FMT_EURO]
+
+    f.sezione("PER STATO", larghezza=6)
+    f.tabella(["Stato"] + intest[1:], [(s, None, _gruppo(ST)) for s in ("Confermato", "In Lavorazione", "Chiuso")], formati)
+    f.sezione("PER STATO PAGAMENTO", larghezza=6)
+    f.tabella(["Stato pagamento"] + intest[1:], [(s, None, _gruppo(STP)) for s in ("Saldato", "Da Saldare")], formati)
+
+    venditori = sorted({(x.get("Venditore") or "N/D") for x in righe})
+    f.sezione("PER VENDITORE", larghezza=6)
+    f.tabella(["Venditore"] + intest[1:], [(v, None, _gruppo(VEN)) for v in venditori], formati)
+
+    f.sezione("PER MESE DI CONFERMA", larghezza=6)
+    def _mese(r, a):
+        crit = f'{DATA},">="&{a},{DATA},"<="&EOMONTH({a},0)'
+        return [f"=COUNTIFS({crit})", f"=SUMIFS({IMP},{crit})", f"=SUMIFS({MAR},{crit})",
+                f"=IF(C{r}=0,0,D{r}/C{r})", f"=SUMIFS({DAI},{crit})"]
+    f.tabella(["Mese"] + intest[1:], [(m, "mmmm yyyy", _mese) for m in _mesi_periodo(start_date, end_date)], formati)
+
+
+@app.route("/dashboard/ceo/export_cashflow")
+@login_required
+def export_cashflow_excel():
+    """Cashflow per cassa, con le stesse regole della dashboard CEO: incassi alla data del pagamento
+    (esclusi i programmati, elencati in un foglio a parte), ordini alla data di conferma ordine/arrivo,
+    costi manuali edili alla data di conferma."""
+    if session.get("user_role") not in ["amministratore", "ceo"]:
+        flash("Accesso negato.", "error")
+        return redirect(url_for("dashboard"))
+
+    start_date, end_date, start_date_str, end_date_str = _periodo_ceo()
+
+    template_filename = get_template_path("modello cashflow.xlsx")
+    if not os.path.exists(template_filename):
+        flash(f"File modello '{template_filename}' non trovato nel server!", "error")
+        return redirect(url_for("dashboard_ceo"))
+
+    cashflow_rows = []
+    programmati = []
+    for p, p_date in _preventivi_attivi_ceo():
+        base = {"N. PREVENTIVO": p.get("numero"), "CLIENTE": p.get("cliente"),
+                "STATO": p.get("stato"), "VENDITORE": p.get("venditore")}
+        is_no_iva = (p.get("no_iva") is True) or (str(p.get("no_iva")).lower() == "true")
+        imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
+        ratio_netto = _ratio_netto_incassi(p)
+        ratio_iva_esente = (_to_float(p.get("tot_iva", 0)) / imponibile) if (is_no_iva and imponibile > 0) else 0.0
+        fee_pct = _to_float(p.get("fee_pct", 0))
+
+        # --- A. ENTRATE (data del pagamento) ---
+        for pag in p.get("pagamenti", []):
+            d_pag = _str_to_date(pag.get("data"))
+            lordo = _to_float(pag.get("importo", 0))
+            netto = lordo * ratio_netto
+            if pag.get("is_scheduled"):
+                programmati.append({**base, "DATA PREVISTA": d_pag, "IMPORTO (€)": round(lordo, 2),
+                                    "NETTO (€)": round(netto, 2), "NOTE": pag.get("note", "")})
+                continue
+            if not d_pag or not (start_date <= d_pag <= end_date):
+                continue
+            tipo_rif = "Rettifica" if pag.get("rectifies_id") else "Pagamento"
+            cashflow_rows.append({
+                **base,
+                "ID (Rif.)": f"{tipo_rif} {pag.get('id', '')} {(pag.get('note') or '')[:30]}".strip(),
+                "DATA TRANSAZIONE": d_pag,
+                "ENTRATE NETTE (€)": round(netto, 2), "USCITE NETTE (€)": 0.0,
+                "FEE VERSATA": round(netto * fee_pct / 100.0, 2) if fee_pct > 0 else 0.0,
+                "IVA ORDINE (€)": 0.0,
+                "IVA PREVENTIVO (€)": 0.0 if is_no_iva else round(lordo - netto, 2),
+                "IVA ESENTE (€)": round(netto * ratio_iva_esente, 2),
+                "TIPO": "INCASSO"
+            })
+
+        # --- B. USCITE: costi manuali edili (data conferma) ---
+        costo_edile = _costo_manuale_edile(p)
+        if costo_edile > 0 and start_date <= p_date <= end_date:
+            cashflow_rows.append({
+                **base, "ID (Rif.)": "Costi Stimati (Manuali Edile)", "DATA TRANSAZIONE": p_date,
+                "ENTRATE NETTE (€)": 0.0, "USCITE NETTE (€)": round(costo_edile, 2), "FEE VERSATA": 0.0,
+                "IVA ORDINE (€)": 0.0, "IVA PREVENTIVO (€)": 0.0, "IVA ESENTE (€)": 0.0, "TIPO": "USCITA"
+            })
+
+        # --- C. USCITE: ordini fornitore (data conferma ordine / arrivo) ---
+        for ordine in p.get("ordini_fornitore", []):
+            d_trans = _data_transazione_ordine(ordine, p_date)
+            if not (start_date <= d_trans <= end_date):
+                continue
+            rif = f"Ord. {ordine.get('azienda', '')}"
+            if ordine.get("numero_conferma"):
+                rif += f" (conf. {ordine.get('numero_conferma')})"
+            cashflow_rows.append({
+                **base, "ID (Rif.)": rif, "DATA TRANSAZIONE": d_trans,
+                "ENTRATE NETTE (€)": 0.0, "USCITE NETTE (€)": round(_get_netto_ordine(ordine), 2),
+                "FEE VERSATA": 0.0, "IVA ORDINE (€)": round(_to_float(ordine.get("iva_ordine", 0)), 2),
+                "IVA PREVENTIVO (€)": 0.0, "IVA ESENTE (€)": 0.0, "TIPO": "USCITA"
+            })
+
+    # --- D. USCITE: merce caricata in magazzino (data del carico) ---
+    for a in acquisti_magazzino(start_date, end_date):
+        cashflow_rows.append({
+            "N. PREVENTIVO": "MAGAZZINO", "CLIENTE": "", "STATO": "", "VENDITORE": "",
+            "ID (Rif.)": f"Mag. {a['codice'] + ' ' if a['codice'] else ''}{a['articolo']} ({_fmt_qt(a['quantita'])} x {money_ui(a['costo_unitario'])})",
+            "DATA TRANSAZIONE": a["data"],
+            "ENTRATE NETTE (€)": 0.0, "USCITE NETTE (€)": a["importo"], "FEE VERSATA": 0.0,
+            "IVA ORDINE (€)": 0.0, "IVA PREVENTIVO (€)": 0.0, "IVA ESENTE (€)": 0.0, "TIPO": "USCITA"
+        })
+
+    if not cashflow_rows:
+        flash("Nessuna transazione trovata nel periodo selezionato.", "warning")
+        return redirect(url_for("dashboard_ceo", start_date=start_date_str, end_date=end_date_str))
+
+    cashflow_rows.sort(key=lambda r: (r["DATA TRANSAZIONE"], r["TIPO"], r["N. PREVENTIVO"] or ""))
+    wb = load_workbook(template_filename)
+    _scrivi_foglio_tabella(wb["Cashflow"], cashflow_rows)
+
+    # Foglio aggiuntivo: incassi programmati (entrano nelle entrate solo quando vengono incassati)
+    if "Programmati" in wb.sheetnames:
+        del wb["Programmati"]
+    ws_p = wb.create_sheet("Programmati")
+    ws_p.append(["N. PREVENTIVO", "CLIENTE", "STATO", "VENDITORE", "DATA PREVISTA", "IMPORTO (€)", "NETTO (€)", "NOTE"])
+    for c in ws_p[1]:
+        c.font = c.font.copy(bold=True)
+        if "€" in str(c.value):
+            c.number_format = '#,##0.00\\ "€"'
+    _scrivi_foglio_tabella(ws_p, sorted(programmati, key=lambda r: r["DATA PREVISTA"] or datetime.date.max))
+    _calcoli_cashflow(wb, start_date, end_date, cashflow_rows, len(programmati))
+
+    filename = f"Cashflow_Dettagliato_{start_date.strftime('%d-%m')}_{end_date.strftime('%d-%m-%Y')}.xlsx"
+    return _invia_workbook(wb, filename)
+
+
+@app.route("/dashboard/ceo/export_excel")
+@login_required
+def export_excel_ceo():
+    """Analisi per preventivo (competenza: data di conferma nel periodo), con costi e margini
+    calcolati come nei KPI della dashboard CEO."""
+    if session.get("user_role") not in ["amministratore", "ceo"]:
+        flash("Accesso negato.", "error")
+        return redirect(url_for("dashboard"))
+
+    start_date, end_date, start_date_str, end_date_str = _periodo_ceo()
+
+    template_filename = get_template_path("template_analisi.xlsx")
+    if not os.path.exists(template_filename):
+        flash(f"File modello '{template_filename}' non trovato nel server!", "error")
+        return redirect(url_for("dashboard_ceo"))
+
+    export_data = []
+    for p, p_date in _preventivi_attivi_ceo():
+        if not (start_date <= p_date <= end_date):
+            continue
+        is_no_iva = (p.get("no_iva") is True) or (str(p.get("no_iva")).lower() == "true")
+
+        # Costi reali come nei KPI CEO: ordini al netto IVA + costi manuali edili
+        costi_ordini = (sum(_get_netto_ordine(o) for o in p.get("ordini_fornitore", []))
+                        + _costo_manuale_edile(p) + costo_righe_magazzino(p))
+        iva_ordini = sum(_to_float(o.get("iva_ordine", 0)) for o in p.get("ordini_fornitore", []))
+        costo_presunto = _to_float(p.get("tot_imponibile_negozio", 0))
+        imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
+        totale = _to_float(p.get("totale", 0))
+        fee_pct = _to_float(p.get("fee_pct", 0))
+
+        # Incassato = pagamenti registrati (rettifiche comprese, sono importi negativi); programmati a parte
+        incassato = sum(_to_float(x.get("importo", 0)) for x in p.get("pagamenti", []) if not x.get("is_scheduled"))
+        programmato = sum(_to_float(x.get("importo", 0)) for x in p.get("pagamenti", []) if x.get("is_scheduled"))
+        dovuto = imponibile if is_no_iva else totale
+
+        export_data.append({
+            "N. Preventivo": p.get("numero"),
+            "Data": p_date,
+            "Cliente": p.get("cliente"),
+            "Stato": p.get("stato"),
+            "Totale Preventivo (€)": totale,
+            "Imponibile Cliente (€)": imponibile,
+            "IVA (€)": _to_float(p.get("tot_iva", 0)),
+            "Costi da Ordini (€)": round(costi_ordini, 2),
+            "IVA su Ordini (€)": round(iva_ordini, 2),
+            "Costo Negozio Stimato (€)": costo_presunto,
+            "Margine (€)": round(imponibile - (costi_ordini if costi_ordini > 0 else costo_presunto), 2),
+            "FEE %": fee_pct / 100.0,
+            "FEE (€)": round(imponibile * fee_pct / 100.0, 2) if fee_pct > 0 else 0.0,
+            "Incassato (€)": round(incassato, 2),
+            "Da Incassare (€)": round(dovuto - incassato, 2),
+            "Programmato Futuro (€)": round(programmato, 2),
+            "Esente IVA": "SÌ" if is_no_iva else "NO",
+            "Stato Fattura": p.get("stato_fattura") or "N/D",
+            "Stato Pagamento": p.get("stato_pagamento_globale") or "N/D",
+            "Venditore": p.get("venditore"),
+            "Stato Consegna": p.get("stato_consegna_globale") or "N/D"
+        })
+
+    if not export_data:
+        flash("Nessun dato valido trovato (esclusi Bozze/Inviati/Annullati).", "warning")
+        return redirect(url_for("dashboard_ceo", start_date=start_date_str, end_date=end_date_str))
+
+    export_data.sort(key=lambda r: (r["Data"], r["N. Preventivo"]))
+    wb = load_workbook(template_filename)
+    if "Analisi" not in wb.sheetnames:
+        flash("Il file modello non contiene un foglio chiamato 'Analisi'.", "error")
+        return redirect(url_for("dashboard_ceo"))
+    _scrivi_foglio_tabella(wb["Analisi"], export_data, formati_colonna={"FEE %": "0.0%"})
+    _calcoli_analisi(wb, start_date, end_date, export_data)
+
+    filename = f"Analisi_Globale_{start_date.strftime('%d-%m')}_{end_date.strftime('%d-%m-%Y')}.xlsx"
+    return _invia_workbook(wb, filename)
+
+
+@app.route("/preventivo/analisi/<quote_id>")
+@login_required
+@role_required('amministratore', 'ceo') 
+def analisi_preventivo(quote_id):
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.", "error")
+        return redirect(url_for("dashboard"))
+
+    # 1. Calcola Ricavi
+    imponibile_cliente = _to_num(p.get("tot_imponibile_cliente"))
+    iva_cliente = _to_num(p.get("tot_iva"))
+    totale_cliente = _to_num(p.get("totale"))
+
+    # 2. Calcola Costi
+    costi_preventivati = _to_num(p.get("tot_imponibile_negozio"))
+    
+    costi_effettivi_netti = sum(
+        _get_ordine_costo_effettivo_netto(o)
+        for o in p.get("ordini_fornitore", [])
+    )
+    costi_effettivi_netti += costo_righe_magazzino(p)
+
+    # Se è edile, integriamo il costo stimato manuale nei costi effettivi
+    if p.get("tipo_preventivo") == "edile":
+        costi_effettivi_netti += sum(_to_num(r.get("costo_stimato")) for r in p.get("righe_edili", []))
+    
+    # Recuperiamo i profitti stimati dal calcolo riga per riga
+    profitti = _calculate_profits_from_quote(p)
+
+    # --- NUOVO CALCOLO FEE SEMPLIFICATO ---
+    # La fee è calcolata semplicemente come % sull'imponibile cliente totale
+    fee_pct = _to_num(p.get("fee_pct"))
+    fee_semplice_valore = imponibile_cliente * (fee_pct / 100)
+    # --------------------------------------
+
+    # Calcolo Utile Effettivo
+    utile_netto_effettivo = imponibile_cliente - costi_effettivi_netti
+
+    # 4. Assembla i dati di analisi
+    analisi = {
+        'imponibile_cliente': imponibile_cliente,
+        'iva_cliente': iva_cliente,
+        'totale_cliente': totale_cliente,
+        'costi_preventivati': costi_preventivati,
+        'costi_effettivi_netti': costi_effettivi_netti if costi_effettivi_netti > 0 else 0.0,
+        
+        'utile_netto_stimato': profitti.get('profitto', 0.0), 
+        'utile_netto_effettivo': utile_netto_effettivo,
+        
+        # Usiamo il valore calcolato semplicemente
+        'fee_versata': fee_semplice_valore, 
+        
+        'scostamento_costi': 0.0,
+        'margine_lordo_pct': 0.0, 
+        'utile_netto_effettivo_pct': 0.0, 
+        'giorni_per_chiusura': 'N/D'
+    }
+
+    # 5. Calcola Redditività e Scostamento
+    # Scostamento = Costi Preventivati - Costi Effettivi Netti
+    if analisi['costi_effettivi_netti'] > 0: 
+        analisi['scostamento_costi'] = analisi['costi_preventivati'] - analisi['costi_effettivi_netti']
+
+    if imponibile_cliente > 0:
+        # Margine Lordo % (basato su costo preventivato)
+        margine_lordo = imponibile_cliente - costi_preventivati
+        analisi['margine_lordo_pct'] = (margine_lordo / imponibile_cliente) * 100
+
+    # Utile Effettivo %
+    if imponibile_cliente > 0:
+        analisi['utile_netto_effettivo_pct'] = (analisi['utile_netto_effettivo'] / imponibile_cliente) * 100
+
+    # 6. Calcola Tempo Chiusura
+    data_conferma_str = p.get("data_conferma")
+    data_chiusura_str = p.get("data_chiusura")
+    if p.get("stato") == "Chiuso" and data_conferma_str and data_chiusura_str:
+        try:
+            data_conferma_dt = datetime.datetime.strptime(data_conferma_str, '%Y-%m-%d').date()
+            data_chiusura_dt = datetime.datetime.strptime(data_chiusura_str, '%Y-%m-%d').date()
+            giorni = (data_chiusura_dt - data_conferma_dt).days
+            if giorni >= 0:
+                 analisi['giorni_per_chiusura'] = giorni
+        except (ValueError, TypeError): pass
+
+    return render_template("analisi_preventivo.html",
+        title=f"Analisi Preventivo {p.get('numero')}",
+        p=p,
+        analisi=analisi
+    )
+@app.route("/cliente/analisi/<client_id>")
+@login_required
+@role_required('amministratore', 'ceo')
+def analisi_cliente(client_id):
+    client = load_client(client_id)
+    if not client:
+        flash("Cliente non trovato.", "error")
+        return redirect(url_for("dashboard_clienti"))
+
+    today = datetime.date.today()
+
+    # 1. Inizializzazione Totali
+    analisi = {
+        'imponibile_cliente': 0.0,      # Totale Ricavi
+        'costi_preventivati': 0.0,      # Totale Costi Presunti (Negozio)
+        'costi_effettivi_netti': 0.0,   # Totale Costi Reali (Ordini)
+        'utile_netto_stimato': 0.0,     # Utile basato sul preventivo
+        'utile_netto_effettivo': 0.0,   # Utile basato sul reale
+        'fee_versata': 0.0,             # Totale Fee (Calcolo Semplificato)
+        'scostamento_costi': 0.0,       # Risparmio o Spesa extra
+        
+        'incassato': 0.0,
+        'da_incassare': 0.0,
+        
+        # Percentuali medie
+        'margine_lordo_pct': 0.0,
+        'utile_netto_effettivo_pct': 0.0
+    }
+    
+    funnel = {'creati': 0, 'inviati': 0, 'confermati': 0, 'annullati': 0}
+    tempi_chiusura_list = []
+    preventivi_analizzati = [] 
+
+    # 2. Iterazione e Aggregazione
+    for summary in get_all_quotes():
+        p = load_quote(summary["numero"])
+        if not p or p.get("id_cliente") != client_id:
+            continue
+
+        stato = p.get("stato")
+        
+        # Funnel Counters
+        funnel['creati'] += 1
+        if stato != "Bozza": funnel['inviati'] += 1
+        if stato in ["Confermato", "In Lavorazione", "Chiuso"]: funnel['confermati'] += 1
+        if stato == "Annullato": funnel['annullati'] += 1
+
+        # --- CALCOLI FINANZIARI (Solo su preventivi attivi/chiusi) ---
+        if stato in ["Confermato", "In Lavorazione", "Chiuso"]:
+            
+            # A. Valori Base
+            imp_cliente = _to_num(p.get("tot_imponibile_cliente"))
+            costo_prev = _to_num(p.get("tot_imponibile_negozio"))
+            
+            # B. Costi Effettivi (Somma ordini netti)
+            costo_eff = sum(_get_ordine_costo_effettivo_netto(o) for o in p.get("ordini_fornitore", []))
+            costo_eff += costo_righe_magazzino(p)
+            
+            # Se è edile, integriamo il costo stimato manuale nei costi effettivi
+            if p.get("tipo_preventivo") == "edile":
+                costo_eff += sum(_to_num(r.get("costo_stimato")) for r in p.get("righe_edili", []))
+            
+            # C. Fee Semplificata (Imponibile * Fee%)
+            fee_pct = _to_num(p.get("fee_pct"))
+            fee_val = imp_cliente * (fee_pct / 100)
+            
+            # D. Utili
+            # Utile Stimato = Imponibile - Costo Previsto (fee esclusa dal calcolo utile puro qui, la mostriamo a parte)
+            # Nota: per coerenza con l'analisi singola, usiamo la logica dei profitti stimati
+            profitti_dettaglio = _calculate_profits_from_quote(p) 
+            utile_stimato = profitti_dettaglio.get('profitto', 0.0)
+
+            utile_effettivo = imp_cliente - costo_eff
+
+            # E. Scostamento
+            scostamento = costo_prev - costo_eff if costo_eff > 0 else 0.0
+
+            # AGGREGAZIONE TOTALI
+            analisi['imponibile_cliente'] += imp_cliente
+            analisi['costi_preventivati'] += costo_prev
+            analisi['costi_effettivi_netti'] += costo_eff
+            analisi['utile_netto_stimato'] += utile_stimato
+            analisi['utile_netto_effettivo'] += utile_effettivo
+            analisi['fee_versata'] += fee_val
+            if costo_eff > 0:
+                analisi['scostamento_costi'] += scostamento
+
+            # Dati per Tabella Dettaglio
+            preventivi_analizzati.append({
+                'numero': p.get('numero'),
+                'data': p.get('data'),
+                'stato': stato,
+                'imponibile': imp_cliente,
+                'costo_eff': costo_eff,
+                'utile_eff': utile_effettivo,
+                'scostamento': scostamento
+            })
+
+            # Tempo Chiusura
+            data_conf = p.get("data_conferma")
+            data_chius = p.get("data_chiusura")
+            if stato == "Chiuso" and data_conf and data_chius:
+                try:
+                    d1 = datetime.datetime.strptime(data_conf, '%Y-%m-%d').date()
+                    d2 = datetime.datetime.strptime(data_chius, '%Y-%m-%d').date()
+                    giorni = (d2 - d1).days
+                    if giorni >= 0: tempi_chiusura_list.append(giorni)
+                except: pass
+
+        # Cash Flow (incassi - distingue tra incassato e da incassare via flag)
+        for pag in p.get("pagamenti", []):
+            imp_pag = _to_num(pag.get("importo"))
+            if pag.get("is_scheduled"):
+                if imp_pag > 0:
+                    analisi['da_incassare'] += imp_pag
+            else:
+                # Le rettifiche sono importi negativi che stornano un pagamento: vanno sommate,
+                # altrimenti il pagamento stornato resterebbe contato come incassato
+                analisi['incassato'] += imp_pag
+
+    # 3. Calcolo Percentuali Medie Finali
+    if analisi['imponibile_cliente'] > 0:
+        margine_lordo = analisi['imponibile_cliente'] - analisi['costi_preventivati']
+        analisi['margine_lordo_pct'] = (margine_lordo / analisi['imponibile_cliente']) * 100
+        analisi['utile_netto_effettivo_pct'] = (analisi['utile_netto_effettivo'] / analisi['imponibile_cliente']) * 100
+
+    # Tempo medio
+    analisi['tempo_medio_chiusura'] = round(sum(tempi_chiusura_list) / len(tempi_chiusura_list), 1) if tempi_chiusura_list else "N/D"
+    
+    if funnel['inviati'] > 0:
+        funnel['tasso_firma_num'] = (funnel['confermati'] / funnel['inviati']) * 100
+    else:
+        funnel['tasso_firma_num'] = 0.0
+
+    preventivi_analizzati.sort(key=lambda x: x['data'], reverse=True)
+
+    return render_template("analisi_cliente.html", 
+        title=f"Analisi Cliente {client.get('cliente')}", 
+        client=client, 
+        analisi=analisi,
+        funnel=funnel,
+        preventivi=preventivi_analizzati
+    )
+@app.route("/ordini")
+@login_required
+def dashboard_ordini():
+    """Pagina che elenca i preventivi con ordini fornitore da gestire."""
+    preventivi_con_ordini = []
+    today = datetime.date.today()
+    
+    tutti_i_preventivi = get_all_quotes()
+
+    for prev_summary in tutti_i_preventivi:
+        p = load_quote(prev_summary["numero"])
+        if not p: continue
+
+        if p.get("stato") in ["Bozza", "Inviato", "Chiuso", "Annullato"]:
+            continue
+            
+        # --- INIZIO NUOVA LOGICA ---
+
+        # 1. Troviamo tutti gli indici delle righe valide (con un articolo)
+        indici_righe_valide = {
+            i for i, r in enumerate(p.get("righe", [])) 
+            if r.get("articolo", "").strip() and r.get("unt", "").strip().upper() != "S"
+        }
+        
+        # 2. Troviamo tutti gli indici degli articoli già assegnati a un ordine
+        indici_gia_ordinati = set()
+        ordini_fornitore = p.get("ordini_fornitore", [])
+        for ordine in ordini_fornitore:
+            indici_gia_ordinati.update(ordine.get("indici_righe", []))
+        # Le righe prese dal magazzino non vanno ordinate al fornitore
+        indici_gia_ordinati.update(_indici_righe_magazzino(p))
+
+        # 3. Calcoliamo gli articoli ancora da ordinare
+        articoli_da_ordinare_count = len(indici_righe_valide - indici_gia_ordinati)
+        p["articoli_da_ordinare_count"] = articoli_da_ordinare_count
+
+        # 4. Calcoliamo (come prima) gli articoli in ordini in attesa di conferma
+        articoli_in_attesa_conferma = 0
+        ordini_in_attesa = [o for o in ordini_fornitore if not o.get("numero_conferma", "").strip()]
+        for ordine in ordini_in_attesa:
+            articoli_in_attesa_conferma += len(ordine.get("indici_righe", []))
+        p["articoli_in_attesa_conferma"] = articoli_in_attesa_conferma
+
+        # 5. Dettagli per la dashboard (avanzamento, fornitori, giorni dalla conferma)
+        p["articoli_totali"] = len(indici_righe_valide)
+        p["articoli_ordinati"] = len(indici_righe_valide & indici_gia_ordinati)
+        p["pct_ordinato"] = round(p["articoli_ordinati"] / p["articoli_totali"] * 100) if p["articoli_totali"] else 0
+        p["ordini_count"] = len(ordini_fornitore)
+        p["ordini_attesa_count"] = len(ordini_in_attesa)
+        p["ordini_confermati_count"] = len(ordini_fornitore) - len(ordini_in_attesa)
+        p["fornitori"] = sorted({o.get("azienda", "").strip() for o in ordini_fornitore if o.get("azienda", "").strip()})
+        rif = _str_to_date(p.get("data_conferma")) or _str_to_date(p.get("data"))
+        p["giorni_da_conferma"] = (today - rif).days if rif else None
+        p["totale_num"] = _to_float(p.get("totale"))
+
+        # 6. Aggiungiamo il preventivo alla dashboard SOLO se c'è qualcosa da fare
+        if articoli_da_ordinare_count > 0 or articoli_in_attesa_conferma > 0:
+            preventivi_con_ordini.append(p)
+            
+        # --- FINE NUOVA LOGICA ---
+
+    return render_template("dashboard_ordini.html", 
+        title="Dashboard Ordini Fornitore",
+        preventivi=preventivi_con_ordini
+    )
+# --- File: gestionale.py (intorno alla riga 1970) ---
+
+@app.route("/consegne")
+@login_required
+def dashboard_consegne():
+    """Pagina che elenca i preventivi con ordini confermati da consegnare."""
+    preventivi_da_consegnare = []
+    today = datetime.date.today()
+
+    def _conta_stati(righe):
+        conteggio = {"da_consegnare": 0, "pronti": 0, "in_bolla": 0, "consegnati": 0}
+        for r in righe:
+            stato = r.get("stato_consegna") or "Da Consegnare"
+            if stato == "Consegnato": conteggio["consegnati"] += 1
+            elif stato == "In Bolla": conteggio["in_bolla"] += 1
+            elif stato == "Pronto per Consegna": conteggio["pronti"] += 1
+            else: conteggio["da_consegnare"] += 1
+        conteggio["totale"] = len(righe)
+        conteggio["pct_consegnato"] = round(conteggio["consegnati"] / len(righe) * 100) if righe else 0
+        return conteggio
+    
+    tutti_i_preventivi = get_all_quotes()
+
+    for prev_summary in tutti_i_preventivi:
+        p = load_quote(prev_summary["numero"])
+        if not p: continue
+
+        if p.get("stato") in ["Bozza", "Inviato", "Chiuso", "Annullato"]:
+            continue
+
+        # Gestione Preventivi Edili
+        if p.get("tipo_preventivo") == "edile":
+            if p.get("stato") in ["Confermato", "In Lavorazione"]:
+                non_consegnati_count = 0
+                for sezione in p.get("sezioni_edili", []):
+                    for r in sezione.get("righe", []):
+                        if r.get("stato_consegna") != "Consegnato":
+                            non_consegnati_count += 1
+                
+                if non_consegnati_count > 0:
+                    p["articoli_da_consegnare_count"] = non_consegnati_count
+                    righe_edili = [r for s in p.get("sezioni_edili", []) for r in s.get("righe", [])]
+                    p["consegna"] = _conta_stati(righe_edili)
+                    p["articoli_non_confermati"] = 0
+                    p["fornitori"] = []
+                    p["prossimo_arrivo"] = None
+                    p["arrivo_in_ritardo"] = False
+                    p["totale_num"] = _to_float(p.get("totale"))
+                    preventivi_da_consegnare.append(p)
+            continue
+
+        ordini_confermati = [o for o in _ordini_con_magazzino(p) if o.get("numero_conferma", "").strip()]
+        if not ordini_confermati: continue
+
+        # --- RECUPERO INDICI CONFERMATI ---
+        indici_confermati = set()
+        for o in ordini_confermati:
+            indici_confermati.update(o.get("indici_righe", []))
+
+        # --- NUOVA LOGICA CORRETTA ---
+        # Trova tutti gli articoli degli ordini confermati che NON sono ancora stati "Consegnati"
+        articoli_non_consegnati = []
+        for index in indici_confermati:
+            if 0 <= index < len(p["righe"]):
+                riga = p["righe"][index]
+                if riga.get("stato_consegna") != "Consegnato":
+                    articoli_non_consegnati.append(riga)
+
+        # Aggiungi il preventivo alla lista SOLO se c'è almeno un articolo non consegnato
+        if articoli_non_consegnati:
+            # Il conteggio ora riflette TUTTI gli articoli in attesa (inclusi quelli in bolla)
+            p["articoli_da_consegnare_count"] = len(articoli_non_consegnati)
+
+            righe_confermate = [p["righe"][i] for i in indici_confermati if 0 <= i < len(p["righe"])]
+            p["consegna"] = _conta_stati(righe_confermate)
+            righe_valide = [r for r in p.get("righe", []) if r.get("articolo", "").strip() and r.get("unt", "").strip().upper() != "S"]
+            p["articoli_non_confermati"] = max(len(righe_valide) - len(righe_confermate), 0)
+            p["fornitori"] = sorted({o.get("azienda", "").strip() for o in ordini_confermati if o.get("azienda", "").strip()})
+
+            # Prossimo arrivo previsto tra gli ordini che hanno ancora merce non arrivata
+            date_arrivo = []
+            for o in ordini_confermati:
+                in_attesa = any(
+                    0 <= i < len(p["righe"]) and (p["righe"][i].get("stato_consegna") or "Da Consegnare") == "Da Consegnare"
+                    for i in o.get("indici_righe", [])
+                )
+                d = _str_to_date(o.get("data_arrivo"))
+                if in_attesa and d: date_arrivo.append(d)
+            prossimo = min(date_arrivo) if date_arrivo else None
+            p["prossimo_arrivo"] = prossimo.strftime('%Y-%m-%d') if prossimo else None
+            p["arrivo_in_ritardo"] = bool(prossimo and prossimo < today)
+            p["totale_num"] = _to_float(p.get("totale"))
+            preventivi_da_consegnare.append(p)
+        # --- FINE NUOVA LOGICA ---
+
+    return render_template("dashboard_consegne.html", 
+        title="Ordini da Consegnare",
+        preventivi=preventivi_da_consegnare
+    )
+
+@app.route("/consegna/<quote_id>")
+@login_required
+def gestione_consegna(quote_id):
+    p = load_quote(quote_id)
+    if not p: return redirect(url_for("dashboard_consegne"))
+
+    if p.get("tipo_preventivo") == "edile":
+        # Usiamo l'appiattimento centralizzato
+        items = get_flat_righe_edili(p)
+            
+        ordini_confermati = [{
+            "numero_conferma": "LAVORAZIONI EDILI",
+            "azienda": "Gestione Interna",
+            "data_arrivo": p.get("data"),
+            "articoli": items
+        }]
+    else:
+        ordini_confermati = [o for o in _ordini_con_magazzino(p) if o.get("numero_conferma", "").strip()]
+        
+        for ordine in ordini_confermati:
+            items_in_ordine = []
+            for item_index in ordine.get("indici_righe", []):
+                if 0 <= item_index < len(p["righe"]):
+                    riga = p["righe"][item_index]
+                    riga["original_index"] = item_index
+                    items_in_ordine.append(riga)
+            ordine["articoli"] = items_in_ordine
+
+   
+    # Funzione che controlla se un ordine è completato (tutti gli articoli 'Consegnato')
+    def is_ordine_completato(ordine):
+        if not ordine.get("articoli"):
+            return True # Un ordine senza articoli è considerato "completato"
+        return all(item.get("stato_consegna") == "Consegnato" for item in ordine["articoli"])
+
+    # Ordina la lista: gli ordini NON completati (False) verranno prima di quelli completati (True)
+    ordini_confermati.sort(key=is_ordine_completato)
+    # --- FINE LOGICA DI ORDINAMENTO ---
+
+    return render_template("gestione_consegna.html",
+        title=f"Gestione Consegna {quote_id}",
+        p=p,
+        ordini_confermati=ordini_confermati,
+        geo_data=GEO_DATA
+    )
+# --- File: gestionale.py (intorno alla riga 2043) ---
+
+@app.route("/consegna/<quote_id>/marca-pronto", methods=["POST"])
+@login_required
+def marca_pronto(quote_id):
+    p = load_quote(quote_id)
+    if not p: return jsonify({"success": False, "error": "Preventivo non trovato"})
+
+    indici_da_marcare = [int(i) for i in request.form.getlist("selected_items[]")]
+    if not indici_da_marcare:
+        return jsonify({"success": False, "error": "Nessun articolo selezionato"})
+
+    # Seleziona la lista corretta in base al tipo
+    target_list = "righe_edili" if p.get("tipo_preventivo") == "edile" else "righe"
+
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    if p.get("tipo_preventivo") == "edile":
+        for idx_assoluto in indici_da_marcare:
+            curr_idx = 0
+            for sezione in p.get("sezioni_edili", []):
+                for riga in sezione.get("righe", []):
+                    if curr_idx == idx_assoluto:
+                        riga["stato_consegna"] = "Pronto per Consegna"
+                        riga["data_arrivo_in_house"] = today_str
+                    curr_idx += 1
+
+    else:
+        for index in indici_da_marcare:
+            if 0 <= index < len(p["righe"]):
+                p["righe"][index]["stato_consegna"] = "Pronto per Consegna"
+                p["righe"][index]["data_arrivo_in_house"] = today_str
+
+    aggiorna_stato_consegna_globale(p) 
+
+
+    save_quote(quote_id, p)
+    return jsonify({"success": True})
+
+
+@app.route("/consegna/<quote_id>/marca-consegnato", methods=["POST"])
+@login_required
+def marca_consegnato(quote_id):
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        return jsonify({"success": False, "error": "Non disponi delle autorizzazioni."})
+    
+    p = load_quote(quote_id)
+    file = request.files.get('file')
+    if not file:
+        return jsonify({"success": False, "error": "Documento firmato obbligatorio."})
+
+    indici_da_marcare = [int(i) for i in request.form.getlist("selected_items[]")]
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    
+    # Salvataggio File
+    quote_dir = ALLEGATI_DIR / quote_id
+    quote_dir.mkdir(parents=True, exist_ok=True)
+    filename = secure_filename(f"BOLLA_FIRMATA_{datetime.datetime.now().strftime('%H%M%S')}_{file.filename}")
+    file.save(quote_dir / filename)
+
+    # Aggiunta agli allegati del preventivo
+    if "allegati" not in p: 
+        p["allegati"] = []
+    
+    p["allegati"].append({
+        "filename": filename,
+        "descrizione": "Bolla di consegna firmata (Upload automatico)",
+        "data_upload": today_str
+    })
+
+    if p.get("tipo_preventivo") == "edile":
+        for idx_assoluto in indici_da_marcare:
+            curr_idx = 0
+            for sezione in p.get("sezioni_edili", []):
+                for riga in sezione.get("righe", []):
+                    if curr_idx == idx_assoluto:
+                        riga["stato_consegna"] = "Consegnato"
+                        riga["data_consegna"] = today_str
+                    curr_idx += 1
+    else:
+        for index in indici_da_marcare:
+            if 0 <= index < len(p["righe"]):
+                p["righe"][index]["stato_consegna"] = "Consegnato"
+                p["righe"][index]["data_consegna"] = today_str
+        # Gli articoli presi dal magazzino escono dalla giacenza alla consegna
+        scarica_righe_magazzino(p, indici_da_marcare)
+
+    aggiorna_stato_consegna_globale(p)
+    aggiorna_stato_avanzamento(p)
+    save_quote(quote_id, p)
+    return jsonify({"success": True})
+
+
+@app.route("/consegna/<quote_id>/annulla-stato", methods=["POST"])
+@login_required
+def annulla_stato_consegna(quote_id):
+    """
+    Riporta uno o più articoli a uno stato di consegna precedente.
+    Può opzionalmente scollegarli da una bolla esistente.
+    """
+    p = load_quote(quote_id)
+    if not p:
+        return jsonify({"success": False, "error": "Preventivo non trovato"})
+
+    form = request.form
+    target_status = form.get("target_status")
+    keep_bolla = form.get("keep_bolla") == "true"
+    item_indices = [int(i) for i in form.getlist("indices[]")]
+
+    # --- File: gestionale.py (intorno alla riga 2091) ---
+
+    if not item_indices or not target_status:
+        return jsonify({"success": False, "error": "Dati mancanti per l'operazione."})
+
+    is_edile = p.get("tipo_preventivo") == "edile"
+
+    if is_edile:
+        for idx_assoluto in item_indices:
+            curr_idx = 0
+            for sezione in p.get("sezioni_edili", []):
+                for riga in sezione.get("righe", []):
+                    if curr_idx == idx_assoluto:
+                        original_bolla_id = riga.get("bolla_id")
+                        riga["stato_consegna"] = target_status
+                        riga.pop("data_consegna", None)
+
+                        if target_status == "Da Consegnare":
+                            riga.pop("data_arrivo_in_house", None)
+
+                        if original_bolla_id and not keep_bolla:
+                            riga.pop("bolla_id", None)
+                            for bolla in p.get("bolle", []):
+                                if bolla.get("id") == original_bolla_id:
+                                    if idx_assoluto in bolla.get("indici_righe", []):
+                                        bolla["indici_righe"].remove(idx_assoluto)
+                                    break
+                    curr_idx += 1
+    else:
+        target_list = "righe"
+        for index in item_indices:
+            if 0 <= index < len(p[target_list]):
+                riga = p[target_list][index]
+                original_bolla_id = riga.get("bolla_id")
+
+                riga["stato_consegna"] = target_status
+                riga.pop("data_consegna", None) 
+
+                if target_status == "Da Consegnare":
+                    riga.pop("data_arrivo_in_house", None) 
+
+                if original_bolla_id and not keep_bolla:
+                    riga.pop("bolla_id", None)
+                    for bolla in p.get("bolle", []):
+                        if bolla.get("id") == original_bolla_id:
+                            if index in bolla.get("indici_righe", []):
+                                bolla["indici_righe"].remove(index)
+                            break
+        # Consegna annullata: quanto era stato scaricato dal magazzino torna in giacenza
+        if target_status != "Consegnato":
+            storna_righe_magazzino(p, item_indices)
+    
+    # Ricalcola lo stato globale e salva
+    aggiorna_stato_consegna_globale(p)
+    aggiorna_stato_avanzamento(p)
+    save_quote(quote_id, p)
+
+    return jsonify({"success": True, "message": "Stato degli articoli aggiornato."})
+
+def get_new_bolla_id(preventivo_data):
+    """Genera un ID progressivo per la bolla, specifico per il preventivo."""
+    now = datetime.datetime.now()
+    year = now.strftime('%Y')
+    
+    bolle_esistenti = preventivo_data.get("bolle", [])
+    if not bolle_esistenti:
+        return f"BOLLA-{year}-1"
+
+    max_num = 0
+    for bolla in bolle_esistenti:
+        try:
+            # Estrae il numero progressivo dall'ID della bolla (es. da "BOLLA-2025-3" prende 3)
+            num = int(bolla.get("id", "").split('-')[2])
+            if num > max_num:
+                max_num = num
+        except (IndexError, ValueError):
+            continue
+    
+    return f"BOLLA-{year}-{max_num + 1}"
+
+
+@app.route("/consegna/<quote_id>/crea-bolla", methods=["POST"])
+@login_or_local_required
+def crea_bolla(quote_id):
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        return jsonify({"success": False, "error": "Non disponi delle autorizzazioni per eseguire questa azione."})
+    p = load_quote(quote_id)
+    if not p: return jsonify({"success": False, "error": "Preventivo non trovato"})
+
+    indici_righe_bolla = [int(i) for i in request.form.getlist("selected_items[]")]
+    indirizzo_cantiere_id = request.form.get("indirizzo_cantiere_id")
+
+    if not indici_righe_bolla:
+        return jsonify({"success": False, "error": "Nessun articolo selezionato per la bolla"})
+
+    bolla_id = get_new_bolla_id(p)
+    
+    if "bolle" not in p: p["bolle"] = []
+    
+    nuova_bolla = {
+        "id": bolla_id,
+        "data": datetime.date.today().strftime('%Y-%m-%d'),
+        "indici_righe": indici_righe_bolla
+    }
+    
+    if indirizzo_cantiere_id:
+        nuova_bolla["indirizzo_cantiere_id"] = indirizzo_cantiere_id
+
+    p["bolle"].append(nuova_bolla)
+
+    # --- AGGIORNAMENTO STATO IMMEDIATO ---
+    # Impostiamo "In Bolla" GIÀ QUI, così anche se il PDF fallisce
+    # le righe risultano correttamente associate alla bolla.
+    # Il PDF può essere rigenerato in seguito senza creare bolle duplicate.
+    is_edile = p.get("tipo_preventivo") == "edile"
+    if is_edile:
+        for idx_assoluto in indici_righe_bolla:
+            curr_idx = 0
+            for sezione in p.get("sezioni_edili", []):
+                for riga in sezione.get("righe", []):
+                    if curr_idx == idx_assoluto:
+                        riga["stato_consegna"] = "In Bolla"
+                        riga["bolla_id"] = bolla_id
+                    curr_idx += 1
+    else:
+        target_list = "righe"
+        for index in indici_righe_bolla:
+            if 0 <= index < len(p[target_list]):
+                p[target_list][index]["stato_consegna"] = "In Bolla"
+                p[target_list][index]["bolla_id"] = bolla_id
+
+    aggiorna_stato_consegna_globale(p)
+    aggiorna_stato_avanzamento(p)
+    save_quote(quote_id, p)
+
+    return jsonify({
+        "success": True, 
+        "next_url": url_for('export_bolla_pdf', quote_id=quote_id, bolla_id=bolla_id)
+    })
+
+@app.route("/pagamenti")
+@login_required
+def dashboard_pagamenti():
+    """Pagina che elenca i preventivi confermati con il loro stato di pagamento."""
+    preventivi_da_saldare = []
+    tutti_i_preventivi = get_all_quotes()
+    today = datetime.date.today()
+
+    def _str_to_float(s):
+        try: return round(float(str(s).replace("€", "").replace(".", "").replace(",", ".").strip()), 2)
+        except: return 0.0
+
+    for prev_summary in tutti_i_preventivi:
+        p = load_quote(prev_summary["numero"])
+        
+        if not p or p.get("stato") not in ["Confermato", "In Lavorazione", "Chiuso"]:
+            continue
+
+        pagamenti = p.get("pagamenti", [])
+        totale_preventivo = round(_str_to_float(p.get("totale", "0")), 2)
+        
+        totale_pagato_effettivo = 0.0
+        totale_da_incassare = 0.0
+        
+        # 1. Calcolo Pagamenti Fisici (rispettando il flag programmato)
+        for pag in pagamenti:
+            importo_float = _str_to_float(pag.get("importo"))
+            
+            if pag.get("is_scheduled") and importo_float > 0:
+                totale_da_incassare += importo_float
+            else:
+                totale_pagato_effettivo += importo_float
+        
+        # 2. GESTIONE ESENZIONE IVA
+        if p.get("no_iva"):
+            valore_iva = _str_to_float(p.get("tot_iva", "0"))
+            totale_pagato_effettivo += valore_iva
+
+        # Arrotondamenti finali
+        totale_pagato_effettivo = round(totale_pagato_effettivo, 2)
+        totale_da_incassare = round(totale_da_incassare, 2)
+        
+        p["totale_pagato"] = totale_pagato_effettivo
+        p["totale_da_incassare"] = totale_da_incassare 
+        p["totale_da_saldare"] = round(totale_preventivo - totale_pagato_effettivo, 2)
+        
+        p["stato_pagamento"] = "Saldato" if p["totale_da_saldare"] <= 0.01 else "Da Saldare"
+
+        if p["stato_pagamento"] == "Saldato":
+            continue
+
+        # Dettagli per la dashboard
+        p["totale_num"] = totale_preventivo
+        p["pct_pagato"] = max(0, min(100, round(totale_pagato_effettivo / totale_preventivo * 100))) if totale_preventivo > 0 else 0
+        p["pct_programmato"] = max(0, min(100 - p["pct_pagato"], round(totale_da_incassare / totale_preventivo * 100))) if totale_preventivo > 0 else 0
+        p["num_pagamenti"] = len([x for x in pagamenti if not x.get("is_scheduled")])
+        programmati = sorted(x.get("data", "") for x in pagamenti if x.get("is_scheduled") and x.get("data"))
+        p["prossimo_incasso"] = programmati[0] if programmati else None
+
+        # Calcolo allerta giorni (Invariato)
+        p["ultimo_pagamento_data"] = None
+        p["allerta_giorni"] = None
+        if pagamenti:
+            pagamenti.sort(key=lambda x: x.get("data", "1900-01-01"), reverse=True)
+            p["ultimo_pagamento_data"] = pagamenti[0].get("data")
+            if p["stato_pagamento"] == "Da Saldare":
+                try:
+                    last_payment_date = datetime.datetime.strptime(p["ultimo_pagamento_data"], '%Y-%m-%d').date()
+                    days_diff = (today - last_payment_date).days
+                    p["giorni_da_ultimo"] = days_diff
+                    if days_diff > 22: p["allerta_giorni"] = "rosso"
+                    elif days_diff >= 16: p["allerta_giorni"] = "arancio"
+                    elif days_diff >= 15: p["allerta_giorni"] = "giallo"
+                except: pass
+
+        preventivi_da_saldare.append(p)
+
+    return render_template("dashboard_pagamenti.html", 
+        title="Saldo e Acconto Preventivi",
+        preventivi=preventivi_da_saldare
+    )
+@app.route("/pagamenti/<quote_id>")
+@login_required
+def gestione_pagamenti(quote_id):
+    """Pagina per visualizzare e aggiungere pagamenti per un singolo preventivo."""
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.")
+        return redirect(url_for("dashboard_pagamenti"))
+
+    # --- AGGIUNTA: Forza ricalcolo all'apertura per aggiornare i campi a 0 ---
+    aggiorna_stato_pagamento_globale(p)
+    # -----------------------------------------------------------------------
+
+    pagamenti_raw = p.get("pagamenti", [])
+    today = datetime.date.today()
+    
+    # --- MIGRAZIONE RETROCOMPATIBILITÀ (Invariata) ---
+    made_changes_to_save = False
+    for pag in pagamenti_raw:
+        if "id" not in pag:
+            pag["id"] = f"PAY-{uuid.uuid4().hex[:8].upper()}"
+            made_changes_to_save = True
+    if made_changes_to_save: save_quote(quote_id, p)
+    # -----------------------------------------------
+
+    def _str_to_float(s):
+        try: return round(float(str(s).replace("€", "").replace(".", "").replace(",", ".").strip()), 2)
+        except: return 0.0
+
+    ids_rettificati = set(pag.get("rectifies_id") for pag in pagamenti_raw if pag.get("rectifies_id"))
+    pagamenti_elaborati = []
+    totale_da_incassare = 0.0
+    totale_pagato_effettivo = 0.0
+
+    # 1. Elabora pagamenti REALI
+    for pag in pagamenti_raw:
+        new_pag = pag.copy()
+        importo_float = _str_to_float(new_pag.get("importo"))
+        is_future = new_pag.get("is_scheduled", False)
+
+        if is_future and importo_float > 0:
+            totale_da_incassare += importo_float
+        else:
+            totale_pagato_effettivo += importo_float
+        
+        is_rettificabile = (importo_float > 0 and not is_future and new_pag.get("id") not in ids_rettificati)
+        
+        new_pag["is_future"] = is_future
+        new_pag["is_rectifiable"] = is_rettificabile
+        new_pag["type"] = "standard" # Tipologia standard
+        pagamenti_elaborati.append(new_pag)
+
+    # 2. GESTIONE RIGA VIRTUALE "NO IVA"
+    if p.get("no_iva"):
+        valore_iva = _str_to_float(p.get("tot_iva", "0"))
+        
+        if valore_iva > 0:
+            # Creiamo un pagamento "fittizio" solo per la visualizzazione
+            pagamento_virtuale = {
+                "id": "VIRTUAL-NO-IVA",
+                "data": p.get("data_conferma", today.strftime('%Y-%m-%d')), # Data preventivo o oggi
+                "importo": p.get("tot_iva", "0,00"),
+                "note": "Saldo automatico",
+                "is_future": False,
+                "type": "auto_iva" # Tipologia speciale per il template
+            }
+            # Aggiungiamo alla lista visuale
+            pagamenti_elaborati.append(pagamento_virtuale)
+            
+            # Aggiorniamo i totali matematici
+            totale_pagato_effettivo += valore_iva
+
+    # Ordina per data
+    pagamenti_elaborati.sort(key=lambda x: x.get("data", ""), reverse=True)
+
+    # Totali Finali
+    totale_da_incassare = round(totale_da_incassare, 2)
+    totale_pagato_effettivo = round(totale_pagato_effettivo, 2)
+    totale_preventivo = _str_to_float(p.get("totale", "0")) 
+    totale_da_saldare = round(totale_preventivo - totale_pagato_effettivo, 2)
+    
+    p["totale_pagato"] = totale_pagato_effettivo
+    p["totale_da_incassare"] = totale_da_incassare
+    p["totale_da_saldare"] = totale_da_saldare
+    p["pagamenti_elaborati"] = pagamenti_elaborati
+
+    return render_template("gestione_pagamenti.html",
+        title=f"Gestione Pagamenti {quote_id}",
+        p=p
+    )
+
+@app.route("/pagamenti/<quote_id>/aggiungi", methods=["POST"])
+@login_required
+def aggiungi_pagamento(quote_id):
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
+        return redirect(request.referrer or url_for('dashboard'))
+    """Salva un nuovo pagamento per un preventivo."""
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.")
+        return redirect(url_for("dashboard_pagamenti"))
+
+    if "pagamenti" not in p:
+        p["pagamenti"] = []
+
+    # Recupera il nome dell'utente dalla sessione e la nota dal form
+    user_name = session.get("user_name", "sconosciuto")
+    nota_originale = request.form.get("note", "").strip()
+
+    nota_finale = f"(Inserito da: {user_name})"
+    if nota_originale:
+        nota_finale = f"{nota_originale} {nota_finale}"
+    
+    # Crea la nota finale combinando la nota dell'utente e il suo nome
+    nota_finale = f"(Inserito da: {user_name})"
+    if nota_originale:
+        nota_finale = f"{nota_originale} {nota_finale}"    
+
+    nuovo_pagamento = {
+        "id": f"PAY-{uuid.uuid4().hex[:8].upper()}",
+        "data": request.form.get("data", datetime.date.today().strftime('%Y-%m-%d')),
+        "importo": request.form.get("importo"),
+        "note": nota_finale,
+        "is_scheduled": (request.form.get("data") > datetime.date.today().strftime('%Y-%m-%d'))
+    }
+
+
+    # Validazione semplice
+    if not nuovo_pagamento["importo"] or float(nuovo_pagamento["importo"].replace(",", ".")) <= 0:
+        flash("L'importo del pagamento non è valido.", "error")
+        return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+    p["pagamenti"].append(nuovo_pagamento)
+    aggiorna_stato_pagamento_globale(p)
+    aggiorna_stato_avanzamento(p) 
+    save_quote(quote_id, p)
+    
+    flash("Nuovo pagamento aggiunto con successo.", "success")
+    return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+@app.route("/pagamenti/<quote_id>/rettifica", methods=["POST"])
+@login_required
+def rettifica_pagamento(quote_id):
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
+        return redirect(request.referrer)
+
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.")
+        return redirect(url_for("dashboard_pagamenti"))
+
+    payment_id_to_rectify = request.form.get("payment_id")
+    original_payment = next((pag for pag in p.get("pagamenti", []) if pag.get("id") == payment_id_to_rectify), None)
+    
+    if original_payment is None:
+        flash("Errore: Pagamento da rettificare non trovato.", "error")
+        return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+    user_name = session.get("user_name", "sconosciuto")
+    try:
+        original_amount_float = float(str(original_payment["importo"]).replace(",", "."))
+        rectified_amount_float = -original_amount_float
+        rectified_amount_str = f"{rectified_amount_float:.2f}".replace(".", ",")
+    except (ValueError, TypeError, KeyError):
+        flash("Errore nel formato dell'importo originale.", "error")
+        return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+    rectified_payment = {
+        "id": f"PAY-{uuid.uuid4().hex[:8].upper()}",
+        "data": datetime.date.today().strftime('%Y-%m-%d'),
+        "importo": rectified_amount_str,
+        # Aggiorniamo la nota per includere l'ID, più chiaro
+        "note": f"Rettifica pag. {original_payment.get('id')} (da {user_name})",
+        # QUESTA E' LA RIGA CHIAVE:
+        "rectifies_id": original_payment.get("id") 
+    }
+
+    if "pagamenti" not in p: p["pagamenti"] = []
+    
+    p["pagamenti"].append(rectified_payment)
+    
+    aggiorna_stato_pagamento_globale(p)
+    aggiorna_stato_avanzamento(p) 
+    save_quote(quote_id, p)
+    
+    flash("Pagamento rettificato con successo.", "success")
+    return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+@app.route("/pagamenti/<quote_id>/conferma_incasso", methods=["POST"])
+@login_required
+def conferma_incasso(quote_id):
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
+        return redirect(request.referrer)
+    
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.")
+        return redirect(url_for("dashboard_pagamenti"))
+
+    payment_id_to_confirm = request.form.get("payment_id")
+    payment_found = False
+
+    for pag in p.get("pagamenti", []):
+        if pag.get("id") == payment_id_to_confirm:
+            pag["data"] = datetime.date.today().strftime('%Y-%m-%d')
+            pag["is_scheduled"] = False
+            payment_found = True
+            break
+    
+    if payment_found:
+        aggiorna_stato_pagamento_globale(p)
+        aggiorna_stato_avanzamento(p)
+        save_quote(quote_id, p)
+        flash("Pagamento futuro confermato e incassato oggi.", "success")
+    else:
+        flash("Errore: Pagamento da confermare non trovato.", "error")
+
+    return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+@app.route("/pagamenti/<quote_id>/modifica-data", methods=["POST"])
+@login_required
+def modifica_data_pagamento(quote_id):
+    """Aggiorna la data di un pagamento programmato (futuro)."""
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non autorizzato.", "error")
+        return redirect(request.referrer)
+
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.", "error")
+        return redirect(url_for("dashboard_pagamenti"))
+
+    payment_id = request.form.get("payment_id")
+    nuova_data = request.form.get("nuova_data")
+
+    if not nuova_data:
+        flash("Inserire una data valida.", "error")
+        return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+    payment_found = False
+    for pag in p.get("pagamenti", []):
+        if pag.get("id") == payment_id:
+            pag["data"] = nuova_data
+            payment_found = True
+            break
+
+    if payment_found:
+        save_quote(quote_id, p)
+        flash("Data del pagamento aggiornata con successo.", "success")
+    else:
+        flash("Errore: Pagamento non trovato.", "error")
+
+    return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+@app.route("/pagamenti/<quote_id>/modifica-programmato", methods=["POST"])
+@login_required
+def modifica_pagamento_programmato(quote_id):
+    """Modifica data e importo di un pagamento futuro tramite modale."""
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non autorizzato.", "error")
+        return redirect(request.referrer)
+
+    p = load_quote(quote_id)
+    if not p: return redirect(url_for("dashboard"))
+
+    payment_id = request.form.get("payment_id")
+    nuova_data = request.form.get("nuova_data")
+    nuovo_importo = request.form.get("nuovo_importo")
+
+    payment_found = False
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    for pag in p.get("pagamenti", []):
+        if pag.get("id") == payment_id:
+            pag["data"] = nuova_data
+            pag["importo"] = nuovo_importo
+            pag["is_scheduled"] = (nuova_data > today_str)
+            payment_found = True
+            break
+    
+    if payment_found:
+        # Ricalcola i totali globali perché l'importo potrebbe essere cambiato
+        aggiorna_stato_pagamento_globale(p)
+        aggiorna_stato_avanzamento(p)
+        save_quote(quote_id, p)
+        flash("Pagamento aggiornato con successo.", "success")
+    else:
+        flash("Errore: Pagamento non trovato.", "error")
+
+    return redirect(url_for("gestione_pagamenti", quote_id=quote_id))
+
+@app.route("/export-bolla-pdf/<quote_id>/<bolla_id>")
+@login_or_local_required
+def export_bolla_pdf(quote_id, bolla_id):
+    """Apre il PDF della bolla se è già stato generato; altrimenti mostra la pagina di generazione.
+    (La rigenerazione forzata resta disponibile da /rigenera-bolla-pdf.)"""
+    p = load_quote(quote_id)
+    bolla = next((b for b in (p or {}).get("bolle", []) if b.get("id") == bolla_id), None)
+    if bolla and not bolla.get("pdf_fallito"):
+        # Le bolle più vecchie non hanno 'pdf_filename': si prova anche il nome standard del file
+        nome_standard = f"{bolla_id.replace('-', '_')}_{p['numero'].replace('-', '_')}.pdf"
+        for pdf_name in (bolla.get("pdf_filename"), nome_standard):
+            if pdf_name and (QUOTES_DIR / pdf_name).is_file() and (QUOTES_DIR / pdf_name).stat().st_size > 1000:
+                return redirect(url_for("pdf_inline", filename=pdf_name))
+    return render_template("loading_bolla.html", quote_id=quote_id, bolla_id=bolla_id)
+
+@app.route("/generate-bolla-task/<quote_id>/<bolla_id>")
+@login_or_local_required
+def generate_bolla_task(quote_id, bolla_id):
+    """Genera il PDF della bolla con gestione robusta di timeout e retry."""
+    import subprocess, shutil
+    log_id = f"{quote_id}/{bolla_id}"
+    log_pdf_event(log_id, "INFO", "Inizio generazione PDF bolla.")
+
+    p = load_quote(quote_id)
+    if not p:
+        log_pdf_event(log_id, "ERRORE", "Preventivo non trovato.")
+        return jsonify({"error": "Preventivo non trovato"}), 404
+
+    bolla = next((b for b in p.get("bolle", []) if b.get("id") == bolla_id), None)
+    if not bolla:
+        log_pdf_event(log_id, "ERRORE", "Bolla non trovata.")
+        return jsonify({"error": "Bolla non trovata"}), 404
+
+    # Determina sorgente righe e template in base al tipo
+    is_edile = p.get("tipo_preventivo") == "edile"
+    template_name = "stampa_consegna_lavori.html" if is_edile else "stampa_bolla.html"
+    righe_sorgente = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
+    
+    righe_bolla = [righe_sorgente[i] for i in bolla.get("indici_righe", []) if 0 <= i < len(righe_sorgente)]
+    
+    indirizzo_consegna = None
+    indirizzo_id = bolla.get("indirizzo_cantiere_id")
+    if indirizzo_id:
+        client = load_client(p.get("id_cliente"))
+        if client:
+            indirizzo_consegna = next((addr for addr in client.get("indirizzi_cantiere", []) if addr.get("id") == indirizzo_id), None)
+
+    quote_num_safe = p['numero'].replace('-', '_')
+    bolla_id_safe = bolla_id.replace('-', '_')
+    pdf_name = f"{bolla_id_safe}_{quote_num_safe}.pdf"
+    out_path = (QUOTES_DIR / pdf_name).resolve()
+
+    url = _local_print_url("stampa_bolla_html", quote_id=quote_id, bolla_id=bolla_id)
+
+    # --- 1. Browser headless (Chrome, poi Edge), con profilo dedicato e più tentativi ---
+    ok = print_url_to_pdf(log_id, url, out_path)
+
+    # --- 2. Fallback WeasyPrint (solo se installato) ---
+    if not ok:
+        log_pdf_event(log_id, "INFO", "Browser non riuscito. Tentativo con WeasyPrint.")
+        html_string = render_template(template_name, p=p, bolla=bolla, righe_bolla=righe_bolla, indirizzo_consegna=indirizzo_consegna)
+        ok = _weasyprint_to_pdf(log_id, html_string, out_path)
+
+    # --- 3. ESITO FINALE ---
+    if not ok:
+        log_pdf_event(log_id, "FALLIMENTO", "Tutti i metodi di generazione PDF hanno fallito.")
+        # Salva flag nel JSON per segnalare che il PDF non è stato generato
+        bolla["pdf_fallito"] = True
+        save_quote(quote_id, p)
+        annuncia(f"❌ PDF NON generato: bolla {bolla_id} del preventivo {quote_id} ({_chi()}).", "pdf_errore")
+        return jsonify({"error": "Impossibile generare il PDF della bolla. Potrai rigenerarlo dalla pagina consegna."}), 500
+
+    # PDF generato con successo: rimuovi eventuali flag di fallimento precedente
+    bolla.pop("pdf_fallito", None)
+    bolla["pdf_filename"] = pdf_name
+    save_quote(quote_id, p)
+
+    log_pdf_event(log_id, "COMPLETATO", f"Processo terminato. File: {pdf_name}")
+    annuncia(f"✅ PDF generato: bolla {bolla_id} del preventivo {quote_id} ({_chi()})", "pdf", url_for("pdf_inline", filename=pdf_name))
+    pdf_url = url_for("pdf_inline", filename=pdf_name)
+    return jsonify({"pdf_url": pdf_url})
+
+@app.route("/rigenera-bolla-pdf/<quote_id>/<bolla_id>")
+@login_or_local_required
+def rigenera_bolla_pdf(quote_id, bolla_id):
+    """Rigenera il PDF di una bolla esistente senza creare una bolla duplicata."""
+    return render_template("loading_bolla.html", quote_id=quote_id, bolla_id=bolla_id)
+
+@app.route("/fatture")
+@login_required
+def dashboard_fatture():
+    """Pagina che elenca i preventivi confermati pronti per la fatturazione."""
+    tutti_i_preventivi = get_all_quotes()
+    preventivi_confermati = []
+    stati_validi = ["Confermato", "In Lavorazione", "Chiuso"]
+
+    for prev_summary in tutti_i_preventivi:
+        p = load_quote(prev_summary["numero"])
+        if not p or p.get("stato") not in stati_validi:
+            continue
+        
+        # Salta i preventivi che sono già stati fatturati completamente
+        if p.get("stato_fattura") == "Fatturato":
+            continue
+
+        # Dettagli per la dashboard
+        p["totale_num"] = _to_float(p.get("totale"))
+        p["imponibile_num"] = _to_float(p.get("tot_imponibile_cliente"))
+        p["iva_num"] = _to_float(p.get("tot_iva"))
+        stati_iva = p.get("stati_fattura_iva") or {}
+        imponibili_iva = p.get("imponibili_iva") or {}
+        p["aliquote"] = [
+            {"aliquota": k, "imponibile": _to_float(v), "fatturato": bool(stati_iva.get(k))}
+            for k, v in sorted(imponibili_iva.items(), key=lambda kv: _to_float(kv[0]))
+        ] if isinstance(imponibili_iva, dict) else []
+        fatture_iva = p.get("fatture_per_iva") or {}
+        p["num_fatture"] = len(p.get("fatture_allegate") or []) + (
+            sum(len(v) for v in fatture_iva.values()) if isinstance(fatture_iva, dict) else 0)
+        p["pronto_fattura"] = p.get("stato_consegna_globale") == "Completato"
+        rif = _str_to_date(p.get("data_conferma")) or _str_to_date(p.get("data"))
+        p["giorni_da_conferma"] = (datetime.date.today() - rif).days if rif else None
+        preventivi_confermati.append(p)
+
+    return render_template("dashboard_fatture.html", 
+        title="Dashboard Fatture",
+        preventivi=preventivi_confermati
+    )
+
+@app.route("/fattura/<quote_id>")
+@login_required
+def editor_fattura(quote_id):
+    """Pagina di visualizzazione snellita di un preventivo per la fatturazione."""
+    p = load_quote(quote_id)
+    # ... (migrazione esistente) ...
+
+    # --- INIZIO LOGICA EDILI / STANDARD ---
+    is_edile = p.get("tipo_preventivo") == "edile"
+    righe_sorgente = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
+    
+    dati_fattura = {}
+    
+    def _clean_num(val_str):
+        try:
+            return float(str(val_str).replace("€", "").replace(".", "").replace(",", ".").strip())
+        except (ValueError, TypeError):
+            return 0.0
+
+    # 1. Raggruppa le righe per aliquota IVA
+    for riga in righe_sorgente:
+        if not riga.get("articolo"): continue
+        
+        iva_key = str(riga.get("iva_pct", "22 %")).replace("%", "").strip()
+        
+        if iva_key not in dati_fattura:
+            dati_fattura[iva_key] = {
+                "righe": [],
+                "imponibile_val": 0.0,
+                "iva_val": 0.0,
+                "fatture_allegate": p.get("fatture_per_iva", {}).get(iva_key, []),
+                "is_fatturato": p.get("stati_fattura_iva", {}).get(iva_key, False)
+            }
+        
+        # Mapping campi per compatibilità template HTML
+        r_view = riga.copy()
+        if is_edile:
+            val_prezzo = _clean_num(riga.get("prezzo_vendita"))
+            r_view["tot_prezzo_unitario"] = riga.get("prezzo_vendita")
+            r_view["tot_prezzo"] = riga.get("prezzo_vendita")
+            r_view["qt"] = "1"
+            r_view["unt"] = "Lav."
+            dati_fattura[iva_key]["imponibile_val"] += val_prezzo
+            dati_fattura[iva_key]["iva_val"] += val_prezzo * (_clean_num(iva_key) / 100)
+        else:
+            dati_fattura[iva_key]["imponibile_val"] += _clean_num(riga.get("tot_prezzo"))
+            dati_fattura[iva_key]["iva_val"] += _clean_num(riga.get("tot_iva_riga"))
+
+        dati_fattura[iva_key]["righe"].append(r_view)
+
+    # 2. Finalizzazione stringhe per il template
+    for key, data in dati_fattura.items():
+        data["imponibile_str"] = f"{data['imponibile_val']:.2f}".replace(".", ",")
+        data["iva_str"] = f"{data['iva_val']:.2f}".replace(".", ",")
+        data["totale"] = data["imponibile_val"] + data["iva_val"]
+    # --- FINE LOGICA EDILI ---
+
+    dati_fattura_ordinati = dict(sorted(dati_fattura.items(), key=lambda item: item[0], reverse=True))
+
+    return render_template("editor_fattura.html", 
+        title=f"Dettaglio Fattura da Preventivo {quote_id}",
+        p=p,
+        dati_fattura=dati_fattura_ordinati
+    )
+
+@app.route("/fattura/<quote_id>/allega", methods=["POST"])
+@login_required
+def allega_fattura(quote_id):
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non disponi delle autorizzazioni per gestire i pagamenti.", "error")
+        return redirect(request.referrer or url_for('dashboard'))
+    
+    p = load_quote(quote_id)
+    if not p:
+        flash("Preventivo non trovato.", "error")
+        return redirect(url_for("editor_fattura", quote_id=quote_id))
+
+    file = request.files.get('file')
+    iva_rate_key = request.form.get("iva_rate_key") # <-- NUOVO CAMPO DAL FORM
+
+    if not all([file, file.filename, iva_rate_key]):
+        flash("Dati mancanti: file o aliquota IVA non specificati.", "error")
+        return redirect(url_for("editor_fattura", quote_id=quote_id))
+
+    # Logica di salvataggio del file (invariata)
+    quote_allegati_dir = ALLEGATI_DIR / quote_id
+    quote_allegati_dir.mkdir(exist_ok=True)
+    filename = secure_filename(file.filename)
+    file.save(quote_allegati_dir / filename)
+
+    # --- NUOVA LOGICA DI SALVATAGGIO PER IVA ---
+    if "fatture_per_iva" not in p:
+        p["fatture_per_iva"] = {}
+    if iva_rate_key not in p["fatture_per_iva"]:
+        p["fatture_per_iva"][iva_rate_key] = []
+
+    p["fatture_per_iva"][iva_rate_key].append({
+        "filename": filename,
+        "descrizione": request.form.get("descrizione", f"Fattura IVA {iva_rate_key}%"),
+        "data_upload": datetime.date.today().strftime('%Y-%m-%d')
+    })
+    
+    # --- VECCHIO MODELLO DATI (per retrocompatibilità, opzionale ma consigliato) ---
+    # Manteniamo la vecchia lista per non rompere la visualizzazione in 'dettaglio_cliente'
+    if "fatture_allegate" not in p:
+        p["fatture_allegate"] = []
+    p["fatture_allegate"].append({
+        "filename": filename,
+        "descrizione": request.form.get("descrizione", f"Fattura IVA {iva_rate_key}%"),
+        "data_upload": datetime.date.today().strftime('%Y-%m-%d')
+    })
+    # --- FINE BLOCCO RETROCOMPATIBILITÀ ---
+
+    aggiorna_stato_avanzamento(p) # Richiama l'aggiornamento stato globale
+    save_quote(quote_id, p)
+    
+    flash(f"Fattura per IVA {iva_rate_key}% allegata con successo!", "success")
+    return redirect(url_for("editor_fattura", quote_id=quote_id))
+def get_flat_righe_edili(p):
+    """
+    Versione con retrocompatibilità: gestisce sia la nuova struttura a sezioni 
+    che la vecchia lista piatta 'righe_edili'.
+    """
+    flat_list = []
+    if p.get("tipo_preventivo") != "edile":
+        return p.get("righe", [])
+    
+    indice_assoluto = 0
+    
+    # --- 1. TENTATIVO NUOVA STRUTTURA (Sezioni) ---
+    if "sezioni_edili" in p and p["sezioni_edili"]:
+        for sezione in p["sezioni_edili"]:
+            for riga in sezione.get("righe", []):
+                r_copy = riga.copy()
+                r_copy["original_index"] = indice_assoluto
+                # Campi virtuali per compatibilità
+                r_copy["qt"] = "1"
+                r_copy["unt"] = "Lav."
+                r_copy["tot_prezzo"] = riga.get("prezzo_vendita", "0")
+                
+                # Calcolo IVA per fatturazione
+                prezzo = _to_num(riga.get("prezzo_vendita", 0))
+                iva_pct = _to_num(riga.get("iva_pct", 10))
+                r_copy["tot_iva_riga"] = f"{(prezzo * iva_pct / 100):.2f}".replace(".", ",")
+                
+                flat_list.append(r_copy)
+                indice_assoluto += 1
+                
+    # --- 2. TENTATIVO VECCHIA STRUTTURA (Fallback retrocompatibilità) ---
+    elif "righe_edili" in p and p["righe_edili"]:
+        for riga in p["righe_edili"]:
+            r_copy = riga.copy()
+            r_copy["original_index"] = indice_assoluto
+            r_copy["qt"] = "1"
+            r_copy["unt"] = "Lav."
+            r_copy["tot_prezzo"] = riga.get("prezzo_vendita", "0")
+            
+            prezzo = _to_num(riga.get("prezzo_vendita", 0))
+            iva_pct = _to_num(riga.get("iva_pct", 10))
+            r_copy["tot_iva_riga"] = f"{(prezzo * iva_pct / 100):.2f}".replace(".", ",")
+            
+            flat_list.append(r_copy)
+            indice_assoluto += 1
+            
+    return flat_list
+def migra_vecchie_fatture_a_iva(p):
+    """
+    Funzione di migrazione una tantum. 
+    Sposta le fatture da p['fatture_allegate'] a p['fatture_per_iva'].
+    Attribuisce tutte le vecchie fatture all'aliquota IVA più alta (di solito 22%).
+    """
+    if p.get("fatture_per_iva") or not p.get("fatture_allegate"):
+        return False # Migrazione già fatta o non necessaria
+
+    print(f"MIGRAZIONE: Trovate fatture legacy per {p['numero']}.")
+    p["fatture_per_iva"] = {}
+
+    # Trova l'aliquota IVA più alta (presumibilmente il "totale" fatturato)
+    # Se non ci sono imponibili, usa "22" come default
+    aliquota_principale = "22" 
+    if p.get("imponibili_iva"):
+        aliquote = [int(k) for k in p.get("imponibili_iva", {}).keys() if _to_num(k) > 0]
+        if aliquote:
+            aliquota_principale = str(max(aliquote))
+
+    # Assegna tutte le vecchie fatture a quell'aliquota
+    p["fatture_per_iva"][aliquota_principale] = p["fatture_allegate"]
+
+    # Aggiorna lo stato globale
+    p["stato_fattura"] = "Fatturato"
+
+    return True # Ritorna True se abbiamo modificato 'p'
+@app.route("/fattura/<quote_id>/toggle-stato", methods=["POST"])
+@login_required
+def toggle_stato_fattura_iva(quote_id):
+    allowed_roles = ['segreteria', 'amministratore', 'ceo']
+    if session.get("user_role") not in allowed_roles:
+        flash("Non autorizzato.", "error")
+        return redirect(request.referrer)
+
+    p = load_quote(quote_id)
+    if not p: return redirect(url_for("dashboard"))
+
+    iva_key = request.form.get("iva_key")
+    # "1" per Fatturato, "0" per Da Fatturare
+    nuovo_stato = request.form.get("set_stato") == "1"
+
+    if "stati_fattura_iva" not in p:
+        p["stati_fattura_iva"] = {}
+
+    # Imposta lo stato per quella specifica aliquota
+    p["stati_fattura_iva"][iva_key] = nuovo_stato
+
+    # --- Ricalcolo Stato Globale Preventivo ---
+    # Controlliamo se TUTTE le aliquote presenti (con importi > 0) sono segnate come fatturate
+    def _to_num_local(x):
+        try: return float(str(x).replace("€", "").replace(".", "").replace(",", ".").strip())
+        except: return 0.0
+
+    aliquote_presenti = [k for k in p.get("imponibili_iva", {}).keys() if _to_num_local(p["imponibili_iva"][k]) > 0]
+    
+    tutto_fatturato = True
+    almeno_uno_fatturato = False
+
+    for k in aliquote_presenti:
+        if p["stati_fattura_iva"].get(k, False):
+            almeno_uno_fatturato = True
+        else:
+            tutto_fatturato = False
+    
+    if tutto_fatturato and aliquote_presenti:
+        p["stato_fattura"] = "Fatturato"
+    elif almeno_uno_fatturato:
+        p["stato_fattura"] = "Fatturato Parziale"
+    else:
+        p["stato_fattura"] = "In Attesa"
+
+    aggiorna_stato_avanzamento(p)
+    save_quote(quote_id, p)
+    
+    flash(f"Stato fatturazione aggiornato.", "success")
+    return redirect(url_for("editor_fattura", quote_id=quote_id))
+
+
+@app.route("/stampa-bolla-html/<quote_id>/<bolla_id>")
+@login_or_local_required
+def stampa_bolla_html(quote_id, bolla_id):
+    """Renderizza il template HTML per la stampa della bolla o consegna lavori."""
+    p = load_quote(quote_id)
+    if not p: return "Preventivo non trovato", 404
+    
+    bolla = next((b for b in p.get("bolle", []) if b.get("id") == bolla_id), None)
+    if not bolla: return "Bolla non trovata", 404
+
+    # Determina sorgente righe e template in base al tipo
+    is_edile = p.get("tipo_preventivo") == "edile"
+    template_name = "stampa_consegna_lavori.html" if is_edile else "stampa_bolla.html"
+    righe_sorgente = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
+
+    righe_bolla = [righe_sorgente[i] for i in bolla.get("indici_righe", []) if 0 <= i < len(righe_sorgente)]
+
+    indirizzo_consegna = None
+    indirizzo_id = bolla.get("indirizzo_cantiere_id")
+    if indirizzo_id:
+        client = load_client(p.get("id_cliente"))
+        if client:
+            indirizzo_consegna = next((addr for addr in client.get("indirizzi_cantiere", []) if addr.get("id") == indirizzo_id), None)
+
+    return render_template(template_name, p=p, bolla=bolla, righe_bolla=righe_bolla, indirizzo_consegna=indirizzo_consegna)
+@app.route("/stampa-html/<quote_id>")
+@login_or_local_required
+def stampa_html(quote_id):
+    p = load_quote(quote_id)
+    if not p: return "Preventivo non trovato", 404
+    
+    if p.get("tipo_preventivo") == "edile":
+        return render_template("stampa_edile.html", p=p)
+        
+    return render_template("stampa.html", p=p)
+
+@app.route("/stampa-semplice-html/<quote_id>")
+@login_or_local_required
+def stampa_semplice_html(quote_id):
+    """Renderizza il template HTML per la stampa SEMPLICE (senza totali di riga)."""
+    p = load_quote(quote_id)
+    if not p: return "Preventivo non trovato", 404
+    # Fai attenzione al nome del nuovo template che creeremo tra poco:
+    return render_template("stampa_semplice.html", p=p)
+@app.route("/export-pdf/<quote_id>")
+@login_or_local_required
+def export_pdf(quote_id):
+    """Pagina di attesa per la generazione del PDF del preventivo."""
+    template_choice = request.args.get('template', 'standard')
+    p = load_quote(quote_id)
+    is_edile = p.get("tipo_preventivo") == "edile" if p else False
+    back_url = url_for("editor_preventivo_edile" if is_edile else "editor_preventivo", quote_id=quote_id)
+    return render_template("loading.html", quote_id=quote_id, template_choice=template_choice, back_url=back_url)
+
+def get_new_revisione_id(preventivo_data):
+    """Calcola il prossimo numero di revisione per un preventivo."""
+    if "storico_pdf" not in preventivo_data or not preventivo_data["storico_pdf"]:
+        return 1
+    return len(preventivo_data["storico_pdf"]) + 1
+
+_PDF_LOCKS = {}
+_PDF_LOCKS_GUARD = threading.Lock()
+
+def _get_pdf_lock(key):
+    """Un lock per preventivo: evita due generazioni contemporanee (doppio click, due utenti)."""
+    with _PDF_LOCKS_GUARD:
+        if key not in _PDF_LOCKS:
+            _PDF_LOCKS[key] = threading.Lock()
+        return _PDF_LOCKS[key]
+
+def get_browser_executables():
+    """Tutti i browser Chromium disponibili (Chrome, Edge...), senza duplicati, nell'ordine di preferenza."""
+    found = []
+    first = get_browser_executable()
+    candidates = [first] if first else []
+    for name in ["chrome", "msedge", "google-chrome", "chromium", "brave"]:
+        candidates.append(shutil.which(name))
+    candidates += [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ]
+    seen = set()
+    for c in candidates:
+        if c and os.path.isfile(c):
+            key = os.path.normcase(os.path.abspath(c))
+            if key not in seen:
+                seen.add(key)
+                found.append(c)
+    return found
+
+def _local_print_url(endpoint, **values):
+    """URL della pagina di stampa raggiungibile dal browser headless sulla stessa macchina del server.
+    Si usa 127.0.0.1 invece dell'IP di rete: non dipende da firewall, proxy o cambi di IP della LAN."""
+    port = request.environ.get("SERVER_PORT") or PORT
+    return f"http://127.0.0.1:{port}{url_for(endpoint, **values)}"
+
+def print_url_to_pdf(log_id, url, out_path, attempts_per_browser=2):
+    """Stampa una pagina in PDF con Chrome/Edge headless.
+
+    Scrive prima su un file temporaneo e lo rinomina solo se valido, così non restano mai PDF a metà.
+    Ogni tentativo usa un profilo browser temporaneo dedicato: senza, se Chrome è già aperto sul PC,
+    il comando si 'aggancia' alla finestra esistente e termina subito senza creare il file
+    (era la causa principale degli errori 'file assente' nel log)."""
+    import tempfile
+    out_path = Path(out_path)
+    tmp_path = out_path.with_name(out_path.stem + f".tmp-{uuid.uuid4().hex[:6]}.pdf")
+    browsers = get_browser_executables()
+    if not browsers:
+        log_pdf_event(log_id, "ERRORE", "Nessun browser Chrome/Edge trovato sul PC.")
+        return False
+
+    for browser_exe in browsers:
+        for attempt in range(1, attempts_per_browser + 1):
+            profile_dir = tempfile.mkdtemp(prefix="gest_pdf_")
+            timeout_secs = 60 if attempt == 1 else 45
+            cmd = [browser_exe, "--headless=new", "--disable-gpu", "--no-sandbox",
+                   "--disable-extensions", "--disable-dev-shm-usage",
+                   "--no-first-run", "--no-default-browser-check", "--disable-sync",
+                   "--disable-background-networking", "--disable-component-update",
+                   "--no-pdf-header-footer", "--run-all-compositor-stages-before-draw",
+                   # Se il gestionale gira come amministratore (es. avviato dall'installer), Chrome/Edge
+                   # si "de-elevano" rilanciandosi in un altro processo: quello avviato da qui esce
+                   # subito con codice 0 senza creare il PDF. Questo flag lo impedisce.
+                   "--do-not-de-elevate",
+                   f"--user-data-dir={profile_dir}",
+                   f"--print-to-pdf={tmp_path}", url]
+            label = f"{os.path.basename(browser_exe)} tentativo {attempt}/{attempts_per_browser}"
+            try:
+                log_pdf_event(log_id, "DEBUG", f"{label} - avvio")
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creationflags)
+                try:
+                    _, stderr = proc.communicate(timeout=timeout_secs)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.communicate()
+                    log_pdf_event(log_id, "ERRORE", f"{label} - timeout dopo {timeout_secs}s.")
+                    continue
+
+                # Il file a volte compare con un leggero ritardo dopo la chiusura del processo
+                # (più a lungo se il browser ha passato il lavoro a un altro processo: nessun output)
+                attese = 10 if (stderr or b"").strip() else 40
+                for _ in range(attese):
+                    if tmp_path.exists() and tmp_path.stat().st_size > 1000:
+                        break
+                    time.sleep(0.3)
+
+                if tmp_path.exists() and tmp_path.stat().st_size > 1000:
+                    os.replace(tmp_path, out_path)
+                    log_pdf_event(log_id, "SUCCESSO", f"PDF generato con {label}. Dimensione: {out_path.stat().st_size} bytes.")
+                    return True
+
+                size_info = tmp_path.stat().st_size if tmp_path.exists() else "file assente"
+                err = (stderr or b"").decode("utf-8", errors="ignore").strip().replace("\n", " | ")[:400]
+                log_pdf_event(log_id, "ERRORE", f"{label} - nessun PDF valido ({size_info}), codice uscita {proc.returncode}. {err}")
+            except Exception as e:
+                log_pdf_event(log_id, "ERRORE", f"{label} - errore imprevisto: {e}")
+            finally:
+                shutil.rmtree(profile_dir, ignore_errors=True)
+                try:
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+                except OSError:
+                    pass
+            time.sleep(1)
+    return False
+
+def _weasyprint_to_pdf(log_id, html_string, out_path):
+    """Fallback WeasyPrint, solo se la libreria è installata (nell'eseguibile di solito non lo è)."""
+    import importlib.util
+    if importlib.util.find_spec("weasyprint") is None:
+        log_pdf_event(log_id, "INFO", "WeasyPrint non installato: fallback non disponibile.")
+        return False
+    try:
+        from weasyprint import HTML
+        HTML(string=html_string, base_url=request.url_root).write_pdf(out_path)
+        ok = Path(out_path).exists() and Path(out_path).stat().st_size > 1000
+        log_pdf_event(log_id, "SUCCESSO" if ok else "ERRORE",
+                      f"PDF generato con WeasyPrint. Dimensione: {Path(out_path).stat().st_size} bytes." if ok else "WeasyPrint ha prodotto un file troppo piccolo.")
+        return ok
+    except Exception as e:
+        log_pdf_event(log_id, "ERRORE", f"Errore WeasyPrint: {e}")
+        return False
+
+@app.route("/generate-pdf-task/<quote_id>")
+@login_or_local_required
+def generate_pdf_task(quote_id):
+    """Genera il PDF ufficiale del preventivo.
+
+    Con ?invia=1 (usato dal pulsante "Inviato") il preventivo passa a Inviato SOLO se il PDF
+    è stato creato: se la generazione fallisce resta in Bozza e si può riprovare, invece di
+    rimanere bloccato in Inviato senza PDF."""
+    lock = _get_pdf_lock(quote_id)
+    if not lock.acquire(blocking=False):
+        log_pdf_event(quote_id, "INFO", "Generazione già in corso: richiesta duplicata ignorata.")
+        return jsonify({"error": "La generazione del PDF di questo preventivo è già in corso. Attendi qualche secondo."}), 409
+    try:
+        return _generate_pdf_task_locked(quote_id)
+    finally:
+        lock.release()
+
+def _generate_pdf_task_locked(quote_id):
+    log_pdf_event(quote_id, "INFO", "Inizio generazione PDF preventivo.")
+    invia = request.args.get("invia") == "1"
+
+    p = load_quote(quote_id)
+    if not p:
+        log_pdf_event(quote_id, "ERRORE", "Preventivo non trovato.")
+        return jsonify({"error": "Preventivo non trovato"}), 404
+
+    if p.get("stato") == "Bozza" and not invia:
+        log_pdf_event(quote_id, "ERRORE", "Tentativo di generare PDF per preventivo in Bozza.")
+        return jsonify({"error": "Non è possibile generare un PDF per un preventivo in stato di Bozza."}), 400
+    if invia and p.get("stato") not in ("Bozza", "Inviato"):
+        invia = False  # già confermato/in lavorazione: si genera solo la nuova revisione
+
+    # Scelta del Template (supporto Standard, Semplice, Edile)
+    template_choice = request.args.get('template', 'standard')
+    is_edile = p.get("tipo_preventivo") == "edile"
+
+    if is_edile:
+        html_endpoint = 'stampa_html'
+        html_template_file = 'stampa_edile.html'
+        log_pdf_event(quote_id, "INFO", "Scelto template PDF: EDILE.")
+    elif template_choice == 'semplice':
+        html_endpoint = 'stampa_semplice_html'
+        html_template_file = 'stampa_semplice.html'
+        log_pdf_event(quote_id, "INFO", "Scelto template PDF: SEMPLICE (senza totali riga).")
+    else:
+        html_endpoint = 'stampa_html'
+        html_template_file = 'stampa.html'
+        log_pdf_event(quote_id, "INFO", "Scelto template PDF: STANDARD (con totali riga).")
+
+    rev_num = get_new_revisione_id(p)
+    pdf_name = f"Preventivo_{p.get('numero', 'file')}_REV{rev_num}.pdf"
+    out_path = (QUOTES_DIR / pdf_name).resolve()
+    log_pdf_event(quote_id, "INFO", f"Percorso output PDF: {out_path}")
+
+    # Token firmato che autorizza il browser headless a leggere la pagina di stampa
+    pdf_token = generate_pdf_token(quote_id)
+    url = _local_print_url(html_endpoint, quote_id=quote_id, _pdf_token=pdf_token)
+
+    ok = print_url_to_pdf(quote_id, url, out_path)
+    if not ok:
+        log_pdf_event(quote_id, "INFO", "Browser non riuscito. Tentativo con WeasyPrint.")
+        ok = _weasyprint_to_pdf(quote_id, render_template(html_template_file, p=p), out_path)
+
+    if not ok:
+        log_pdf_event(quote_id, "FALLIMENTO", "Tutti i metodi di generazione PDF hanno fallito. Nessuna revisione salvata"
+                      + (", il preventivo resta in Bozza." if invia and p.get("stato") == "Bozza" else "."))
+        annuncia(f"❌ PDF NON generato: preventivo {quote_id} ({_chi()}). Dettagli nel log PDF.", "pdf_errore")
+        return jsonify({"error": "Impossibile generare il PDF del preventivo. Riprova tra qualche secondo; "
+                                 "se il problema persiste, chiudi e riapri Chrome sul PC del gestionale."}), 500
+
+    # Il PDF esiste ed è valido: solo ora si salva la revisione (e l'eventuale passaggio a Inviato).
+    # Si ricarica il preventivo per non sovrascrivere modifiche fatte nel frattempo.
+    p = load_quote(quote_id) or p
+    log_pdf_event(quote_id, "INFO", f"PDF valido. Aggiornamento preventivo con REV-{rev_num}.")
+    if "storico_pdf" not in p: p["storico_pdf"] = []
+    p["storico_pdf"].append({
+        "id": f"REV-{rev_num}",
+        "data": datetime.date.today().strftime('%Y-%m-%d'),
+        "filename": pdf_name,
+        "totale": p.get("totale", "0,00")
+    })
+    p["pdf_attivo"] = pdf_name
+    if invia and p.get("stato") == "Bozza":
+        p["stato"] = "Inviato"
+        p["is_locked"] = True
+        log_pdf_event(quote_id, "INFO", "Preventivo impostato come Inviato.")
+    save_quote(quote_id, p)
+
+    pdf_url = url_for("pdf_inline", filename=pdf_name)
+    log_pdf_event(quote_id, "COMPLETATO", f"Processo terminato. URL PDF: {pdf_url}")
+    annuncia(f"✅ PDF generato: preventivo {quote_id} REV-{rev_num} ({_chi()})"
+             + (" - segnato come Inviato" if invia else ""), "pdf", url_for("pdf_inline", filename=pdf_name))
+    return jsonify({"pdf_url": pdf_url})
+
+@app.route("/loading-static")
+def loading_static(): return render_template("loading_static.html")
+@app.route("/pdf/<path:filename>")
+@login_required
+def pdf_inline(filename):
+    """Serve un PDF dalla cartella preventivi. Richiede login."""
+    pdf_directory = QUOTES_DIR.resolve()
+    return send_from_directory(directory=pdf_directory, path=filename)
+
+def get_lan_ip():
+    """Trova l'IP locale del PC sulla LAN."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+def get_tailscale_ip():
+    """IP Tailscale di questo PC (100.x.y.z), o None se Tailscale non è attivo:
+    è l'indirizzo con cui telefono e PC fuori ufficio raggiungono il gestionale."""
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            if _ip_tailscale(info[4][0]):
+                return info[4][0]
+    except Exception:
+        pass
+    try:  # in alternativa lo si chiede al programma di Tailscale
+        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        return next((ip for ip in out.split() if _ip_tailscale(ip)), None)
+    except Exception:
+        return None
+
+def is_admin():
+    """Controlla se lo script ha i privilegi di amministratore su Windows."""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+def manage_firewall_rule(port, rule_name="Gestionale Flask"):
+    """Controlla e aggiunge una regola al firewall di Windows se eseguito come admin."""
+    if sys.platform != 'win32' or not is_admin():
+        if sys.platform == 'win32':
+            print("INFO: Esegui come amministratore la prima volta per configurare il firewall automaticamente.")
+        return
+    try:
+        check_cmd = f'netsh advfirewall firewall show rule name="{rule_name}"'
+        result = subprocess.run(check_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        # netsh esce con errore se la regola non c'è (il testo del messaggio dipende dalla lingua di Windows)
+        if result.returncode != 0 or "Nessuna regola corrispondente ai criteri specificati" in result.stdout:
+            print(f"INFO: Regola firewall '{rule_name}' non trovata. Tentativo di creazione...")
+            add_cmd = (f'netsh advfirewall firewall add rule name="{rule_name}" '
+                       f'dir=in action=allow protocol=TCP localport={port}')
+            subprocess.run(add_cmd, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            print(f"SUCCESS: Regola firewall per la porta {port} creata con successo.")
+        else:
+            print(f"INFO: Regola firewall '{rule_name}' già presente.")
+    except Exception as e:
+        print(f"ERRORE FIREWALL: Impossibile creare/verificare la regola. Errore: {e}")
+
+# --- Costanti di Configurazione Dinamiche ---
+HOST_BIND = "0.0.0.0"       # L'indirizzo a cui il server si lega (sempre questo per la LAN)
+LAN_IP = get_lan_ip()       # L'indirizzo IP da mostrare agli utenti
+PORT = 5001
+DISPLAY_URL = f"http://{LAN_IP}:{PORT}/"
+APP_TITLE = f"Gestionale Preventivi v{APP_VERSION}"
+SERVER_ADDRESS_INFO = f"Server attivo su {DISPLAY_URL}"
+
+def run_server():
+    """Funzione che avvia il server web e controlla gli annunci."""
+    # Esegui l'annuncio prima di far partire il server
+    verifica_e_annuncia_aggiornamento()
+    
+    is_debug_mode = "--debug" in sys.argv
+    if not is_debug_mode or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        threading.Thread(target=sincronizza_stati_tutti_preventivi, daemon=True).start()
+        integrazioni_google.avvia_riepilogo_giornaliero(report_per_riepilogo, lambda: indirizzi_email("email_report"),
+                                                        componi=componi_riepilogo)
+        avvia_chiusura_report()
+        avvia_controllo_postazioni()
+        ceerlo.avvia_riassunti_automatici(prossimi_eventi, contesto_evento, dopo=_riassunto_pronto)
+        threading.Timer(90, titoli_mancanti).start()  # le task aperte senza titolo lo ricevono da Ceerlo
+    
+    print(SERVER_ADDRESS_INFO)
+    if is_debug_mode:
+        app.run(host=HOST_BIND, port=PORT, debug=True)
+    else:
+        # Avvia Waitress con configurazione ottimizzata (12 thread)
+        serve(
+            app, 
+            host=HOST_BIND, 
+            port=PORT, 
+            threads=12, 
+            connection_limit=200, 
+            channel_timeout=60
+        )
+
+def open_app(icon, menu_item):
+    """Apre il gestionale nel browser."""
+    webbrowser.open(DISPLAY_URL)
+
+def quit_app(icon, menu_item):
+    """Ferma l'icona e chiude l'applicazione."""
+    icon.stop()
+    os._exit(0)
+
+def load_messages():
+    """Carica tutti i messaggi dalla tabella SQLite."""
+    db = _DBSession()
+    try:
+        return [m.to_dict() for m in db.query(_Message).order_by(_Message.timestamp).all()]
+    except Exception:
+        return []
+    finally:
+        db.close()
+
+def save_messages(msgs):
+    """Sostituisce tutti i messaggi nel DB (reset completo + reinserimento)."""
+    db = _DBSession()
+    try:
+        db.query(_Message).delete()
+        for m in msgs:
+            db.add(_Message(
+                from_user=m.get("from", ""),
+                from_name=m.get("from_name", ""),
+                to_user=m.get("to", ""),
+                text=m.get("text", ""),
+                attachment=m.get("attachment", ""),
+                original_filename=m.get("original_filename", ""),
+                timestamp=m.get("timestamp", ""),
+                read=m.get("read", False)
+            ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[save_messages] Errore: {e}")
+    finally:
+        db.close()
+
+@app.route("/api/messages/users")
+@login_required
+def api_get_chat_users():
+    """Elenco colleghi per la chat con non letti, ultimo messaggio (anteprima) e ordinamento per attività."""
+    all_users = load_users()
+    me = session["user_id"]
+    db = _DBSession()
+    try:
+        mine = db.query(_Message).filter(
+            (_Message.from_user == me) | (_Message.to_user == me)
+        ).order_by(_Message.timestamp, _Message.id).all()
+    finally:
+        db.close()
+
+    last_by_user, unread_by_user = {}, {}
+    for m in mine:
+        other = m.to_user if m.from_user == me else m.from_user
+        last_by_user[other] = m  # ordinati per timestamp: resta l'ultimo
+        if m.to_user == me and not m.read:
+            unread_by_user[other] = unread_by_user.get(other, 0) + 1
+
+    users_with_stats = []
+    for u in all_users:
+        if u["username"] == me or u["role"] == 'amministratore': continue
+        last = last_by_user.get(u["username"])
+        preview = ""
+        if last:
+            preview = (last.text or "").strip() or (f"📎 {last.original_filename}" if last.attachment else "")
+        users_with_stats.append({
+            "username": u["username"],
+            "full_name": u["full_name"],
+            "role": u["role"],
+            "unread_count": unread_by_user.get(u["username"], 0),
+            "last_message_timestamp": last.timestamp if last else "0000-00-00 00:00:00",
+            "last_message_preview": preview[:80],
+            "last_message_mine": bool(last and last.from_user == me),
+        })
+
+    # Prima chi ha messaggi non letti, poi per data ultimo messaggio (desc)
+    users_with_stats.sort(key=lambda x: (x["unread_count"] > 0, x["last_message_timestamp"]), reverse=True)
+    return jsonify(users_with_stats)
+
+@app.route("/api/messages/history/<other_user>")
+@login_required
+def api_get_chat_history(other_user):
+    me = session["user_id"]
+    db = _DBSession()
+    try:
+        # Marca come letti i messaggi che l'altro utente mi ha inviato (UPDATE mirato, senza riscrivere la tabella)
+        db.query(_Message).filter(
+            _Message.to_user == me, _Message.from_user == other_user, _Message.read == False  # noqa: E712
+        ).update({_Message.read: True}, synchronize_session=False)
+        db.commit()
+        history = db.query(_Message).filter(
+            ((_Message.from_user == me) & (_Message.to_user == other_user)) |
+            ((_Message.from_user == other_user) & (_Message.to_user == me))
+        ).order_by(_Message.timestamp, _Message.id).all()
+        return jsonify([dict(m.to_dict(), id=m.id) for m in history])
+    except Exception as e:
+        db.rollback()
+        print(f"[chat] Errore history: {e}")
+        return jsonify([])
+    finally:
+        db.close()
+
+def voci_note_cliente(cli):
+    """Le note del cliente a voci; le note scritte prima (testo libero) diventano una voce per riga."""
+    if cli.note_voci:
+        return list(cli.note_voci)
+    return [{"id": f"v{i}", "testo": t.strip().lstrip("•-* ").strip(), "autore": "", "autore_nome": "", "quando": ""}
+            for i, t in enumerate((cli.note_interne or "").splitlines()) if t.strip().lstrip("•-* ").strip()]
+
+
+@app.route("/api/cliente/<client_id>/note", methods=["GET", "POST"])
+@login_required
+def api_note_cliente(client_id):
+    """Legge (GET) o salva (POST {voci: [...]}) le note interne di un cliente, a voci come i report.
+    Ogni voce: id, testo, autore, autore_nome, quando. 'note_interne' resta il testo (per Ceerlo e le ricerche)."""
+    db = _DBSession()
+    try:
+        cli = db.query(_Cliente).filter_by(id_cliente=client_id).first()
+        if not cli:
+            return jsonify({"ok": False, "error": "Cliente non trovato"}), 404
+        vecchie = voci_note_cliente(cli)
+        if request.method == "GET":
+            return jsonify({"ok": True, "voci": vecchie, "note": cli.note_interne or "",
+                            "cliente": cli.cliente or cli.rag_sociale or client_id})
+        data = request.get_json(silent=True) or {}
+        grezze = data.get("voci")
+        if not isinstance(grezze, list):  # vecchio formato: testo libero, una voce per riga
+            grezze = [{"testo": t} for t in str(data.get("note", "")).splitlines()]
+        per_id = {v["id"]: v for v in vecchie}
+        adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        voci = []
+        for g in grezze[:200]:
+            if not isinstance(g, dict):
+                continue
+            testo = str(g.get("testo") or "").strip()[:2000]
+            if not testo:
+                continue
+            prima = per_id.get(str(g.get("id") or ""))
+            if prima and prima["testo"] == testo:
+                voci.append(prima)  # voce invariata: resta di chi l'ha scritta
+            else:
+                voci.append({"id": (prima or {}).get("id") or uuid.uuid4().hex[:8], "testo": testo,
+                             "autore": session["user_id"], "autore_nome": session.get("user_name") or session["user_id"],
+                             "quando": adesso})
+        cli.note_voci = voci
+        cli.note_interne = "\n".join(f"• {v['testo']}" for v in voci)
+        db.commit()
+        return jsonify({"ok": True, "voci": voci})
+    except Exception as e:
+        db.rollback()
+        print(f"[note_cliente] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio delle note"}), 500
+    finally:
+        db.close()
+
+@app.route("/api/messages/send", methods=["POST"])
+@login_required
+def api_send_message():
+    text = request.form.get("text", "").strip()
+    to_user = request.form.get("to", "")
+    file = request.files.get("file")
+
+    if not to_user:
+        return jsonify({"success": False, "error": "Destinatario mancante"}), 400
+    if not text and not (file and file.filename):
+        return jsonify({"success": False, "error": "Messaggio vuoto"}), 400
+
+    filename = None
+    if file and file.filename != '':
+        filename = f"{uuid.uuid4().hex}_{secure_filename(file.filename)}"
+        file.save(CHAT_ATTACHMENTS_DIR / filename)
+
+    nuovo_msg = {
+        "from": session["user_id"],
+        "from_name": session["user_name"],
+        "to": to_user,
+        "text": text,
+        "attachment": filename,
+        "original_filename": file.filename if filename else None,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "read": False
+    }
+    # Inserimento del solo nuovo messaggio (prima veniva riscritta l'intera tabella:
+    # lento e con rischio di perdere messaggi inviati in contemporanea)
+    db = _DBSession()
+    try:
+        row = _Message(from_user=nuovo_msg["from"], from_name=nuovo_msg["from_name"], to_user=to_user,
+                       text=text, attachment=filename or "", original_filename=nuovo_msg["original_filename"] or "",
+                       timestamp=nuovo_msg["timestamp"], read=False)
+        db.add(row)
+        db.commit()
+        nuovo_msg["id"] = row.id
+    except Exception as e:
+        db.rollback()
+        print(f"[chat] Errore invio: {e}")
+        return jsonify({"success": False, "error": "Errore durante l'invio"}), 500
+    finally:
+        db.close()
+    return jsonify({"success": True, "msg": nuovo_msg})
+
+@app.route("/api/messages/unread_total")
+@login_required
+def api_unread_total():
+    me = session["user_id"]
+    db = _DBSession()
+    try:
+        count = db.query(_Message).filter(_Message.to_user == me, _Message.read == False).count()  # noqa: E712
+    finally:
+        db.close()
+    return jsonify({"unread_count": count})
+
+def load_tagbox():
+    """Carica le voci della tagbox dal DB SQLite (pinned prima, poi per timestamp)."""
+    db = _DBSession()
+    try:
+        entries = db.query(_TagboxEntry).order_by(
+            _TagboxEntry.pinned.desc(), _TagboxEntry.timestamp.desc()
+        ).all()
+        return [e.to_dict() for e in entries]
+    except Exception:
+        return []
+    finally:
+        db.close()
+
+def save_tagbox(shouts):
+    """Salva la tagbox nel DB (upsert per id, elimina voci non presenti)."""
+    db = _DBSession()
+    try:
+        incoming_ids = set()
+        for s in shouts:
+            sid = s.get("id")
+            if not sid:
+                continue
+            incoming_ids.add(sid)
+            existing = db.query(_TagboxEntry).filter_by(id=sid).first()
+            if existing:
+                existing.pinned = s.get("pinned", False)
+                existing.text = s.get("text", "")
+            else:
+                db.add(_TagboxEntry(
+                    id=sid,
+                    user=s.get("user", ""),
+                    user_id=s.get("user_id", ""),
+                    text=s.get("text", ""),
+                    timestamp=s.get("timestamp", ""),
+                    pinned=s.get("pinned", False)
+                ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[save_tagbox] Errore: {e}")
+    finally:
+        db.close()
+
+@app.route("/api/tagbox", methods=["GET", "POST"])
+@login_required
+def api_tagbox():
+    if request.method == "POST":
+        data = request.json
+        shouts = load_tagbox()
+        nuovo_shout = {
+            "id": uuid.uuid4().hex[:6],
+            "user": session["user_name"],
+            "user_id": session["user_id"],
+            "text": data.get("text"),
+            "timestamp": datetime.datetime.now().strftime("%H:%M"),
+            "pinned": False
+        }
+        shouts.insert(0, nuovo_shout) # I più nuovi in alto
+        save_tagbox(shouts[:50]) # Teniamo solo gli ultimi 50
+        
+        # Notifica tutti gli altri utenti dell'attività sulla Tagbox
+        users = load_users()
+        for u in users:
+            if u["username"] != session["user_id"]:
+                add_notification(u["username"], f"{session['user_name']} ha scritto sulla Tag Board", link="/", tipo="menzione")
+                
+        return jsonify({"success": True})
+    
+    return jsonify(load_tagbox())
+
+@app.route("/api/tagbox/pin/<shout_id>", methods=["POST"])
+@login_required
+@role_required('amministratore', 'ceo', 'segreteria') # Solo ruoli gestionali possono pinnare
+def api_pin_shout(shout_id):
+    shouts = load_tagbox()
+    for s in shouts:
+        if s["id"] == shout_id:
+            s["pinned"] = not s["pinned"] # Toggle pin
+    save_tagbox(shouts)
+    return jsonify({"success": True})
+
+@app.route("/api/suggestions/links")
+@login_required
+def api_suggestions_links():
+    term = request.args.get("q", "").lower().strip()
+    quotes = get_all_quotes() # Recupera tutti i preventivi
+    
+    suggestions = []
+    
+    # 1. Ricerca Preventivi
+    for q in quotes:
+        # Se non c'è termine mostra i recenti, altrimenti cerca nel numero o nel cliente
+        if not term or term in q["numero"].lower() or term in q["cliente"].lower():
+            suggestions.append({"id": q["numero"], "label": f"Prev. {q['numero']} ({q['cliente']})", "type": "quote"})
+        if len(suggestions) >= 5: break # Limite per i preventivi
+
+    # 2. Ricerca Clienti (usando i dati dei preventivi per velocità)
+    recent_clients_seen = set()
+    count_clients = 0
+    for q in quotes:
+        client_name = q.get("cliente", "")
+        # Filtriamo per termine se presente
+        if (not term or term in client_name.lower()) and client_name not in recent_clients_seen:
+            # Recuperiamo l'ID reale dal file del preventivo
+            p_data = load_quote(q["numero"])
+            if p_data:
+                suggestions.append({
+                    "id": p_data["id_cliente"], 
+                    "label": f"Cartella: {client_name}", 
+                    "type": "client"
+                })
+                recent_clients_seen.add(client_name)
+                count_clients += 1
+        if count_clients >= 5: break # Limite per i clienti
+
+    return jsonify(suggestions)
+
+# --- Task: personali e di gruppo ---
+# Una task e' "personale" (per se'), "utente" (per un collega) o "gruppo" (per un ruolo o per tutti).
+# I gruppi si ricavano dai ruoli degli utenti; le task vecchie (tipo vuoto) si classificano dalle menzioni.
+GRUPPI_STORICI = {"tutti": None, "venditori": "venditore", "segreteria": "segreteria", "produzione": "produzione"}
+ETICHETTE_RUOLI = {"venditore": "Venditori", "segreteria": "Segreteria", "amministratore": "Amministratori", "ceo": "CEO", "produzione": "Produzione"}
+
+
+def gruppi_task(utenti):
+    # Inizializza la lista con il gruppo "tutti"
+    gruppi = [{"id": "tutti", "label": "Tutti", "n": len(utenti)}]
+    
+    # Conta gli utenti per ogni ruolo presente
+    conteggi = {}
+    for u in utenti:
+        ruolo = u.get("role") or ""
+        if ruolo:
+            conteggi[ruolo] = conteggi.get(ruolo, 0) + 1
+    
+    # Crea le voci per i ruoli, ordinate per etichetta
+    voci = []
+    for ruolo, n in conteggi.items():
+        label = ETICHETTE_RUOLI.get(ruolo, ruolo.capitalize())
+        voci.append({"id": ruolo, "label": label, "n": n})
+    
+    # Ordina per label e aggiungi alla lista principale
+    voci.sort(key=lambda x: x["label"])
+    gruppi.extend(voci)
+    
+    return gruppi
+
+def categoria_task(t, ruoli):
+    tipo = t.get("tipo") or ""
+    
+    # Gestione esplicita dei tipi moderni
+    if tipo == "gruppo":
+        return "gruppo"
+    if tipo in ("personale", "utente"):
+        return "personali"
+    
+    # Gestione task vecchie (tipo vuoto o assente)
+    assigned = t.get("assigned_to") or []
+    for nome in assigned:
+        # Pulisce il prefisso @ e converte in minuscolo
+        nome_pulito = nome.lstrip("@").lower()
+        
+        # Verifica se è un gruppo storico o un ruolo esistente
+        if nome_pulito in GRUPPI_STORICI or nome_pulito in ruoli:
+            return "gruppo"
+            
+    return "personali"
+
+def utenti_del_gruppo(gruppo, utenti):
+    gruppo = (gruppo or "").strip().lower()
+    # Traduce i nomi storici nel ruolo corrispondente
+    if gruppo in GRUPPI_STORICI:
+        ruolo_corrispondente = GRUPPI_STORICI[gruppo]
+    else:
+        ruolo_corrispondente = gruppo
+        
+    # Caso "tutti" o gruppo storico che vale None
+    if gruppo == "tutti" or ruolo_corrispondente is None:
+        return [u["username"] for u in utenti]
+        
+    # Filtra gli utenti per ruolo specifico
+    return [u["username"] for u in utenti if (u.get("role") or "").lower() == ruolo_corrispondente.lower()]
+
+
+def _e_gruppo(nome, ruoli):
+    nome = (nome or "").lstrip("@").lower()
+    return nome in GRUPPI_STORICI or nome in ruoli
+
+
+def leggi_data_etc(valore):
+    """ETC (Estimated Time Complete) dal calendario: 'YYYY-MM-DD' valida, altrimenti None."""
+    try:
+        return datetime.datetime.strptime(str(valore or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def errore_etc(valore):
+    """Messaggio d'errore per una ETC non valida (obbligatoria e non nel passato), None se va bene."""
+    d = leggi_data_etc(valore)
+    if not d:
+        return "Scegli sul calendario la data prevista di completamento (ETC)."
+    if d < datetime.date.today():
+        return "La data prevista di completamento non puo' essere nel passato."
+    return None
+
+
+def assegnazione_da_menzioni(testo, me, all_users, ruoli):
+    """Da una voce di report con @menzioni ricava a chi va la task: (tipo, assegnati, gruppo).
+    Nessun collega o gruppo taggato (o solo se stessi) -> task personale ("Le mie task")."""
+    user_resolver = {u["username"].lower(): u["username"] for u in all_users}
+    assegnati, gruppo = [], ""
+    for m in re.findall(r"@(\w+)", testo or ""):
+        nome = m.lower()
+        if _e_gruppo(nome, ruoli):
+            gruppo = gruppo or nome
+            voce = f"@{nome}"
+        elif nome in user_resolver and user_resolver[nome] != me:
+            voce = f"@{user_resolver[nome]}"
+        else:
+            continue
+        if voce not in assegnati:
+            assegnati.append(voce)
+    if not assegnati:
+        return "personale", [f"@{me}"], ""
+    return ("gruppo" if gruppo else "utente"), assegnati, gruppo
+
+
+def task_visibile(t, me, my_role):
+    """Chi vede una task: le personali solo l'autore; le altre autore, assegnati, gruppi, admin e CEO."""
+    if t.get("tipo") == "personale":
+        return t.get("created_by") == me
+    miei_gruppi = {"@tutti", f"@{my_role}"} | {f"@{k}" for k, v in GRUPPI_STORICI.items() if v and v == my_role}
+    assegnati = set(t.get("assigned_to") or [])
+    return bool(t.get("created_by") == me or f"@{me}" in assegnati or assegnati & miei_gruppi
+                or my_role in ['amministratore', 'ceo'])
+
+
+def task_mi_riguarda(t, me, my_role):
+    """Task creata da me o assegnata a me / a un mio gruppo (per gli alert, anche per admin e CEO)."""
+    miei_gruppi = {"@tutti", f"@{my_role}"} | {f"@{k}" for k, v in GRUPPI_STORICI.items() if v and v == my_role}
+    assegnati = set(t.get("assigned_to") or [])
+    return bool(t.get("created_by") == me or f"@{me}" in assegnati
+                or (t.get("tipo") != "personale" and assegnati & miei_gruppi))
+
+
+def destinatari_task(t, all_users):
+    """Username a cui va avvisata una task: l'autore e gli assegnati (i gruppi si espandono).
+    Una task personale riguarda solo chi l'ha scritta."""
+    if t.get("tipo") == "personale":
+        return {t.get("created_by")} - {None, ""}
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    user_resolver = {u["username"].lower(): u["username"] for u in all_users}
+    chi = {t.get("created_by")} - {None, ""}
+    for a in t.get("assigned_to") or []:
+        nome = a.lstrip("@").lower()
+        if _e_gruppo(nome, ruoli):
+            chi.update(utenti_del_gruppo(nome, all_users))
+        elif nome in user_resolver:
+            chi.add(user_resolver[nome])
+    return chi
+
+
+def aggiungi_coinvolti(t, testo, me, all_users):
+    """Chi viene taggato (@collega o @gruppo) in un commento entra nella task: la vede e ne riceve gli avvisi.
+    Le task personali restano private: li' le menzioni sono solo testo.
+    Modifica t["assigned_to"] e restituisce (nuovi_colleghi, nuovi_gruppi) appena aggiunti."""
+    if t.get("tipo") == "personale":
+        return [], []
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    user_resolver = {u["username"].lower(): u["username"] for u in all_users}
+    assegnati = list(t.get("assigned_to") or [])
+    presenti = {a.lstrip("@").lower() for a in assegnati}
+    nuovi_utenti, nuovi_gruppi = [], []
+    for m in re.findall(r"@(\w+)", testo or ""):
+        nome = m.lower()
+        if nome in presenti:
+            continue
+        if _e_gruppo(nome, ruoli):
+            assegnati.append(f"@{nome}")
+            nuovi_gruppi.append(nome)
+        elif nome in user_resolver and user_resolver[nome] not in (me, t.get("created_by")):
+            assegnati.append(f"@{user_resolver[nome]}")
+            nuovi_utenti.append(user_resolver[nome])
+        else:
+            continue
+        presenti.add(nome)
+    t["assigned_to"] = assegnati
+    return nuovi_utenti, nuovi_gruppi
+
+
+def nuovo_commento(testo, status_change=None):
+    """Un commento di task: con id e username dell'autore, per poterlo poi modificare o eliminare."""
+    return {"id": uuid.uuid4().hex[:12], "user_id": session["user_id"], "user": session["user_name"],
+            "text": testo, "timestamp": datetime.datetime.now().strftime("%d/%m %H:%M"),
+            "status_change": status_change}
+
+
+def autore_commento(c, me, mio_nome):
+    """I commenti vecchi non hanno lo username: li' vale il nome mostrato."""
+    if c.get("user_id"):
+        return c["user_id"] == me
+    return bool(mio_nome) and c.get("user") == mio_nome
+
+
+def puo_modificare_commento(c, me, mio_nome, my_role):
+    """L'autore del commento, oppure admin e CEO. Le righe "data prevista spostata" le scrive il gestionale: non si toccano."""
+    if c.get("status_change") == "etc":
+        return False
+    return my_role in ("amministratore", "ceo") or autore_commento(c, me, mio_nome)
+
+
+def puo_eliminare_commento(c, me, mio_nome, my_role):
+    """Come la modifica, ma il commento che ha cambiato lo stato resta nello storico (se ne puo' correggere il testo)."""
+    return not c.get("status_change") and puo_modificare_commento(c, me, mio_nome, my_role)
+
+
+def trova_commento(commenti, cid, idx, testo_orig):
+    """Posizione del commento: per id, oppure (commenti vecchi senza id) per posizione con il testo che combacia."""
+    if cid:
+        return next((i for i, c in enumerate(commenti) if c.get("id") == cid), None)
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        return None
+    if 0 <= idx < len(commenti) and not commenti[idx].get("id") and commenti[idx].get("text") == testo_orig:
+        return idx
+    return None
+
+
+def _estratto_task(desc, utenti=None):
+    """Le prime parole della task, leggibili: #CODICE[nome] -> nome, @utente -> nome del collega."""
+    utenti = utenti if utenti is not None else {u["username"].lower(): u.get("full_name") or u["username"] for u in load_users()}
+    t = _senza_codici(desc or "")
+    t = re.sub(r"@(\w+)", lambda m: utenti.get(m.group(1).lower(), m.group(1)), t)
+    t = " ".join(t.split())
+    return t if len(t) <= 55 else t[:52].rsplit(" ", 1)[0] + "..."
+
+
+def nome_task(t, utenti=None):
+    """Come si chiama una task nelle notifiche: il titolo di Ceerlo se c'e', altrimenti l'inizio del testo."""
+    if isinstance(t, str):
+        db = _DBSession()
+        try:
+            r = db.query(_Task).filter_by(id=t).first()
+            t = r.to_dict() if r else {"id": t}
+        finally:
+            db.close()
+    nome = (t.get("titolo") or "").strip() or _estratto_task(t.get("description"), utenti) or f"#{t.get('id')}"
+    return f"«{nome}»"
+
+
+def chiedi_titolo_task(task_id, desc):
+    """Ceerlo scrive il titolo in sottofondo; quando arriva lo salva e lo mette anche nelle notifiche gia' partite."""
+    if not ceerlo.attivo():
+        return
+    def salva(titolo):
+        if not titolo:
+            return
+        db = _DBSession()
+        try:
+            t = db.query(_Task).filter_by(id=task_id).first()
+            if not t:
+                return
+            vecchio = nome_task(t.to_dict())
+            t.titolo = titolo
+            nuovo = nome_task(t.to_dict())
+            for n in db.query(_Notification).filter_by(link=f"/tasks#{task_id}").all():
+                if vecchio in (n.text or ""):
+                    n.text = n.text.replace(vecchio, nuovo)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[titolo task] {e}")
+        finally:
+            db.close()
+    try:
+        ceerlo.chiedi_titolo(desc, salva, chiave=f"titolo:{task_id}")
+    except Exception as e:
+        print(f"[titolo task] Ceerlo non disponibile: {e}")
+
+
+def titoli_mancanti():
+    """All'avvio: le task aperte senza titolo (anche quelle di prima) lo chiedono a Ceerlo, una alla volta in coda."""
+    if not ceerlo.attivo():
+        return
+    for t in load_tasks():
+        if t.get("status") in ("open", "support") and not t.get("titolo"):
+            chiedi_titolo_task(t["id"], t.get("description"))
+
+
+def crea_task(me, mittente, desc, tipo="", destinatario="", gruppo="", etc="", report_id="", assegnati=None):
+    """Crea una task e manda le notifiche. Restituisce (id, None) oppure (None, messaggio d'errore).
+    Con `assegnati` (task nate dalle voci di un report) l'assegnazione e' gia' decisa."""
+    desc = (desc or "").strip()
+    if not desc:
+        return None, "Descrizione mancante"
+    err = errore_etc(etc)
+    if err:
+        return None, err
+
+    all_users = load_users()
+    user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    mentions = re.findall(r"@(\w+)", desc)
+    tipo = (tipo or "").strip()
+    gruppo = (gruppo or "").strip().lower()
+
+    if assegnati is not None:
+        assigned = list(assegnati)
+    elif tipo == "personale":
+        assigned = [f"@{me}"]
+    elif tipo == "utente":
+        dest = user_resolver.get(str(destinatario or "").strip().lower())
+        if not dest:
+            return None, "Scegli il collega a cui assegnare la task."
+        assigned = [f"@{dest}"]
+    elif tipo == "gruppo":
+        if gruppo != "tutti" and gruppo not in ruoli:
+            return None, "Gruppo non valido."
+        assigned = [f"@{gruppo}"]
+    else:
+        # Richiesta vecchio stile: si assegna con le menzioni nel testo
+        tipo = ""
+        assigned = [f"@{m}" for m in mentions] if mentions else ["@tutti"]
+    # Nelle task personali le @menzioni restano solo testo: nessun assegnatario in piu'
+    if tipo != "personale":
+        for m in mentions:
+            if f"@{m}" not in assigned:
+                assigned.append(f"@{m}")
+
+    task_id = str(uuid.uuid4())[:8].upper()
+    db = _DBSession()
+    try:
+        db.add(_Task(
+            id=task_id,
+            created_by=me,
+            created_by_name=mittente,
+            description=desc,
+            assigned_to=assigned,
+            status="open",
+            timestamp=datetime.datetime.now().strftime("%d/%m %H:%M"),
+            comments=[],
+            tipo=tipo,
+            gruppo=gruppo if tipo == "gruppo" else "",
+            report_id=str(report_id or "")[:40],
+            etc=leggi_data_etc(etc).strftime("%Y-%m-%d"),
+            etc_avvisata=""
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[crea_task] Errore salvataggio DB: {e}")
+        return None, "Errore interno durante il salvataggio del task."
+    finally:
+        db.close()
+    chiedi_titolo_task(task_id, desc)
+
+    if tipo == "personale":
+        return task_id, None  # nessuno da avvisare: la vede solo chi l'ha scritta
+
+    # --- GESTIONE NOTIFICHE E TAGBOX ---
+    link_task = f"[VEDI TASK #TASK-{task_id}]"
+    nomi = {a.lstrip("@").lower() for a in assigned}
+    gruppi = sorted(n for n in nomi if _e_gruppo(n, ruoli))
+
+    # 1. Post su Tagbox (per i Gruppi)
+    if gruppi:
+        tagbox = load_tagbox()
+        tagbox.insert(0, {
+            "id": uuid.uuid4().hex[:6],
+            "user": f"{mittente} [TASK]",
+            "user_id": me,
+            "text": f"@{gruppi[0]} Nuova task creata: {link_task}",
+            "timestamp": datetime.datetime.now().strftime("%H:%M"),
+            "pinned": False
+        })
+        save_tagbox(tagbox[:50])
+
+    # 2. Notifiche Campanella: chi fa parte dei gruppi indicati e gli utenti menzionati
+    nome = nome_task({"id": task_id, "description": desc},
+                     {u["username"].lower(): u.get("full_name") or u["username"] for u in all_users})
+    notified_ids = {me}  # Non notificare se stessi
+    for g in gruppi:
+        for u_real_id in utenti_del_gruppo(g, all_users):
+            if u_real_id not in notified_ids:
+                add_notification(u_real_id, f"{mittente} ha creato una task per @{g}: {nome}", link=f"/tasks#{task_id}", tipo="task")
+                notified_ids.add(u_real_id)
+    for n in nomi:
+        if n in user_resolver and not _e_gruppo(n, ruoli):
+            u_real_id = user_resolver[n]
+            if u_real_id not in notified_ids:
+                add_notification(u_real_id, f"{mittente} ti ha assegnato una task: {nome}", link=f"/tasks#{task_id}", tipo="task")
+                notified_ids.add(u_real_id)
+    return task_id, None
+
+
+# Controllo delle task oltre la ETC: al massimo ogni 5 minuti, un avviso per ogni data superata
+_ultimo_controllo_scadenze = 0.0
+_lock_scadenze = threading.Lock()
+
+
+def controlla_task_scadute(forza=False):
+    global _ultimo_controllo_scadenze
+    if not forza and time.time() - _ultimo_controllo_scadenze < 300:
+        return
+    if not _lock_scadenze.acquire(blocking=False):
+        return
+    try:
+        _ultimo_controllo_scadenze = time.time()
+        oggi = datetime.date.today().strftime("%Y-%m-%d")
+        db = _DBSession()
+        try:
+            scadute = db.query(_Task).filter(
+                _Task.status.in_(["open", "support"]), _Task.etc != None, _Task.etc != "",  # noqa: E711
+                _Task.etc < oggi).all()
+            da_avvisare = [t for t in scadute if (t.etc_avvisata or "") != t.etc]
+            if not da_avvisare:
+                return
+            all_users = load_users()
+            capi = {u["username"] for u in all_users if u.get("role") in ("amministratore", "ceo")}
+            for t in da_avvisare:
+                td = t.to_dict()
+                data_it = datetime.datetime.strptime(t.etc, "%Y-%m-%d").strftime("%d/%m/%Y")
+                # admin e CEO sono avvisati di tutte le task del team (non delle personali altrui)
+                avvisati = destinatari_task(td, all_users) | (capi if td.get("tipo") != "personale" else set())
+                for u in avvisati:
+                    add_notification(u, f"⏰ Oltre la data prevista ({data_it}): {nome_task(td)}",
+                                     link=f"/tasks#{t.id}", tipo="scadenza")
+                t.etc_avvisata = t.etc
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[controlla_task_scadute] Errore: {e}")
+        finally:
+            db.close()
+    finally:
+        _lock_scadenze.release()
+
+
+def load_tasks():
+    """Carica i tasks pubblici dalla tabella SQLite 'tasks'."""
+    db = _DBSession()
+    try:
+        return [t.to_dict() for t in db.query(_Task).all()]
+    except Exception:
+        return []
+    finally:
+        db.close()
+
+def save_tasks(tasks):
+    """Salva la lista tasks nel DB (upsert per id)."""
+    db = _DBSession()
+    try:
+        incoming_ids = set()
+        for t in tasks:
+            tid = t.get("id")
+            if not tid:
+                continue
+            incoming_ids.add(tid)
+            existing = db.query(_Task).filter_by(id=tid).first()
+            if existing:
+                existing.status = t.get("status", "open")
+                existing.comments = t.get("comments", [])
+                existing.assigned_to = t.get("assigned_to", [])
+                # la data di conclusione ha il suo campo (prima finiva al posto dell'orario di creazione)
+                if t.get("status") in ("resolved", "failed") and t.get("concluded_at") \
+                        and t["concluded_at"] != (existing.concluso_il or ""):
+                    existing.concluso_il = t["concluded_at"]
+            else:
+                db.add(_Task(
+                    id=tid,
+                    created_by=t.get("created_by", ""),
+                    created_by_name=t.get("created_by_name", ""),
+                    description=t.get("description", ""),
+                    assigned_to=t.get("assigned_to", []),
+                    status=t.get("status", "open"),
+                    is_private_admin=t.get("is_private_admin", False),
+                    timestamp=t.get("timestamp", ""),
+                    comments=t.get("comments", [])
+                ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[save_tasks] Errore: {e}")
+    finally:
+        db.close()
+
+@app.route("/tasks")
+@login_required
+def tasks_page():
+    return render_template("tasks.html", title="Task & Report", etichette_ruoli=ETICHETTE_RUOLI)
+
+
+@app.route("/api/tasks", methods=["GET", "POST"])
+@login_required
+def api_tasks():
+    if request.method == "POST":
+        data = request.json or {}
+        task_id, err = crea_task(session["user_id"], session["user_name"], data.get("description", ""),
+                                 tipo=data.get("tipo"), destinatario=data.get("destinatario"),
+                                 gruppo=data.get("gruppo"), etc=data.get("etc"), report_id=data.get("report_id"))
+        if err:
+            return jsonify({"error": err}), 400 if "interno" not in err else 500
+        return jsonify({"success": True, "id": task_id})
+
+    # GET: task visibili all'utente, divise tra "pubbliche" e "mie" (personali, private)
+    controlla_task_scadute()
+    me = session["user_id"]
+    my_role = session["user_role"]
+    oggi = datetime.date.today()
+    visibili = [t for t in load_tasks() if task_visibile(t, me, my_role)]
+    for t in visibili:
+        t["categoria"] = "mie" if t.get("tipo") == "personale" else "pubbliche"
+        t["per_me"] = task_mi_riguarda(t, me, my_role) and t.get("created_by") != me
+        d = leggi_data_etc(t.get("etc"))
+        aperta = t.get("status") in ("open", "support")
+        t["giorni_ritardo"] = (oggi - d).days if (d and aperta and d < oggi) else 0
+        t["scaduta"] = t["giorni_ritardo"] > 0
+        t["comments"] = [dict(c, puo_modificare=puo_modificare_commento(c, me, session["user_name"], my_role),
+                              puo_eliminare=puo_eliminare_commento(c, me, session["user_name"], my_role))
+                         for c in (t.get("comments") or [])]
+    return jsonify(visibili)
+
+
+@app.route("/api/tasks/etc", methods=["POST"])
+@login_required
+def api_task_etc():
+    """Imposta o sposta la data prevista di completamento. Spostarla richiede un commento."""
+    data = request.json or {}
+    task_id = str(data.get("id") or "")
+    nuova = str(data.get("etc") or "").strip()
+    motivo = str(data.get("comment") or "").strip()
+    err = errore_etc(nuova)
+    if err:
+        return jsonify({"error": err}), 400
+    me, my_role = session["user_id"], session["user_role"]
+    db = _DBSession()
+    try:
+        t = db.query(_Task).filter_by(id=task_id).first()
+        if not t or not task_visibile(t.to_dict(), me, my_role):
+            return jsonify({"error": "Task non trovata."}), 404
+        if t.status not in ("open", "support"):
+            return jsonify({"error": "La task e' gia' conclusa."}), 400
+        vecchia = t.etc or ""
+        if vecchia == nuova:
+            return jsonify({"success": True})
+        if vecchia and not motivo:
+            return jsonify({"error": "Scrivi nel commento perche' sposti la data."}), 400
+        fmt = lambda v: leggi_data_etc(v).strftime("%d/%m/%Y") if leggi_data_etc(v) else v
+        testo = (f"Data prevista spostata dal {fmt(vecchia)} al {fmt(nuova)}" if vecchia
+                 else f"Data prevista impostata al {fmt(nuova)}") + (f": {motivo}" if motivo else "")
+        t.comments = list(t.comments or []) + [nuovo_commento(testo, "etc")]
+        t.etc = nuova
+        t.etc_avvisata = ""
+        td = t.to_dict()
+        # chi viene taggato nel motivo entra nella task (come nei commenti)
+        nuovi_u, nuovi_g = aggiungi_coinvolti(td, motivo, me, load_users())
+        if nuovi_u or nuovi_g:
+            t.assigned_to = list(td["assigned_to"])
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[api_task_etc] Errore: {e}")
+        return jsonify({"error": "Errore interno durante il salvataggio."}), 500
+    finally:
+        db.close()
+    for u in destinatari_task(td, load_users()) - {me}:
+        add_notification(u, f"📅 {session['user_name']} ha cambiato la data prevista di {nome_task(td)}",
+                         link=f"/tasks#{task_id}", tipo="scadenza")
+    return jsonify({"success": True})
+
+
+@app.route("/api/tasks/destinatari")
+@login_required
+def api_tasks_destinatari():
+    """Colleghi e gruppi (ricavati dai ruoli) a cui si puo' assegnare una task."""
+    utenti = load_users()
+    return jsonify({
+        "utenti": sorted(({"username": u["username"], "full_name": u.get("full_name") or u["username"],
+                           "role": u.get("role") or ""} for u in utenti), key=lambda u: u["full_name"].lower()),
+        "gruppi": gruppi_task(utenti),
+        # nomi con cui si puo' taggare un gruppo (@tutti, @venditori, ... e i ruoli)
+        "nomi_gruppo": sorted(set(GRUPPI_STORICI) | {(u.get("role") or "").lower() for u in utenti if u.get("role")}),
+        "etichette_gruppo": {**ETICHETTE_RUOLI, "tutti": "Tutti", "venditori": "Venditori"},
+    })
+
+
+# --- Report: ognuno scrive il suo, a voci (righe); agli altri si mostra l'ultimo inviato di ciascuno ---
+# Una voce diventa task se si spunta o se tagga un collega/gruppo. Le bozze le vede solo l'autore.
+# L'ultimo report inviato si puo' modificare o cancellare; i precedenti (archiviati) no.
+
+MAX_VOCI_REPORT = 60
+
+
+def ultimi_report_per_autore(reports):
+    # Mappa per tenere solo il report più recente per ogni autore
+    migliori = {}
+    for r in reports:
+        aut = r.get("autore")
+        if aut not in migliori or r.get("creato_il", "") > migliori[aut].get("creato_il", ""):
+            migliori[aut] = r
+    # Ordina dal più recente al più vecchio
+    return sorted(migliori.values(), key=lambda x: x.get("creato_il", ""), reverse=True)
+
+
+def _bozza_di(db, autore):
+    return db.query(_Report).filter(_Report.autore == autore, _Report.stato == "bozza").order_by(
+        _Report.creato_il.desc()).first()
+
+
+def _ultimo_inviato(db, autore):
+    return db.query(_Report).filter(_Report.autore == autore, _Report.stato != "bozza").order_by(
+        _Report.creato_il.desc(), _Report.id.desc()).first()
+
+
+def voci_report(dati, me, vecchie=None):
+    """Pulisce le voci arrivate dal browser. Restituisce (voci, errore).
+    Ogni voce: testo, task (diventa task), etc, task_id (se la task esiste gia').
+    `vecchie`: voci gia' salvate, per riconoscere le task gia' create (non si ricreano)."""
+    grezze = dati.get("righe")
+    if not isinstance(grezze, list):
+        return None, "Voci del report non valide."
+    task_esistenti = {v.get("task_id") for v in (vecchie or []) if v.get("task_id")}
+    # voci scritte da Ceerlo (robottino) o prese dal registro: il segno resta solo se il testo non e' stato toccato
+    generate = {v.get("testo"): ("ai" if v.get("ai") else "registro") for v in (vecchie or []) if v.get("ai") or v.get("registro")}
+    prom_esistenti = {v.get("promemoria_id") for v in (vecchie or []) if v.get("promemoria_id")}
+    all_users = load_users()
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    voci = []
+    for r in grezze[:MAX_VOCI_REPORT]:
+        if not isinstance(r, dict):
+            continue
+        testo = str(r.get("testo") or "").strip()
+        if not testo:
+            continue
+        if len(testo) > 2000:
+            return None, "Una voce del report e' troppo lunga."
+        task_id = str(r.get("task_id") or "")
+        task_id = task_id if task_id in task_esistenti else ""
+        prom_id = str(r.get("promemoria_id") or "")
+        prom_id = prom_id if prom_id in prom_esistenti else ""
+        # Una voce puo' diventare task oppure promemoria (in alternativa): il promemoria vince sui @tag
+        promemoria = bool(prom_id or (r.get("promemoria") and not task_id))
+        tipo, _, _ = assegnazione_da_menzioni(testo, me, all_users, ruoli)
+        voci.append({"testo": testo, "task": not promemoria and bool(task_id or r.get("task") or tipo != "personale"),
+                     "etc": str(r.get("etc") or "").strip()[:10], "task_id": task_id,
+                     "promemoria": promemoria, "prom_data": str(r.get("prom_data") or "").strip()[:10],
+                     "prom_ora": str(r.get("prom_ora") or "").strip()[:5], "promemoria_id": prom_id})
+        origine = generate.get(testo)
+        if origine and r.get(origine):
+            voci[-1][origine] = True
+    return voci, None
+
+
+def crea_task_dalle_voci(voci, report_id):
+    """Crea le task delle voci spuntate o con tag che non ne hanno ancora una. Restituisce (create, errore)."""
+    me, nome = session["user_id"], session["user_name"]
+    for v in voci:
+        if v["task"] and not v["task_id"]:
+            err = errore_etc(v["etc"])
+            if err:
+                return 0, f"Voce \"{v['testo'][:40]}\": {err}"
+        if v.get("promemoria") and not v.get("promemoria_id"):
+            err = errore_data_promemoria(v.get("prom_data"), v.get("prom_ora"))
+            if err:
+                return 0, f"Voce \"{v['testo'][:40]}\": {err}"
+    all_users = load_users()
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    create = 0
+    for v in voci:
+        if v["task"] and not v["task_id"]:
+            tipo, assegnati, gruppo = assegnazione_da_menzioni(v["testo"], me, all_users, ruoli)
+            tid, err = crea_task(me, nome, v["testo"], tipo=tipo, gruppo=gruppo, etc=v["etc"],
+                                 report_id=report_id, assegnati=assegnati)
+            if err:
+                return create, err
+            v["task_id"] = tid
+            create += 1
+        elif v.get("promemoria") and not v.get("promemoria_id"):
+            pid, err = crea_promemoria(me, nome, v["testo"], v["prom_data"], v.get("prom_ora") or "", report_id=report_id)
+            if err:
+                return create, err
+            v["promemoria_id"] = pid
+    return create, None
+
+
+def _testo_da_voci(voci):
+    return "\n".join(f"• {v['testo']}" for v in voci)
+
+
+# --- Bozza di Ceerlo dal registro attivita' e report automatico alla chiusura ---
+# Il registro dell'utente (dall'ultimo report) diventa la bozza del report: la scrive Ceerlo, voce per voce (robottino).
+# Alla chiusura serale chi non ha inviato un report nella giornata riceve un report "automatico":
+# - bozza mai toccata (o nessuna bozza) -> il registro attivita' cosi' com'e' (non il testo di Ceerlo);
+# - bozza modificata dall'utente ma non inviata -> quella bozza.
+# Chi ha gia' inviato un report nella giornata (a qualunque ora, per i turni) non viene toccato.
+
+ORE_MAX_REGISTRO = 48          # il registro piu' vecchio di cosi' non finisce nel report
+MAX_VOCI_CEERLO = 15
+_LOCK_CHIUSURA = threading.Lock()
+
+
+def inizio_periodo_report(db, utente, adesso=None):
+    """Da quando conta il registro per il prossimo report: dall'ultimo report inviato (anche automatico)."""
+    adesso = adesso or datetime.datetime.now()
+    limite = (adesso - datetime.timedelta(hours=ORE_MAX_REGISTRO)).strftime("%Y-%m-%d %H:%M:%S")
+    ultimo = _ultimo_inviato(db, utente)
+    return max(limite, ultimo.creato_il or "") if ultimo else limite
+
+
+def voci_dal_registro(attivita):
+    return [{"testo": a["testo"] + (f" ({a['volte']} salvataggi)" if a.get("volte", 1) > 1 else ""),
+             "task": False, "etc": "", "task_id": "", "promemoria": False, "prom_data": "", "prom_ora": "",
+             "promemoria_id": "", "registro": True} for a in attivita if a.get("testo")]
+
+
+def voci_da_ceerlo(testo):
+    """Le righe '- ...' della risposta di Ceerlo diventano voci col robottino."""
+    voci = []
+    for riga in (testo or "").splitlines():
+        r = riga.strip()
+        if r[:2] in ("- ", "* ", "• "):
+            r = r[2:].strip().replace("**", "")
+            if r:
+                voci.append({"testo": r[:2000], "task": False, "etc": "", "task_id": "", "promemoria": False,
+                             "prom_data": "", "prom_ora": "", "promemoria_id": "", "ai": True})
+    return voci[:MAX_VOCI_CEERLO]
+
+
+def salva_bozza_generata(utente, utente_nome, ruolo, voci):
+    """Mette le voci nella bozza dell'utente, ma solo se non ne ha una o se ha ancora quella preparata (mai toccata)."""
+    if not voci:
+        return False
+    adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db = _DBSession()
+    try:
+        rep = _bozza_di(db, utente)
+        if rep and (rep.origine or "") != "ceerlo":
+            return False  # l'utente ci sta lavorando: non si tocca
+        if not rep:
+            rep = _Report(id="REP-" + uuid.uuid4().hex[:8].upper(), autore=utente, creato_il=adesso, stato="bozza")
+            db.add(rep)
+        rep.autore_nome, rep.ruolo = utente_nome or utente, ruolo or ""
+        rep.righe, rep.testo = voci, _testo_da_voci(voci)
+        rep.modificato_il, rep.origine = adesso, "ceerlo"
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"[bozza ceerlo] {e}")
+        return False
+    finally:
+        db.close()
+
+
+def prepara_bozza_report(utente, utente_nome, ruolo):
+    """Chiede a Ceerlo la bozza del report dal registro. Restituisce (stato, id del lavoro):
+    'niente' (nessuna attivita'), 'occupata' (bozza gia' modificata dall'utente), 'pronta' (senza Ceerlo: voci del registro)
+    oppure 'in_coda' (Ceerlo la scrive in sottofondo e la salva quando ha finito)."""
+    db = _DBSession()
+    try:
+        dal = inizio_periodo_report(db, utente)
+        bozza = _bozza_di(db, utente)
+        if bozza and (bozza.origine or "") != "ceerlo":
+            return "occupata", ""
+    finally:
+        db.close()
+    attivita = registro_attivita(utente, dal)
+    if not attivita:
+        return "niente", ""
+    if not ceerlo.attivo():
+        return ("pronta" if salva_bozza_generata(utente, utente_nome, ruolo, voci_dal_registro(attivita)) else "occupata"), ""
+    elenco = "\n".join(f"- {a['quando'][11:16]} {a['testo']}" + (f" ({a['volte']} volte)" if a.get("volte", 1) > 1 else "")
+                       for a in attivita)
+    messaggi = [{"role": "system", "content": (
+                    f"Sei {ceerlo.NOME}, l'assistente del gestionale di CERLAB. Scrivi in italiano la bozza del report di fine "
+                    f"turno di {utente_nome}, partendo SOLO dal suo registro attivita'. Una voce per riga, ogni riga inizia con '- '. "
+                    "Raggruppa le attivita' sullo stesso preventivo o cliente in una voce sola, in ordine di orario, frasi brevi "
+                    "al passato (es. 'Creato e inviato il preventivo ...'). Lascia i codici esattamente nella forma #CODICE[nome] "
+                    "come nel registro. Niente titoli, introduzioni o commenti, niente cose non presenti nel registro. "
+                    f"Massimo {MAX_VOCI_CEERLO} voci.")},
+                {"role": "user", "content": "REGISTRO ATTIVITA':\n" + elenco[:12000]}]
+
+    def al_termine(risposta):
+        voci = voci_da_ceerlo(risposta) or voci_dal_registro(attivita)
+        salva_bozza_generata(utente, utente_nome, ruolo, voci)
+    try:
+        jid = ceerlo.aggiungi(utente, messaggi, ceerlo.PRIO_RICHIESTA, "bozza_report", al_termine=al_termine,
+                              chiave=f"bozza_report:{utente}")
+    except Exception as e:
+        print(f"[bozza ceerlo] Ceerlo non disponibile: {e}")
+        return ("pronta" if salva_bozza_generata(utente, utente_nome, ruolo, voci_dal_registro(attivita)) else "occupata"), ""
+    return "in_coda", jid
+
+
+def chiudi_report_mancanti(adesso=None):
+    """Alla chiusura serale manda il report di chi ha lavorato ma non l'ha inviato (vedi sopra). Si puo' chiamare
+    piu' volte: chi ha gia' un report della giornata (suo o automatico) viene saltato. Restituisce i report creati."""
+    adesso = adesso or datetime.datetime.now()
+    ora, minuti = integrazioni_google._ora_minuti(integrazioni_google.ora_riepilogo(), "19:00")
+    if adesso < adesso.replace(hour=ora, minute=minuti, second=0, microsecond=0):
+        return []
+    oggi = adesso.strftime("%Y-%m-%d") + " 00:00:00"
+    ts = adesso.strftime("%Y-%m-%d %H:%M:%S")
+    limite = (adesso - datetime.timedelta(hours=ORE_MAX_REGISTRO)).strftime("%Y-%m-%d %H:%M:%S")
+    creati = []
+    with _LOCK_CHIUSURA:
+        db = _DBSession()
+        try:
+            utenti = [u for (u,) in db.query(_RegistroAttivita.utente).filter(
+                _RegistroAttivita.quando > limite, _RegistroAttivita.quando <= ts).distinct().all()]
+            for utente in utenti:
+                if db.query(_Report).filter(_Report.autore == utente, _Report.stato != "bozza",
+                                            _Report.creato_il >= oggi).first():
+                    continue  # ha gia' il report della giornata (inviato da lui a qualunque ora, o automatico)
+                dal = inizio_periodo_report(db, utente, adesso)
+                attivita = registro_attivita(utente, dal, ts)
+                if not attivita:
+                    continue
+                bozza = _bozza_di(db, utente)
+                if bozza and (bozza.origine or "") != "ceerlo" and bozza.righe:
+                    # modificata dall'utente ma non inviata: vale la sua bozza (senza creare task o promemoria non confermati)
+                    rep, voci = bozza, [dict(v, task=bool(v.get("task_id")), promemoria=bool(v.get("promemoria_id")))
+                                        for v in bozza.righe]
+                else:
+                    if bozza:
+                        db.delete(bozza)  # la bozza di Ceerlo non toccata non vale: vale il registro
+                    rep = _Report(id="REP-" + uuid.uuid4().hex[:8].upper(), autore=utente)
+                    db.add(rep)
+                    voci = voci_dal_registro(attivita)
+                    utente_dati = next((u for u in load_users() if u["username"] == utente), {})
+                    rep.autore_nome = utente_dati.get("full_name") or attivita[-1].get("utente_nome") or utente
+                    rep.ruolo = utente_dati.get("role") or ""
+                rep.righe, rep.testo = voci, _testo_da_voci(voci)
+                rep.stato, rep.origine, rep.creato_il, rep.modificato_il = "inviato", "automatico", ts, ""
+                db.commit()
+                creati.append(rep.to_dict())
+        except Exception as e:
+            db.rollback()
+            print(f"[chiusura report] {e}")
+        finally:
+            db.close()
+    for r in creati:
+        integrazioni_google.log(f"Report automatico per {r['autore']} ({len(r['righe'])} voci)")
+    return creati
+
+
+def avvia_chiusura_report():
+    """Ogni minuto: dopo l'ora del riepilogo chiude i report mancanti (anche con le email spente)."""
+    def _giro():
+        while True:
+            try:
+                chiudi_report_mancanti()
+            except Exception as e:
+                print(f"[chiusura report] {e}")
+            time.sleep(60)
+    threading.Thread(target=_giro, daemon=True, name="ChiusuraReport").start()
+
+
+def report_per_riepilogo(quando):
+    """Per il riepilogo serale: prima si chiudono i report mancanti, poi si prendono tutti quelli inviati."""
+    chiudi_report_mancanti()
+    return report_inviati_dal(quando)
+
+
+@app.route("/api/report/bozza-ceerlo", methods=["POST"])
+@login_required
+def api_report_bozza_ceerlo():
+    stato, jid = prepara_bozza_report(session["user_id"], session["user_name"], session.get("user_role", ""))
+    return jsonify({"ok": True, "stato": stato, "job": jid})
+
+
+@app.route("/api/report/bozza-ceerlo/<jid>", methods=["GET"])
+@login_required
+def api_report_bozza_ceerlo_stato(jid):
+    st = ceerlo.stato_job(jid, session["user_id"]) or {}
+    return jsonify({"ok": True, "stato": st.get("stato") or "perso", "posizione": st.get("posizione", 0)})
+
+
+@app.route("/report")
+@login_required
+def report_page():
+    # Pagina HTML dei report
+    return render_template("report.html", title="Task & Report")
+
+
+@app.route("/api/report", methods=["GET"])
+@login_required
+def api_report_lista():
+    me = session["user_id"]
+    db = _DBSession()
+    try:
+        tutti_dicts = [r.to_dict() for r in db.query(_Report).all()]
+        inviati = [r for r in tutti_dicts if r.get("stato") != "bozza"]
+        # Escludi i report dell'utente collegato dalla lista "ultimi"
+        altri = [r for r in inviati if r.get("autore") != me]
+        # Dei tuoi report inviati si mostra solo l'ultimo (quello che vedono gli altri e che si puo' modificare):
+        # i precedenti sono archiviati e stanno nella scheda Archivio
+        miei = sorted((r for r in inviati if r.get("autore") == me), key=lambda x: x.get("creato_il", ""), reverse=True)
+        bozze = sorted((r for r in tutti_dicts if r.get("stato") == "bozza" and r.get("autore") == me),
+                       key=lambda x: x.get("modificato_il") or x.get("creato_il", ""), reverse=True)
+        bozza = bozze[0] if bozze else None
+        registro = registro_attivita(me, inizio_periodo_report(db, me))
+        di_ceerlo = bool(bozza and bozza.get("origine") == "ceerlo")
+        return jsonify({"ok": True, "ultimi": ultimi_report_per_autore(altri), "miei": miei[:1],
+                        "miei_archiviati": max(0, len(miei) - 1),
+                        "bozza": bozza, "modificabile": miei[0]["id"] if miei else None,
+                        "registro": registro,
+                        # attivita' arrivate dopo che Ceerlo ha preparato la bozza (si puo' rifarla)
+                        "registro_nuove": sum(1 for a in registro if di_ceerlo and a["quando"] > (bozza.get("modificato_il") or "")),
+                        "ora_chiusura": integrazioni_google.ora_riepilogo(), "ceerlo": ceerlo.attivo()})
+    except Exception as e:
+        print(f"[api_report_lista] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel caricamento."}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/report", methods=["POST"])
+@login_required
+def api_report_salva():
+    """Salva la bozza (azione "bozza", una per utente) o invia il report (azione "invia")."""
+    dati = request.get_json(silent=True) or {}
+    me = session["user_id"]
+    azione = "bozza" if dati.get("azione") == "bozza" else "invia"
+    if "righe" not in dati and dati.get("testo"):
+        dati["righe"] = [{"testo": t} for t in str(dati["testo"]).splitlines()]  # vecchio formato: una voce per riga
+    db = _DBSession()
+    try:
+        bozza = _bozza_di(db, me)
+        vecchie, origine_bozza = (list(bozza.righe or []), bozza.origine or "") if bozza else ([], "")
+    finally:
+        db.close()
+    voci, err = voci_report(dati, me, vecchie)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    if not voci:
+        return jsonify({"ok": False, "error": "Scrivi almeno una voce del report."}), 400
+    if azione == "invia":
+        for v in voci:
+            e = errore_etc(v["etc"]) if v["task"] else \
+                (errore_data_promemoria(v["prom_data"], v["prom_ora"]) if v["promemoria"] else None)
+            if e:
+                return jsonify({"ok": False, "error": f"Voce \"{v['testo'][:40]}\": {e}"}), 400
+
+    adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db = _DBSession()
+    try:
+        rep = _bozza_di(db, me)
+        if not rep:
+            rep = _Report(id="REP-" + uuid.uuid4().hex[:8].upper(), autore=me, creato_il=adesso)
+            db.add(rep)
+        rep.autore_nome = session["user_name"]
+        rep.ruolo = session.get("user_role", "")
+        rep.righe = voci
+        rep.testo = _testo_da_voci(voci)
+        rep.modificato_il = adesso
+        rep.stato = "bozza"
+        # resta "di Ceerlo" (e quindi alla chiusura vale il registro) solo se le voci sono ancora quelle preparate
+        intatta = origine_bozza == "ceerlo" and [v["testo"] for v in voci] == [v.get("testo") for v in vecchie]
+        rep.origine = "ceerlo" if azione == "bozza" and intatta else ""
+        if azione == "invia":
+            rep.creato_il = adesso  # la data del report e' quella dell'invio
+            rep.modificato_il = ""
+        db.commit()
+        rep_id = rep.id
+    except Exception as e:
+        db.rollback()
+        print(f"[api_report_salva] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+
+    create = 0
+    if azione == "invia":
+        create, err = crea_task_dalle_voci(voci, rep_id)
+        db = _DBSession()
+        try:
+            rep = db.query(_Report).filter_by(id=rep_id).first()
+            rep.righe = voci  # con gli id delle task create
+            rep.stato = "inviato"
+            db.commit()
+            salvato = rep.to_dict()
+        finally:
+            db.close()
+        integrazioni_google.email_report(salvato, indirizzi_email("email_report"))
+        if err:
+            return jsonify({"ok": True, "report": salvato, "task_create": create,
+                            "avviso": f"Report inviato, ma una task non e' stata creata: {err}"})
+    else:
+        db = _DBSession()
+        try:
+            salvato = db.query(_Report).filter_by(id=rep_id).first().to_dict()
+        finally:
+            db.close()
+    # Nessuna notifica per il report: si legge dalla pagina Report (le task avvisano chi e' taggato)
+    return jsonify({"ok": True, "report": salvato, "task_create": create})
+
+
+@app.route("/api/report/<report_id>", methods=["PUT", "DELETE"])
+@login_required
+def api_report_modifica(report_id):
+    """Modifica o cancella il proprio ultimo report inviato (non quelli archiviati) o la propria bozza."""
+    me = session["user_id"]
+    db = _DBSession()
+    try:
+        rep = db.query(_Report).filter_by(id=report_id).first()
+        if not rep or rep.autore != me:
+            return jsonify({"ok": False, "error": "Report non trovato."}), 404
+        if rep.stato != "bozza":
+            ultimo = _ultimo_inviato(db, me)
+            if not ultimo or ultimo.id != rep.id:
+                return jsonify({"ok": False, "error": "Si puo' modificare solo l'ultimo report inviato: questo e' archiviato."}), 403
+        if request.method == "DELETE":
+            db.delete(rep)
+            db.commit()
+            return jsonify({"ok": True})
+        vecchie = list(rep.righe or [])
+        stato = rep.stato
+    finally:
+        db.close()
+
+    voci, err = voci_report(request.get_json(silent=True) or {}, me, vecchie)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    if not voci:
+        return jsonify({"ok": False, "error": "Il report deve avere almeno una voce: per toglierlo usa Elimina."}), 400
+    create = 0
+    if stato != "bozza":
+        create, err = crea_task_dalle_voci(voci, report_id)
+        if err and not create:
+            return jsonify({"ok": False, "error": err}), 400
+    db = _DBSession()
+    try:
+        rep = db.query(_Report).filter_by(id=report_id).first()
+        rep.righe = voci
+        rep.testo = _testo_da_voci(voci)
+        rep.modificato_il = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.commit()
+        salvato = rep.to_dict()
+    except Exception as e:
+        db.rollback()
+        print(f"[api_report_modifica] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel salvataggio."}), 500
+    finally:
+        db.close()
+    return jsonify({"ok": True, "report": salvato, "task_create": create,
+                    "avviso": f"Una task non e' stata creata: {err}" if err else ""})
+
+
+# Archivio: tutti i report di tutti, dal piu' recente, con filtri e a pagine
+@app.route("/api/report/archivio", methods=["GET"])
+@login_required
+def api_report_archivio():
+    db = _DBSession()
+    try:
+        # Parametri di filtro
+        autore = request.args.get("autore", "").strip()
+        dal = request.args.get("dal", "").strip()
+        al = request.args.get("al", "").strip()
+
+        # Parametri di paginazione
+        try:
+            offset = max(0, int(request.args.get("offset", 0)))
+        except (ValueError, TypeError):
+            offset = 0
+        try:
+            limit = int(request.args.get("limit", 20))
+            if limit < 1 or limit > 50:
+                limit = 20
+        except (ValueError, TypeError):
+            limit = 20
+
+        # Costruzione query base (le bozze le vede solo l'autore, nella pagina Report)
+        query = db.query(_Report).filter(_Report.stato != "bozza")
+
+        # Filtro per autore
+        if autore:
+            query = query.filter(_Report.autore == autore)
+
+        # Filtro per data inizio
+        if dal:
+            try:
+                datetime.datetime.strptime(dal, "%Y-%m-%d")
+                query = query.filter(_Report.creato_il >= dal + " 00:00:00")
+            except ValueError:
+                pass
+
+        # Filtro per data fine
+        if al:
+            try:
+                datetime.datetime.strptime(al, "%Y-%m-%d")
+                query = query.filter(_Report.creato_il <= al + " 23:59:59")
+            except ValueError:
+                pass
+
+        # Ordinamento
+        query = query.order_by(_Report.creato_il.desc(), _Report.id.desc())
+
+        # Paginazione: chiedo limit+1 per sapere se ce ne sono altri
+        risultati = query.offset(offset).limit(limit + 1).all()
+        altri = len(risultati) > limit
+        risultati = risultati[:limit]
+
+        # Risposta base
+        risposta = {
+            "ok": True,
+            "reports": [r.to_dict() for r in risultati],
+            "altri": altri
+        }
+
+        # Lista autori solo alla prima pagina
+        if offset == 0:
+            autori_query = db.query(_Report.autore, _Report.autore_nome).filter(_Report.stato != "bozza").distinct()
+            autori_righe = autori_query.all()
+            
+            # Ordino per autore_nome senza distinzione maiuscole e rimuovo duplicati
+            autori_visti = set()
+            autori_ordinati = []
+            for a, n in autori_righe:
+                if a not in autori_visti:
+                    autori_visti.add(a)
+                    autori_ordinati.append({"autore": a, "autore_nome": n})
+            
+            # Ordino la lista finale per autore_nome (case-insensitive)
+            autori_ordinati.sort(key=lambda x: (x["autore_nome"] or x["autore"] or "").lower())
+            risposta["autori"] = autori_ordinati
+
+        return jsonify(risposta)
+    except Exception as e:
+        print(f"[api_report_archivio] Errore: {e}")
+        return jsonify({"ok": False, "error": "Errore nel caricamento."}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/admin-support", methods=["POST"])
+@login_required
+def api_admin_support():
+    """Salva una richiesta di assistenza direttamente nel file JSON admin."""
+    data = request.get_json(silent=True) or {}
+    desc = str(data.get("description", "")).strip()[:5000]
+    if not desc:
+        return jsonify({"error": "Descrizione vuota"}), 400
+    pagina = str(data.get("pagina", "")).strip()[:300]
+
+    tasks = []
+    if ADMIN_TASKS_FILE.exists():
+        # Nota: eventuali task precedenti in admin_tasks.json sono stati migrati nel DB.
+        # Il file JSON non viene più scritto; questa lettura serve solo come fallback legacy.
+        pass
+
+    new_support_request = {
+        "id": f"SOS-{uuid.uuid4().hex[:6].upper()}",
+        "user_id": session["user_id"],
+        "user_name": session["user_name"],
+        "description": desc,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "status": "LOGGED_ONLY",
+        "pagina": pagina,
+    }
+    # Salva direttamente nel DB
+    db = _DBSession()
+    try:
+        db.add(_AdminTask(
+            id=new_support_request["id"],
+            user_id=new_support_request["user_id"],
+            user_name=new_support_request["user_name"],
+            description=new_support_request["description"],
+            timestamp=new_support_request["timestamp"],
+            status=new_support_request["status"]
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[api_admin_support] Errore: {e}")
+    finally:
+        db.close()
+
+    destinatari = indirizzi_email("email_admin")
+    if destinatari:
+        testo, html, allegati = componi_email_admin(new_support_request)
+        integrazioni_google.email_admin_task(new_support_request, destinatari, testo, html, allegati)
+    return jsonify({"success": True})
+
+
+ORE_REGISTRO_ADMIN = 24  # nell'email della richiesta admin: cosa ha fatto l'utente nelle ultime 24 ore
+
+
+def _codici_in_chiaro(testo, utenti=None):
+    """#CODICE[nome] -> nome (CODICE) e @username -> nome e cognome, per chi legge l'email."""
+    utenti = utenti if utenti is not None else {u["username"].lower(): u for u in load_users()}
+    testo = _CODICE_TAG.sub(lambda m: f"{m.group(2)} ({m.group(1)})", testo or "")
+    testo = re.sub(r"\[#([A-Z0-9][A-Z0-9-]{2,}) \(([^)\n]*)\)\]", lambda m: f"{m.group(2) or m.group(1)} ({m.group(1)})", testo)  # vecchio formato
+    return re.sub(r"@(\w+)", lambda m: (utenti.get(m.group(1).lower()) or {}).get("full_name") or m.group(1), testo)
+
+
+def componi_email_admin(r):
+    """(testo, html, allegati) della richiesta admin: codici e @ in chiaro, con il registro attivita' dell'utente
+    delle ultime ORE_REGISTRO_ADMIN ore nel corpo (le ultime voci) e allegato per intero (CSV)."""
+    import html as _h
+    utenti = {u["username"].lower(): u for u in load_users()}
+    descrizione = _codici_in_chiaro(r["description"], utenti)
+    dal = (datetime.datetime.now() - datetime.timedelta(hours=ORE_REGISTRO_ADMIN)).strftime("%Y-%m-%d %H:%M:%S")
+    attivita = registro_attivita(r["user_id"], dal)
+    voci = [(a["quando"][:16], _codici_in_chiaro(a["testo"], utenti) + (f" ({a['volte']} volte)" if a.get("volte", 1) > 1 else ""))
+            for a in attivita]
+    testo = [f"{r['user_name']} ha inviato una richiesta admin il {r['timestamp'][:16]}."]
+    if r.get("pagina"):
+        testo.append(f"Pagina: {r['pagina']}")
+    testo += ["", descrizione, "", f"COSA HA FATTO NELLE ULTIME {ORE_REGISTRO_ADMIN} ORE ({len(voci)} attivita'):"]
+    testo += [f"- {q} {t}" for q, t in voci[-15:]] or ["- nessuna attivita' registrata"]
+    if len(voci) > 15:
+        testo.append(f"(le altre {len(voci) - 15} sono nel file allegato)")
+    righe_html = "".join(f'<tr><td style="padding:4px 10px 4px 0;color:#64748b;white-space:nowrap;">{_h.escape(q[11:])}</td>'
+                         f'<td style="padding:4px 0;">{_h.escape(t)}</td></tr>' for q, t in voci[-15:])
+    html = (f'<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">'
+            f'<p><b>{_h.escape(r["user_name"])}</b> ha inviato una richiesta admin il {_h.escape(r["timestamp"][:16])}'
+            + (f' dalla pagina <code>{_h.escape(r["pagina"])}</code>' if r.get("pagina") else "") + '.</p>'
+            f'<div style="background:#fef2f2;border-left:4px solid #da0303;padding:10px 14px;border-radius:6px;white-space:pre-wrap;">'
+            f'{_h.escape(descrizione)}</div>'
+            f'<p style="margin:18px 0 6px;font-weight:700;">Cosa ha fatto nelle ultime {ORE_REGISTRO_ADMIN} ore ({len(voci)} attivit&agrave;)</p>'
+            + (f'<table style="border-collapse:collapse;font-size:13px;">{righe_html}</table>' if voci else
+               '<p style="color:#64748b;">Nessuna attivit&agrave; registrata.</p>')
+            + (f'<p style="color:#64748b;font-size:12px;">Le altre {len(voci) - 15} sono nel file allegato.</p>' if len(voci) > 15 else "")
+            + '</div>')
+    allegati = []
+    if voci:
+        csv = "Quando;Attivita'\n" + "\n".join(f'{q};"{t.replace(chr(34), chr(39))}"' for q, t in voci)
+        allegati.append((f"registro_attivita_{r['user_id']}_{r['timestamp'][:10]}.csv", csv))
+    return integrazioni_google.togli_importi("\n".join(testo)), integrazioni_google.togli_importi(html), allegati
+
+
+# --- Email automatiche e Google Calendar (logica in integrazioni_google.py) ---
+
+def indirizzi_email(campo):
+    """Email degli utenti che in gestione utenze hanno l'avviso 'campo' (email_report o email_admin)."""
+    return sorted({u["email"] for u in load_users() if u.get(campo) and u.get("email")})
+
+
+# --- Riepilogo serale impaginato (email HTML) con il punto della giornata scritto da Ceerlo ---
+
+GIORNI_IT = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
+MESI_IT = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto",
+           "settembre", "ottobre", "novembre", "dicembre")
+MINUTI_ATTESA_CEERLO = 15
+
+
+def _giorno_lungo(d):
+    return f"{GIORNI_IT[d.weekday()]} {d.day} {MESI_IT[d.month - 1]}"
+
+
+def dati_riepilogo(reports, oggi=None):
+    """Tutto quello che va nel riepilogo serale, gia' senza importi: report, agenda di oggi e domani,
+    promemoria del team, incassi previsti (solo cliente e preventivo) e task scadute o in scadenza domani."""
+    oggi = oggi or datetime.date.today()
+    domani = oggi + datetime.timedelta(days=1)
+    utenti = {u["username"]: u for u in load_users()}
+    nome = lambda u: (utenti.get(u.lstrip("@")) or {}).get("full_name") or u.lstrip("@")
+    def pulisci(t):
+        """Niente importi e @username (nelle email vanno i nomi). I #CODICE[nome] restano: nell'email diventano link."""
+        t = t or ""
+        t = re.sub(r"@(\w+)", lambda m: (utenti.get(m.group(1)) or {}).get("full_name") or m.group(0), t)
+        return integrazioni_google.togli_importi(t)
+    d = {"oggi": oggi, "domani": domani, "errori": [],
+         "report": [{"autore": r.get("autore_nome") or r.get("autore"), "ora": (r.get("creato_il") or "")[11:16],
+                     # automatico = l'utente non l'ha inviato: e' il suo registro attivita'
+                     "automatico": r.get("origine") == "automatico",
+                     "voci": [{"testo": pulisci(v.get("testo")), "task": bool(v.get("task_id")),
+                               "promemoria": bool(v.get("promemoria_id")), "ai": bool(v.get("ai"))}
+                              for v in (r.get("righe") or [])]
+                     or [{"testo": pulisci(t), "task": False, "promemoria": False, "ai": False}
+                         for t in (r.get("testo") or "").splitlines() if t.strip()]}
+                    for r in reports],
+         "agenda": {oggi.isoformat(): [], domani.isoformat(): []}, "promemoria": [], "incassi": [], "task": []}
+    if integrazioni_google.calendar_collegato():
+        try:
+            for e in integrazioni_google.eventi(oggi, domani):
+                g = e["inizio"][:10]
+                if g in d["agenda"]:
+                    d["agenda"][g].append({"ora": "" if e["tutto_il_giorno"] else e["inizio"][11:16],
+                                           "titolo": pulisci(e["titolo"]), "cliente": e.get("cliente") or "",
+                                           "luogo": e.get("luogo") or "", "chi": [nome(u) for u in e.get("assegnati") or []]})
+        except Exception as ex:
+            d["errori"].append(f"Calendario non letto: {ex}")
+    db = _DBSession()
+    try:
+        for p in db.query(_Promemoria).filter(_Promemoria.fatto == False,  # noqa: E712
+                                              _Promemoria.data <= domani.isoformat()).all():
+            if p.assegnati and p.data >= oggi.isoformat():  # i personali restano personali
+                d["promemoria"].append({"data": p.data, "ora": p.ora or "", "testo": pulisci(p.testo),
+                                        "di": p.autore_nome or p.autore, "per": [nome(a) for a in p.assegnati]})
+    finally:
+        db.close()
+    d["promemoria"].sort(key=lambda p: (p["data"], p["ora"] or "99"))
+    d["incassi"] = [{"cliente": x["cliente"], "preventivo": x["preventivo"], "scaduto": x["scaduto"]}
+                    for x in incassi_programmati(oggi.isoformat(), domani.isoformat()) if x["data"] == domani.isoformat()]
+    for t in load_tasks():
+        if t.get("status") in ("resolved", "failed") or t.get("tipo") == "personale" or not t.get("etc"):
+            continue
+        if t["etc"] <= domani.isoformat():
+            d["task"].append({"id": t["id"], "testo": pulisci(t.get("description"))[:300], "etc": t["etc"],
+                              "scaduta": t["etc"] < oggi.isoformat(),
+                              "chi": [nome(a) for a in t.get("assigned_to") or []]})
+    d["task"].sort(key=lambda t: t["etc"])
+    return d
+
+
+def _contesto_riepilogo(d):
+    righe = [f"OGGI: {_giorno_lungo(d['oggi'])}. DOMANI: {_giorno_lungo(d['domani'])}.", "", "REPORT DI OGGI:"]
+    for r in d["report"]:
+        righe.append(f"{r['autore']} ({r['ora']})" + (" [report non inviato: registro attivita' del gestionale]" if r["automatico"] else "") + ":")
+        righe += [f"  - {v['testo']}" + (" [diventata task]" if v["task"] else "") + (" [promemoria]" if v["promemoria"] else "")
+                  for v in r["voci"]]
+    if not d["report"]:
+        righe.append("nessun report")
+    for g, titolo in ((d["oggi"], "APPUNTAMENTI DI OGGI"), (d["domani"], "APPUNTAMENTI DI DOMANI")):
+        lista = d["agenda"][g.isoformat()]
+        righe += ["", titolo + ":"] + ([f"  - {a['ora'] or 'tutto il giorno'} {a['titolo']}"
+                                        + (f", cliente {a['cliente']}" if a["cliente"] else "")
+                                        + (f", con {', '.join(a['chi'])}" if a["chi"] else ", non assegnato")
+                                        for a in lista] or ["  nessuno"])
+    righe += ["", "PROMEMORIA DEL TEAM (oggi e domani):"] + (
+        [f"  - {p['data']} {p['ora']} {p['testo']} (per {', '.join(p['per'])})" for p in d["promemoria"]] or ["  nessuno"])
+    righe += ["", "INCASSI PREVISTI DOMANI (senza importi):"] + (
+        [f"  - {x['cliente']} preventivo {x['preventivo']}" for x in d["incassi"]] or ["  nessuno"])
+    righe += ["", "TASK SCADUTE O IN SCADENZA DOMANI:"] + (
+        [f"  - #{t['id']} {t['testo'][:150]} (entro {t['etc']}{', SCADUTA' if t['scaduta'] else ''}; {', '.join(t['chi'])})"
+         for t in d["task"]] or ["  nessuna"])
+    return "\n".join(righe)
+
+
+def riassunto_serale_ceerlo(d, minuti=MINUTI_ATTESA_CEERLO):
+    """Chiede a Ceerlo il punto della giornata e aspetta al massimo `minuti`: se non risponde si va avanti senza."""
+    if not ceerlo.attivo():
+        return ""
+    messaggi = [{"role": "system", "content": ceerlo.prompt_sistema("il CEO e il team", "riepilogo serale", _contesto_riepilogo(d))},
+                {"role": "user", "content": (
+                    "Scrivi il riepilogo serale da mandare per email. Tre parti brevi con questi titoli su righe a se': "
+                    "'Report di oggi' (il riassunto dei report: una riga per collega che inizia col suo nome, con cosa ha fatto "
+                    "e cosa e' rimasto aperto; se non ci sono report scrivi 'Nessun report'), 'Domani' (appuntamenti, promemoria, "
+                    "incassi previsti, in ordine di orario) e 'Attenzione' (task scadute, appuntamenti senza nessuno assegnato, "
+                    "cose da non dimenticare; se non c'e' nulla scrivi 'Niente di urgente'). Sotto ogni titolo righe che "
+                    "iniziano con '- '. In tutto massimo 18 righe. Niente importi o cifre in euro. Per clienti e preventivi "
+                    "scrivi il codice come nel contesto, nella forma #CODICE[nome]: nell'email diventa un link. "
+                    "Per i colleghi scrivi i nomi, senza @. Usa solo i dati del contesto.")}]
+    try:
+        jid = ceerlo.aggiungi("riepilogo", messaggi, ceerlo.PRIO_RICHIESTA, "riepilogo", chiave=f"riepilogo:{d['oggi']}")
+    except Exception as ex:
+        integrazioni_google.log(f"Riepilogo: Ceerlo non disponibile ({ex})")
+        return ""
+    fine = time.time() + minuti * 60
+    while time.time() < fine:
+        st = ceerlo.stato_job(jid) or {}
+        if st.get("stato") == "fatto":
+            testo = st.get("risposta") or ""
+            testo = re.sub(r"@(\w+)", lambda m: (next((u.get("full_name") for u in load_users()
+                                                         if u["username"].lower() == m.group(1).lower()), None) or m.group(1)), testo)
+            return integrazioni_google.togli_importi(testo.replace("**", "").strip())
+        if st.get("stato") in ("errore", None) or not st:
+            integrazioni_google.log(f"Riepilogo: Ceerlo non ha risposto ({st.get('errore', 'richiesta persa')})")
+            return ""
+        time.sleep(5)
+    integrazioni_google.log(f"Riepilogo: Ceerlo non ha finito in {minuti} minuti, parte senza riassunto")
+    return ""
+
+
+_CODICE_TAG = re.compile(r"#([A-Z0-9][A-Z0-9-]{2,})\[([^\]\n]+)\]")
+
+
+def _senza_codici(testo):
+    """#CODICE[nome] -> nome (testo semplice delle email)."""
+    return _CODICE_TAG.sub(r"\2", testo or "")
+
+
+def indirizzo_gestionale():
+    """Indirizzo con cui PC dell'ufficio e telefoni aprono il gestionale: Tailscale se c'e', altrimenti la rete locale."""
+    return DISPLAY_URL if DISPLAY_URL.endswith("/") else DISPLAY_URL + "/"
+
+
+def _link_email(testo_html):
+    """Nell'HTML gia' neutralizzato, #CODICE[nome] diventa un link che apre il cliente o il preventivo nel gestionale."""
+    base = indirizzo_gestionale()
+    return _CODICE_TAG.sub(lambda m: f'<a href="{base}ceerlo/vai/{urllib.parse.quote(m.group(1))}" '
+                                     f'style="color:#3b4fe4;text-decoration:underline;">{m.group(2)}</a>', testo_html)
+
+
+def _html_ceerlo(testo):
+    """Il testo di Ceerlo ('Titolo' + righe '- ...') in HTML semplice per le email."""
+    import html as _h
+    pezzi, lista = [], []
+    def chiudi():
+        if lista:
+            pezzi.append('<ul style="margin:4px 0 12px;padding-left:20px;">' + "".join(
+                f'<li style="margin:3px 0;">{x}</li>' for x in lista) + "</ul>")
+            lista.clear()
+    for riga in testo.splitlines():
+        r = riga.strip()
+        if not r:
+            continue
+        if r[:2] in ("- ", "* ", "• "):
+            lista.append(_link_email(_h.escape(r[2:].strip())))
+        else:
+            chiudi()
+            titolo = _senza_codici(r.strip("#: ").strip())
+            pezzi.append(f'<div style="font-weight:700;color:#1e2a78;margin:10px 0 2px;font-size:15px;">{_h.escape(titolo)}</div>')
+    chiudi()
+    return "".join(pezzi)
+
+
+def componi_riepilogo(reports, dal, adesso, minuti_ceerlo=MINUTI_ATTESA_CEERLO):
+    """(oggetto, testo semplice, html) del riepilogo serale."""
+    import html as _h
+    esc = lambda t: _link_email(_h.escape(t or ""))  # i #CODICE[nome] diventano link al gestionale
+    d = dati_riepilogo(reports, adesso.date())
+    ai = riassunto_serale_ceerlo(d, minuti_ceerlo) if minuti_ceerlo else ""
+    oggi_k, domani_k = d["oggi"].isoformat(), d["domani"].isoformat()
+    oggetto = f"Riepilogo di {_giorno_lungo(d['oggi'])}"
+
+    # --- testo semplice (per i programmi di posta senza HTML) ---
+    t = [oggetto.upper(), ""]
+    if ai:
+        t += ["IL PUNTO DI CEERLO", ai, ""]
+    t.append(f"REPORT DI OGGI ({len(d['report'])}):")
+    for r in d["report"]:
+        t += ["", f"Report di {r['autore']} ({r['ora']})" + (" - dal registro attivita'" if r["automatico"] else "")] + \
+             [f"- {'[AI] ' if v['ai'] else ''}{v['testo']}" for v in r["voci"]]
+    if not d["report"]:
+        t.append("Nessun report inviato.")
+    t.append("")
+    for g, titolo in ((domani_k, "DOMANI"), (oggi_k, "OGGI")):
+        t.append(f"APPUNTAMENTI {titolo}:")
+        t += [f"- {a['ora'] or 'tutto il giorno'} {a['titolo']}" + (f" ({a['cliente']})" if a["cliente"] else "")
+              + (f" - {', '.join(a['chi'])}" if a["chi"] else "") for a in d["agenda"][g]] or ["- nessuno"]
+        t.append("")
+    if d["promemoria"]:
+        t += ["PROMEMORIA:"] + [f"- {p['data'][8:10]}/{p['data'][5:7]} {p['ora']} {p['testo']} (per {', '.join(p['per'])})"
+                                for p in d["promemoria"]] + [""]
+    if d["incassi"]:
+        t += ["INCASSI PREVISTI DOMANI:"] + [f"- {x['cliente']} (preventivo {x['preventivo']})" for x in d["incassi"]] + [""]
+    if d["task"]:
+        t += ["TASK SCADUTE O IN SCADENZA:"] + [f"- #{x['id']} {x['testo'][:120]} (entro {x['etc']})" for x in d["task"]] + [""]
+    testo = _senza_codici("\n".join(t))
+
+    # --- HTML (tabelle e stili in linea: e' quello che i programmi di posta leggono bene) ---
+    blu, grigio, bordo = "#3b4fe4", "#64748b", "#e5e7eb"
+    def sezione(titolo, icona, corpo, colore=blu):
+        return (f'<tr><td style="padding:18px 28px 4px;"><div style="font-size:12px;letter-spacing:.6px;text-transform:uppercase;'
+                f'color:{colore};font-weight:700;margin-bottom:8px;">{icona}&nbsp; {esc(titolo)}</div>{corpo}</td></tr>')
+    def riga(ora, testo_html, sotto="", colore="#eef1fd"):
+        sotto = f'<div style="font-size:12.5px;color:{grigio};margin-top:2px;">{sotto}</div>' if sotto else ""
+        return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 6px;border-collapse:separate;">'
+                f'<tr><td width="74" valign="top" style="background:{colore};border-radius:8px 0 0 8px;padding:9px 8px;font-size:13px;'
+                f'font-weight:700;color:#1f2937;text-align:center;">{ora}</td>'
+                f'<td valign="top" style="background:#f8fafc;border-radius:0 8px 8px 0;padding:9px 12px;font-size:14px;color:#111827;">'
+                f'{testo_html}{sotto}</td></tr></table>')
+    def agenda(chiave):
+        lista = d["agenda"][chiave]
+        if not lista:
+            return f'<div style="color:{grigio};font-size:14px;">Nessun appuntamento.</div>'
+        return "".join(riga(esc(a["ora"]) or "Tutto il giorno", f"<b>{esc(a['titolo'])}</b>",
+                            " · ".join(x for x in (esc(a["cliente"]), esc(a["luogo"]),
+                                                   ("con " + esc(", ".join(a["chi"]))) if a["chi"] else
+                                                   '<span style="color:#b45309;">non assegnato</span>') if x))
+                       for a in lista)
+    blocchi = []
+    if ai:
+        blocchi.append(f'<tr><td style="padding:22px 28px 6px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
+                       f'<tr><td style="background:#f4f5ff;border:1px solid #dfe3fb;border-radius:12px;padding:16px 18px;font-size:14px;'
+                       f'line-height:1.55;color:#1f2937;"><div style="font-size:12px;letter-spacing:.6px;text-transform:uppercase;'
+                       f'color:{blu};font-weight:700;">🤖&nbsp; Il punto di Ceerlo</div>{_html_ceerlo(ai)}</td></tr></table></td></tr>')
+    # i report del giorno: uno per collega, chiusi a tendina (si aprono toccando "Report di ...").
+    # I programmi di posta che non gestiscono le tendine (es. Gmail sul web) li mostrano gia' aperti.
+    rep_html = []
+    for r in d["report"]:
+        voci = "".join(f'<li style="margin:3px 0;">' + ('<span title="Scritta da Ceerlo">🤖</span> ' if v["ai"] else "") + f'{esc(v["testo"])}'
+                       + (' <span style="font-size:11px;background:#eef1fd;color:#3b4fe4;border-radius:8px;padding:1px 7px;">task</span>' if v["task"] else "")
+                       + (' <span style="font-size:11px;background:#fff4d6;color:#b45309;border-radius:8px;padding:1px 7px;">promemoria</span>' if v["promemoria"] else "")
+                       + "</li>" for v in r["voci"])
+        n = len(r["voci"])
+        rep_html.append(f'<details style="border:1px solid {bordo};border-radius:10px;margin:0 0 8px;background:#ffffff;">'
+                        f'<summary style="display:block;list-style:none;cursor:pointer;padding:11px 14px;font-weight:700;font-size:14px;color:#111827;">'
+                        f'<span style="color:{blu};">&#9656;</span> Report di {_h.escape(r["autore"] or "")}'
+                        f'<span style="font-weight:400;color:{grigio};font-size:12.5px;"> · {esc(r["ora"])} · '
+                        + ("dal registro attività · " if r["automatico"] else "") +
+                        f'{n} {"voce" if n == 1 else "voci"}</span></summary>'
+                        f'<ul style="margin:0;padding:0 14px 12px 34px;font-size:14px;line-height:1.5;color:#1f2937;">{voci}</ul></details>')
+    blocchi.append(sezione(f"Report di oggi ({len(d['report'])})", "📝",
+                           "".join(rep_html) or f'<div style="color:{grigio};font-size:14px;">Nessun report inviato.</div>'))
+    blocchi.append(sezione(f"Domani, {_giorno_lungo(d['domani'])}", "📅", agenda(domani_k)))
+    extra = []
+    for p in d["promemoria"]:
+        extra.append(riga(esc(p["ora"]) or ("Domani" if p["data"] == domani_k else "Oggi"), "🔔 " + esc(p["testo"]),
+                          f"per {esc(', '.join(p['per']))} · da {esc(p['di'])}", "#fff4d6"))
+    for x in d["incassi"]:
+        extra.append(riga("Incasso", f"<b>{esc(x['cliente'])}</b>", f"preventivo {esc(x['preventivo'])}", "#dcf5e6"))
+    if extra:
+        blocchi.append(sezione("Promemoria e incassi previsti", "🔔", "".join(extra), "#b45309"))
+    if d["task"]:
+        blocchi.append(sezione("Task scadute o in scadenza", "⏰", "".join(
+            riga("Scaduta" if x["scaduta"] else f"{x['etc'][8:10]}/{x['etc'][5:7]}", esc(x["testo"]),
+                 f"#{esc(x['id'])}" + (f" · {esc(', '.join(x['chi']))}" if x["chi"] else ""),
+                 "#fde4e1" if x["scaduta"] else "#fff4d6") for x in d["task"]), "#c2410c"))
+    blocchi.append(sezione("Oggi in agenda", "🗓️", agenda(oggi_k), grigio))
+    if not ai and ceerlo.attivo() and minuti_ceerlo:
+        blocchi.append(f'<tr><td style="padding:4px 28px;font-size:12px;color:{grigio};">Ceerlo stasera non ha risposto in tempo: '
+                       f'il riepilogo e\' senza il suo riassunto.</td></tr>')
+    chiusura = integrazioni_google.leggi_config()["chiusura"]
+    nota = f" I PC dell'ufficio si spengono alle {esc(chiusura['ora'])}." if chiusura["spegni"] else ""
+    html = f"""<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>{esc(oggetto)}</title></head>
+<body style="margin:0;padding:0;background:#eef0f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef0f5;"><tr><td align="center" style="padding:24px 10px;">
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(15,23,42,.08);">
+<tr><td style="background:linear-gradient(135deg,#3b4fe4,#6a3de8);background-color:#3b4fe4;padding:24px 28px;color:#ffffff;">
+<div style="font-size:12px;letter-spacing:3px;font-weight:700;opacity:.85;">CERLAB · GESTIONALE</div>
+<div style="font-size:22px;font-weight:700;margin-top:6px;">Riepilogo di {esc(_giorno_lungo(d['oggi']))}</div>
+<div style="font-size:13px;opacity:.85;margin-top:4px;">{len(d['report'])} report · {len(d['agenda'][domani_k])} appuntamenti domani · {len(d['task'])} task da tenere d'occhio</div>
+</td></tr>
+{''.join(blocchi)}
+<tr><td style="padding:18px 28px 24px;"><a href="{esc(DISPLAY_URL)}" style="display:inline-block;background:{blu};color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:10px 18px;border-radius:8px;">Apri il gestionale</a></td></tr>
+<tr><td style="padding:14px 28px;background:#f8fafc;border-top:1px solid {bordo};font-size:11.5px;color:{grigio};line-height:1.5;">
+Email automatica del Gestionale Cerlab, senza dati economici.{nota}</td></tr>
+</table></td></tr></table></body></html>"""
+    return oggetto, testo, html
+
+
+def report_inviati_dal(quando):
+    db = _DBSession()
+    try:
+        return [r.to_dict() for r in db.query(_Report).filter(
+            _Report.stato != "bozza", _Report.creato_il > quando).all()]
+    finally:
+        db.close()
+
+
+def _redirect_uri_google():
+    # Google accetta per le app desktop solo l'indirizzo locale: il collegamento si fa dal PC del gestionale
+    return f"http://127.0.0.1:{PORT}{url_for('google_oauth_callback')}"
+
+
+@app.route("/impostazioni/google")
+@login_required
+@role_required("amministratore")
+def impostazioni_google():
+    return render_template("impostazioni_google.html", title="Email e Google Calendar",
+                           stato=integrazioni_google.stato_pubblico(),
+                           ceerlo_cfg=ceerlo.leggi_config(),
+                           postazioni_log=sorted(_leggi_json_file(POSTAZIONI_LOG_FILE, {}).items(), reverse=True)[:7],
+                           ora_controllo_postazioni=ORA_CONTROLLO_POSTAZIONI,
+                           ricevono_report=[u for u in load_users() if u.get("email_report") and u.get("email")],
+                           ricevono_admin=[u for u in load_users() if u.get("email_admin") and u.get("email")],
+                           redirect_uri=_redirect_uri_google(),
+                           dal_pc_server=request.remote_addr in ("127.0.0.1", "::1", LAN_IP))
+
+
+@app.route("/impostazioni/google/email", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_google_email():
+    f = request.form
+    valori = {"mittente": (f.get("mittente") or "").strip(),
+              "invia_report": bool(f.get("invia_report")), "riepilogo": bool(f.get("riepilogo"))}
+    ora = (f.get("ora_riepilogo") or "").strip()
+    if re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", ora):
+        valori["ora_riepilogo"] = ora
+    if (f.get("password") or "").strip():
+        valori["password"] = integrazioni_google.proteggi(f["password"].strip())
+    integrazioni_google.aggiorna_sezione("email", valori)
+    flash("Impostazioni email salvate.", "success")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/riepilogo/anteprima")
+@login_required
+@role_required("amministratore")
+def anteprima_riepilogo():
+    """L'email del riepilogo di oggi come arriverebbe adesso (senza aspettare Ceerlo, se non con ?ceerlo=1)."""
+    oggi = datetime.date.today()
+    reports = report_inviati_dal(f"{oggi} 00:00:00")
+    _, _, html = componi_riepilogo(reports, f"{oggi} 00:00:00", datetime.datetime.now(),
+                                   minuti_ceerlo=5 if request.args.get("ceerlo") == "1" else 0)
+    return html
+
+
+@app.route("/impostazioni/chiusura", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_chiusura():
+    ora = (request.form.get("ora") or "").strip()
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", ora):
+        flash("Ora di spegnimento non valida.", "error")
+        return redirect(url_for("impostazioni_google"))
+    integrazioni_google.aggiorna_sezione("chiusura", {"spegni": bool(request.form.get("spegni")), "ora": ora})
+    flash("Chiusura serale salvata: Gestionale Notifiche la applica sui PC entro pochi secondi.", "success")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/email/prova", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_google_email_prova():
+    me = next((u for u in load_users() if u["username"] == session["user_id"]), {})
+    # la prova va a tutti quelli che ricevono i report (piu' chi la manda), cosi' si vede subito chi la riceve davvero
+    destinatari = sorted(set(indirizzi_email("email_report")) | ({me["email"]} if me.get("email") else set()))
+    if not destinatari:
+        flash("Nessun destinatario: in Gestione Utenti aggiungi l'email e la spunta 'riceve i report'.", "error")
+    else:
+        ok, errore = integrazioni_google.email_prova(destinatari)
+        flash(f"Email di prova inviata a: {', '.join(destinatari)}." if ok else errore, "success" if ok else "error")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/calendar", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_google_calendar():
+    f = request.form
+    valori = {"client_id": (f.get("client_id") or "").strip(),
+              "calendar_id": integrazioni_google.normalizza_id_calendario(f.get("calendar_id"))}
+    if (f.get("client_secret") or "").strip():
+        valori["client_secret"] = integrazioni_google.proteggi(f["client_secret"].strip())
+    integrazioni_google.aggiorna_sezione("calendar", valori)
+    flash("Impostazioni Google Calendar salvate.", "success")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/collega")
+@login_required
+@role_required("amministratore")
+def google_collega():
+    if request.remote_addr not in ("127.0.0.1", "::1", LAN_IP):
+        flash("Il collegamento a Google si fa dal PC del gestionale, aprendo il gestionale su quel PC.", "error")
+        return redirect(url_for("impostazioni_google"))
+    try:
+        return redirect(integrazioni_google.url_collegamento(_redirect_uri_google()))
+    except ValueError as e:
+        flash(str(e), "error")
+        return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/oauth2callback")
+def google_oauth_callback():
+    # Google torna su 127.0.0.1, dove il browser puo' non avere la sessione del gestionale (aperto con l'IP di rete):
+    # niente login qui, la richiesta e' valida solo con lo "state" segreto creato da un amministratore poco prima.
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return "Non consentito.", 403
+    if request.args.get("error"):
+        esito, ok = "Collegamento annullato su Google.", False
+    else:
+        try:
+            account = integrazioni_google.completa_collegamento(request.args.get("code", ""), request.args.get("state", ""))
+            esito, ok = f"Google Calendar collegato con l'account {account or 'Google'}.", True
+        except Exception as e:
+            integrazioni_google.log(f"Collegamento non riuscito: {e}")
+            esito, ok = f"Collegamento non riuscito: {e}", False
+    return render_template_string(
+        "<!doctype html><meta charset='utf-8'><title>Google Calendar</title>"
+        "<body style='font-family:sans-serif;max-width:520px;margin:60px auto;text-align:center'>"
+        "<h2>{{ '✅' if ok else '⚠️' }} {{ esito }}</h2>"
+        "<p><a href='{{ indietro }}'>Torna alle impostazioni del gestionale</a></p></body>",
+        esito=esito, ok=ok, indietro=DISPLAY_URL.rstrip("/") + url_for("impostazioni_google"))
+
+
+@app.route("/impostazioni/google/scollega", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def google_scollega():
+    integrazioni_google.scollega_calendar()
+    flash("Google Calendar scollegato.", "success")
+    return redirect(url_for("impostazioni_google"))
+
+
+@app.route("/calendario")
+@login_required
+def calendario_page():
+    db = _DBSession()
+    try:
+        clienti = [{"id": c.id_cliente, "nome": c.cliente or c.rag_sociale or ""}
+                   for c in db.query(_Cliente).all() if (c.cliente or c.rag_sociale)]
+        # Preventivi da scegliere nell'appuntamento (senza importi), i piu' recenti prima
+        preventivi = [{"numero": p.numero, "data": p.data or "", "stato": p.stato or "",
+                       "cliente_id": p.id_cliente or "", "cliente": p.cliente or p.rag_sociale or ""}
+                      for p in db.query(_Preventivo).all()]
+    finally:
+        db.close()
+    clienti.sort(key=lambda c: c["nome"].lower())
+    preventivi.sort(key=lambda p: _data_ordinabile(p["data"]) + p["numero"], reverse=True)
+    utenti = sorted(({"username": u["username"], "nome": u.get("full_name") or u["username"]} for u in load_users()),
+                    key=lambda u: u["nome"].lower())
+    return render_template("calendario.html", title="Calendario", active_page="calendario",
+                           collegato=integrazioni_google.calendar_collegato(), clienti=clienti, utenti=utenti,
+                           preventivi=preventivi[:3000],
+                           io=session.get("user_id"),
+                           precompila={k: request.args.get(k, "") for k in ("cliente", "cliente_id", "preventivo", "task")})
+
+
+@app.route("/api/calendario/eventi", methods=["GET"])
+@login_required
+def api_calendario_eventi():
+    try:
+        dal = datetime.date.fromisoformat(request.args.get("dal") or datetime.date.today().isoformat())
+        al = datetime.date.fromisoformat(request.args.get("al") or (dal + datetime.timedelta(days=30)).isoformat())
+    except ValueError:
+        return jsonify({"ok": False, "error": "Date non valide."}), 400
+    if (al - dal).days > 370 or al < dal:
+        return jsonify({"ok": False, "error": "Intervallo di date non valido."}), 400
+    try:
+        eventi = integrazioni_google.eventi(dal, al)
+        pronti = ceerlo.riassunti()
+        utenti = {u["username"]: u for u in load_users()}
+        for e in eventi:
+            e["riassunto"] = (pronti.get(e["id"]) or {}).get("testo", "")
+            _con_nomi_assegnati(e, utenti)
+        return jsonify({"ok": True, "eventi": eventi, "ceerlo": ceerlo.attivo()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/calendario/eventi", methods=["POST"])
+@login_required
+def api_calendario_crea():
+    d = request.get_json(silent=True) or {}
+    titolo = (d.get("titolo") or "").strip()
+    if not titolo:
+        return jsonify({"ok": False, "error": "Scrivi il titolo dell'appuntamento."}), 400
+    try:
+        datetime.date.fromisoformat(d.get("giorno") or "")
+        if d.get("ora"):
+            datetime.time.fromisoformat(d["ora"])
+        durata = int(d.get("durata") or 60)
+    except ValueError:
+        return jsonify({"ok": False, "error": "Data, ora o durata non valide."}), 400
+    collegamenti = {k: (d.get(k) or "").strip()[:200] for k in ("cliente", "cliente_id", "preventivo", "task")}
+    assegnati = _assegnati_validi(d.get("assegnati"))
+    try:
+        ev = integrazioni_google.crea_evento(titolo[:200], d["giorno"], d.get("ora") or "", durata,
+                                             (d.get("descrizione") or "")[:4000], (d.get("luogo") or "")[:300],
+                                             collegamenti, creato_da=session.get("user_name") or session["user_id"],
+                                             assegnati=assegnati, nomi_assegnati=_nomi_utenti(assegnati))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    _EVENTI_CACHE["quando"] = 0
+    _avvisa_assegnati(ev, assegnati)
+    return jsonify({"ok": True, "evento": _con_nomi_assegnati(ev)})
+
+
+@app.route("/api/calendario/eventi/<evento_id>/assegna", methods=["POST"])
+@login_required
+def api_calendario_assegna(evento_id):
+    """Cambia a chi e' assegnato un appuntamento; avvisa solo chi viene aggiunto."""
+    assegnati = _assegnati_validi((request.get_json(silent=True) or {}).get("assegnati"))
+    try:
+        prima, ev = integrazioni_google.assegna_evento(evento_id, assegnati, _nomi_utenti(assegnati))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    _EVENTI_CACHE["quando"] = 0
+    _avvisa_assegnati(ev, [u for u in assegnati if u not in prima])
+    return jsonify({"ok": True, "evento": _con_nomi_assegnati(ev)})
+
+
+def _data_ordinabile(testo):
+    """'31/10/2026' o '2026-10-31' -> '2026-10-31' per ordinare; vuoto se non si capisce."""
+    testo = (testo or "").strip()[:10]
+    m = re.match(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$", testo)
+    if m:
+        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    return testo if re.match(r"\d{4}-\d{2}-\d{2}$", testo) else ""
+
+
+# --- Incassi programmati (dai pagamenti dei preventivi) e promemoria, mostrati nel calendario ---
+
+STATI_CON_INCASSI = ("Confermato", "In Lavorazione", "Chiuso")
+
+
+def incassi_programmati(dal, al):
+    """Pagamenti programmati (non ancora incassati) con data tra dal e al (stringhe YYYY-MM-DD)."""
+    db = _DBSession()
+    try:
+        righe = db.query(_Preventivo.numero, _Preventivo.cliente, _Preventivo.rag_sociale, _Preventivo.id_cliente,
+                         _Preventivo.stato, _Preventivo.pagamenti).filter(_Preventivo.stato.in_(STATI_CON_INCASSI)).all()
+    finally:
+        db.close()
+    oggi = datetime.date.today().isoformat()
+    incassi = []
+    for r in righe:
+        for pag in r.pagamenti or []:
+            data = str(pag.get("data") or "")[:10]
+            if not pag.get("is_scheduled") or not (dal <= data <= al):
+                continue
+            incassi.append({"id": pag.get("id") or "", "data": data, "importo": _to_float(pag.get("importo")),
+                            "note": pag.get("note") or "", "preventivo": r.numero, "cliente": r.cliente or r.rag_sociale or "",
+                            "cliente_id": r.id_cliente or "", "scaduto": data < oggi})
+    return sorted(incassi, key=lambda x: (x["data"], x["preventivo"]))
+
+
+def _promemoria_come_task(p):
+    """Un promemoria ha le stesse regole di visibilita' e di avviso delle task."""
+    return {"tipo": "utente" if p.get("assegnati") else "personale", "created_by": p.get("autore"),
+            "assigned_to": p.get("assegnati") or []}
+
+
+def promemoria_visibile(p, me, ruolo):
+    return task_visibile(_promemoria_come_task(p), me, ruolo)
+
+
+def errore_data_promemoria(data, ora=""):
+    try:
+        giorno = datetime.date.fromisoformat(data or "")
+        if ora:
+            datetime.time.fromisoformat(ora)
+    except ValueError:
+        return "Scegli il giorno (e l'ora, se serve) del promemoria."
+    if giorno < datetime.date.today():
+        return "Il promemoria non puo' essere nel passato."
+    return None
+
+
+def crea_promemoria(me, nome, testo, data, ora="", assegnati=None, cliente_id="", preventivo="", report_id=""):
+    """Crea un promemoria e avvisa subito i colleghi a cui e' rivolto. Restituisce (id, None) o (None, errore).
+    assegnati: ["@utente", "@gruppo"]; si aggiungono anche i @colleghi e @gruppi scritti nel testo."""
+    testo = (testo or "").strip()
+    if not testo:
+        return None, "Scrivi il testo del promemoria."
+    err = errore_data_promemoria(data, ora)
+    if err:
+        return None, err
+    all_users = load_users()
+    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+    tipo, dal_testo, _ = assegnazione_da_menzioni(testo, me, all_users, ruoli)
+    tutti = [a for a in (assegnati or []) if a != f"@{me}"]
+    if tipo != "personale":
+        tutti += [a for a in dal_testo if a not in tutti]
+    pid = "PRM-" + uuid.uuid4().hex[:8].upper()
+    db = _DBSession()
+    try:
+        db.add(_Promemoria(id=pid, testo=testo[:2000], data=data, ora=ora or "", autore=me, autore_nome=nome,
+                           assegnati=tutti[:10], cliente_id=cliente_id or "", preventivo=preventivo or "",
+                           report_id=report_id or "", creato_il=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                           fatto=False, avvisato=""))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[crea_promemoria] Errore: {e}")
+        return None, "Errore nel salvataggio del promemoria."
+    finally:
+        db.close()
+    quando = datetime.date.fromisoformat(data).strftime("%d/%m") + (f" alle {ora}" if ora else "")
+    for u in destinatari_task(_promemoria_come_task({"autore": me, "assegnati": tutti}), all_users) - {me}:
+        add_notification(u, f"🔔 {nome} ti ha lasciato un promemoria per il {quando}: {testo[:80]}",
+                         link=f"/calendario?giorno={data}", tipo="task")
+    return pid, None
+
+
+_ultimo_controllo_promemoria = 0.0
+
+
+def controlla_promemoria():
+    """Al giorno (e all'ora) del promemoria avvisa autore e destinatari, una volta sola. Al massimo ogni minuto."""
+    global _ultimo_controllo_promemoria
+    if time.time() - _ultimo_controllo_promemoria < 60:
+        return
+    _ultimo_controllo_promemoria = time.time()
+    adesso = datetime.datetime.now()
+    oggi, ora = adesso.strftime("%Y-%m-%d"), adesso.strftime("%H:%M")
+    db = _DBSession()
+    try:
+        dovuti = [p for p in db.query(_Promemoria).filter(_Promemoria.fatto == False, _Promemoria.data <= oggi).all()  # noqa: E712
+                  if (p.data < oggi or not p.ora or p.ora <= ora) and (p.avvisato or "") != f"{p.data} {p.ora}"]
+        if not dovuti:
+            return
+        all_users = load_users()
+        for p in dovuti:
+            for u in destinatari_task(_promemoria_come_task(p.to_dict()), all_users):
+                add_notification(u, f"🔔 Promemoria: {(p.testo or '')[:100]}", link=f"/calendario?giorno={p.data}", tipo="scadenza")
+            p.avvisato = f"{p.data} {p.ora}"
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[controlla_promemoria] Errore: {e}")
+    finally:
+        db.close()
+
+
+@app.route("/api/calendario/voci")
+@login_required
+def api_calendario_voci():
+    """Voci del gestionale da mettere nel calendario: incassi programmati e promemoria visibili all'utente."""
+    dal, al = request.args.get("dal") or "", request.args.get("al") or ""
+    try:
+        datetime.date.fromisoformat(dal); datetime.date.fromisoformat(al)
+    except ValueError:
+        return jsonify({"ok": False, "error": "Date non valide."}), 400
+    me, ruolo = session["user_id"], session.get("user_role")
+    utenti = {u["username"]: u for u in load_users()}
+    db = _DBSession()
+    try:
+        prom = [p.to_dict() for p in db.query(_Promemoria).filter(_Promemoria.data >= dal, _Promemoria.data <= al).all()]
+    finally:
+        db.close()
+    prom = [p for p in prom if promemoria_visibile(p, me, ruolo)]
+    for p in prom:
+        p["per"] = [(utenti.get(a.lstrip("@")) or {}).get("full_name") or a.lstrip("@") for a in p["assegnati"]]
+        p["mio"] = p["autore"] == me
+    return jsonify({"ok": True, "incassi": incassi_programmati(dal, al),
+                    "promemoria": sorted(prom, key=lambda p: (p["data"], p["ora"] or "99"))})
+
+
+@app.route("/api/promemoria", methods=["POST"])
+@login_required
+def api_promemoria_crea():
+    d = request.get_json(silent=True) or {}
+    assegnati = [f"@{u}" for u in _assegnati_validi(d.get("assegnati"))]
+    pid, err = crea_promemoria(session["user_id"], session.get("user_name") or session["user_id"], d.get("testo"),
+                               (d.get("data") or "").strip(), (d.get("ora") or "").strip(), assegnati,
+                               str(d.get("cliente_id") or "")[:50], str(d.get("preventivo") or "")[:50])
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    return jsonify({"ok": True, "id": pid})
+
+
+@app.route("/api/promemoria/<pid>", methods=["POST", "DELETE"])
+@login_required
+def api_promemoria_modifica(pid):
+    """POST {fatto: true/false}: lo segna fatto (autore o destinatari). DELETE: lo toglie (autore o amministratore)."""
+    me, ruolo = session["user_id"], session.get("user_role")
+    db = _DBSession()
+    try:
+        p = db.query(_Promemoria).filter_by(id=pid).first()
+        if not p or not promemoria_visibile(p.to_dict(), me, ruolo):
+            return jsonify({"ok": False, "error": "Promemoria non trovato."}), 404
+        if request.method == "DELETE":
+            if p.autore != me and ruolo != "amministratore":
+                return jsonify({"ok": False, "error": "Puo' eliminarlo solo chi l'ha scritto."}), 403
+            db.delete(p)
+        else:
+            if me not in destinatari_task(_promemoria_come_task(p.to_dict()), load_users()) and ruolo != "amministratore":
+                return jsonify({"ok": False, "error": "Non e' un tuo promemoria."}), 403
+            p.fatto = bool((request.get_json(silent=True) or {}).get("fatto"))
+        db.commit()
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+def _assegnati_validi(valore):
+    """Username esistenti, senza doppioni, nell'ordine dato (accetta lista o testo separato da virgole)."""
+    if isinstance(valore, str):
+        valore = valore.split(",")
+    esistenti = {u["username"] for u in load_users()}
+    visti = []
+    for u in valore or []:
+        u = str(u).strip().lstrip("@")
+        if u in esistenti and u not in visti:
+            visti.append(u)
+    return visti[:10]
+
+
+def _nomi_utenti(usernames):
+    utenti = {u["username"]: u for u in load_users()}
+    return [(utenti.get(u) or {}).get("full_name") or u for u in usernames]
+
+
+def _con_nomi_assegnati(ev, utenti=None):
+    utenti = utenti if utenti is not None else {u["username"]: u for u in load_users()}
+    ev["assegnati_info"] = [{"username": u, "nome": (utenti.get(u) or {}).get("full_name") or u,
+                             "sigla": (utenti.get(u) or {}).get("sigla") or u[:2].upper()} for u in ev.get("assegnati") or []]
+    return ev
+
+
+def _quando_evento(ev):
+    try:
+        if ev.get("tutto_il_giorno") or len(ev.get("inizio", "")) < 16:
+            return datetime.date.fromisoformat(ev["inizio"][:10]).strftime("%d/%m")
+        return datetime.datetime.fromisoformat(ev["inizio"][:16]).strftime("%d/%m alle %H:%M")
+    except (KeyError, ValueError):
+        return ev.get("inizio", "")
+
+
+def _avvisa_assegnati(ev, usernames):
+    """Notifica nel gestionale ai colleghi assegnati (non a chi sta facendo l'assegnazione)."""
+    chi = session.get("user_name") or session.get("user_id") or ""
+    for u in usernames:
+        if u == session.get("user_id"):
+            continue
+        try:
+            add_notification(u, f"{chi} ti ha assegnato l'appuntamento \"{ev['titolo']}\" del {_quando_evento(ev)}",
+                             link="/calendario", tipo="task")
+        except Exception as e:
+            print(f"[calendario] Notifica non inviata a {u}: {e}")
+
+
+def _riassunto_pronto(ev, testo):
+    """Dopo un riassunto automatico di Ceerlo: avvisa i colleghi assegnati all'appuntamento."""
+    for u in ev.get("assegnati") or []:
+        try:
+            add_notification(u, f"Ceerlo ha preparato il riassunto per \"{ev['titolo']}\" del {_quando_evento(ev)}",
+                             link="/calendario", tipo="info")
+        except Exception as e:
+            print(f"[ceerlo] Notifica riassunto non inviata a {u}: {e}")
+
+
+# --- Ceerlo, l'assistente AI (logica e coda in ceerlo.py; il modello gira con Ollama su un altro PC via Tailscale) ---
+
+@app.context_processor
+def inject_ceerlo():
+    if "user_id" not in session:
+        return {}
+    try:
+        cartella = Path(app.static_folder) / "ceerlo"
+        avatar = next((n for n in ("avatar.gif", "avatar.webp", "avatar.png") if (cartella / n).exists()), "")
+        return dict(ceerlo_attivo=ceerlo.attivo(), ceerlo_avatar=avatar)
+    except Exception:
+        return {}
+
+
+_EVENTI_CACHE = {"quando": 0, "dati": []}
+
+
+def eventi_vicini():
+    """Appuntamenti da 7 giorni fa ai prossimi 30, tenuti 5 minuti per non chiamare Google a ogni domanda."""
+    if time.time() - _EVENTI_CACHE["quando"] > 300:
+        oggi = datetime.date.today()
+        _EVENTI_CACHE["dati"] = integrazioni_google.eventi(oggi - datetime.timedelta(days=7), oggi + datetime.timedelta(days=30))
+        _EVENTI_CACHE["quando"] = time.time()
+    return _EVENTI_CACHE["dati"]
+
+
+def prossimi_eventi(ore):
+    if not integrazioni_google.calendar_collegato():
+        return []
+    adesso = datetime.datetime.now()
+    limite = (adesso + datetime.timedelta(hours=ore)).strftime("%Y-%m-%dT%H:%M")
+    da = adesso.strftime("%Y-%m-%d")  # da inizio giornata: anche gli appuntamenti di oggi gia' iniziati
+    return [e for e in eventi_vicini() if da <= e["inizio"][:16] <= limite]
+
+
+def _euro(x):
+    return f"{_to_float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " EUR"
+
+
+def _riga_soldi(numero):
+    """Per Ceerlo dentro il gestionale: totale, incassato, da saldare e pagamenti programmati di un preventivo."""
+    p = load_quote(numero) or {}
+    if not p:
+        return ""
+    pag = p.get("pagamenti") or []
+    incassato = sum(_to_float(x.get("importo")) for x in pag if not x.get("is_scheduled"))
+    programmati = [x for x in pag if x.get("is_scheduled")]
+    pezzi = [f"totale {_euro(p.get('totale'))}", f"incassato {_euro(incassato)}"]
+    if p.get("stato") in STATI_CON_INCASSI:
+        residuo = _residuo_da_saldare(p)
+        pezzi.append("SALDATO" if residuo <= 0.01 else f"da saldare {_euro(residuo)}")
+    if programmati:
+        pezzi.append("incassi programmati: " + ", ".join(
+            f"{_euro(x.get('importo'))} il {str(x.get('data') or '?')[:10]}" for x in programmati[:5]))
+    return ", ".join(pezzi)
+
+
+def _contesto_cliente(client_id="", nome="", importi=False, profondo=False):
+    """Dati del cliente per Ceerlo: anagrafica, note interne, preventivi (con importi e saldi solo in chat), report che lo citano.
+    profondo=True (\"controlla piu' a fondo\") allarga note, preventivi e report."""
+    db = _DBSession()
+    try:
+        cli = db.query(_Cliente).filter_by(id_cliente=client_id).first() if client_id else None
+        if not cli and nome:
+            cli = db.query(_Cliente).filter(_Cliente.cliente.ilike(nome.strip())).first()
+        if not cli:
+            return f"Cliente: {nome} (non trovato in anagrafica)" if nome else ""
+        nome_cli = cli.cliente or cli.rag_sociale or cli.id_cliente
+        righe = [f"Cliente: #{cli.id_cliente}[{nome_cli}]" + (f" ({cli.rag_sociale})" if cli.rag_sociale and cli.rag_sociale != nome_cli else ""),
+                 f"Zona: {' '.join(x for x in (cli.indirizzo, cli.comune, cli.provincia) if x)}".rstrip()]
+        if importi:  # in chat anche i recapiti: Ceerlo li puo' dare senza mandare nella scheda cliente
+            recapiti = ", ".join(f"{k} {v}" for k, v in (("tel.", getattr(cli, "telefono", "")), ("email", getattr(cli, "email", "")),
+                                                         ("P.IVA", getattr(cli, "p_iva", ""))) if v)
+            if recapiti:
+                righe.append("Recapiti: " + recapiti)
+        if (cli.note_interne or "").strip():
+            righe.append("Note interne: " + cli.note_interne.strip()[:6000 if profondo else 2500])
+        prev = db.query(_Preventivo).filter_by(id_cliente=cli.id_cliente).order_by(_Preventivo.data.desc()).limit(
+            40 if profondo else 10).all()
+        if prev:
+            if importi:
+                righe.append("Preventivi (piu' recenti prima):")
+                for p in prev:
+                    soldi = _riga_soldi(p.numero)
+                    righe.append(f"- #{p.numero} del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})"
+                                 + (f": {soldi}" if soldi else ""))
+            else:
+                righe.append("Preventivi (piu' recenti prima): " + "; ".join(
+                    f"#{p.numero} del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'})" for p in prev))
+        reports = db.query(_Report).filter(_Report.stato != "bozza", _Report.testo.ilike(f"%{nome_cli}%")).order_by(
+            _Report.creato_il.desc()).limit(15 if profondo else 5).all()
+        for r in reports:
+            righe.append(f"Report di {r.autore_nome} del {(r.creato_il or '')[:10]}: {(r.testo or '')[:1000 if profondo else 400]}")
+        return "\n".join(righe)
+    finally:
+        db.close()
+
+
+def contesto_ceerlo(pagina="", client_id="", quote_id="", con_appuntamenti=True, importi=False, profondo=False):
+    parti = []
+    if pagina:
+        parti.append(f"L'utente e' nella pagina {pagina} del gestionale.")
+    if quote_id:
+        db = _DBSession()
+        try:
+            p = db.query(_Preventivo).filter_by(numero=quote_id).first()
+            if p:
+                soldi = _riga_soldi(p.numero) if importi else ""
+                parti.append(f"Preventivo: #{p.numero} del {p.data}, cliente {p.cliente or '?'}, stato {p.stato}, "
+                             f"venditore {p.venditore}" + (f", {soldi}" if soldi else "") + ".")
+                client_id = client_id or p.id_cliente or ""
+        finally:
+            db.close()
+    if client_id:
+        parti.append(_contesto_cliente(client_id, importi=importi, profondo=profondo))
+    try:
+        oggi = datetime.date.today().isoformat()
+        domani = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        vicini = [e for e in eventi_vicini() if e["inizio"][:10] in (oggi, domani)] \
+            if con_appuntamenti and integrazioni_google.calendar_collegato() else []
+        if vicini:
+            parti.append("Appuntamenti di oggi e domani:\n" + "\n".join(
+                _riga_evento(e) for e in vicini))
+    except Exception as e:
+        print(f"[ceerlo] Calendario non letto: {e}")
+    return "\n\n".join(x for x in parti if x)
+
+
+def _contesto_utente(username):
+    """Per una @menzione: chi e', le sue task aperte visibili a chi chiede e i suoi ultimi report."""
+    u = next((x for x in load_users() if x["username"].lower() == username.lower()), None)
+    if not u:
+        return ""
+    righe = [f"Collega @{u['username']}: {u.get('full_name') or u['username']}, ruolo {u.get('role')}."]
+    try:
+        aperte = [t for t in load_tasks() if t.get("status") not in ("resolved", "failed")
+                  and task_visibile(t, session["user_id"], session["user_role"])
+                  and (u["username"] in [a.replace("@", "") for a in (t.get("assigned_to") or [])] or t.get("created_by") == u["username"])]
+        for t in aperte[:10]:
+            righe.append(f"- Task #{t['id']} ({t.get('status')}, scadenza {t.get('etc') or '-'}): {(t.get('description') or '')[:200]}")
+    except Exception as e:
+        print(f"[ceerlo] Task non lette: {e}")
+    try:
+        if integrazioni_google.calendar_collegato():
+            oggi = datetime.date.today().isoformat()
+            suoi = [e for e in eventi_vicini() if e["inizio"][:10] >= oggi and u["username"] in (e.get("assegnati") or [])]
+            if suoi:
+                righe.append("Appuntamenti assegnati:\n" + "\n".join(_riga_evento(e) for e in suoi[:10]))
+    except Exception as e:
+        print(f"[ceerlo] Calendario non letto: {e}")
+    db = _DBSession()
+    try:
+        for r in db.query(_Report).filter(_Report.autore == u["username"], _Report.stato != "bozza").order_by(
+                _Report.creato_il.desc()).limit(2).all():
+            righe.append(f"Report del {(r.creato_il or '')[:16]}: {(r.testo or '')[:600]}")
+    finally:
+        db.close()
+    return "\n".join(righe)
+
+
+def _esiste_cliente(ident):
+    db = _DBSession()
+    try:
+        return db.query(_Cliente.id_cliente).filter_by(id_cliente=ident).first() is not None
+    finally:
+        db.close()
+
+
+def contesto_tag(testo, profondo=False):
+    """Dati dei #clienti, #preventivi e @colleghi citati nella domanda (stessi codici delle altre chat: #ID[nome], @utente)."""
+    parti, visti = [], set()
+    for ident in re.findall(r"(?:^|\s)#([A-Z0-9-]+)", testo or ""):
+        if ident in visti or len(visti) >= 5:
+            continue
+        visti.add(ident)
+        if ident.startswith("CLT-") or _esiste_cliente(ident):
+            parti.append(_contesto_cliente(ident, importi=True, profondo=profondo))
+        else:
+            parti.append(contesto_ceerlo(quote_id=ident, con_appuntamenti=False, importi=True, profondo=profondo))
+    for nome in re.findall(r"@(\w+)", testo or ""):
+        if nome.lower() in visti or len(visti) >= 8:
+            continue
+        visti.add(nome.lower())
+        parti.append(_contesto_utente(nome))
+    return "\n\n".join(p for p in parti if p)
+
+
+def _riga_report(r):
+    return f"- {r.get('autore_nome') or r.get('autore')} ({(r.get('creato_il') or '')[:16]}): {(r.get('testo') or '').strip()[:700]}"
+
+
+def _riga_task(t):
+    assegnati = ", ".join(t.get("assigned_to") or []) or "-"
+    return (f"- Task #{t['id']} di {t.get('created_by_name') or t.get('created_by')} per {assegnati}, "
+            f"stato {t.get('status')}, scadenza {t.get('etc') or '-'}: {(t.get('description') or '')[:200]}")
+
+
+_PAROLE_SOLDI = ("sald", "pagament", "pagat", "incass", "soldi", "debit", "credit", "acconto", "acconti", "rata", "rate",
+                 "import", "fattur", "euro", "quanto")
+
+
+def _contesto_saldi(limite):
+    """Preventivi confermati non ancora saldati (dal residuo piu' alto) e incassi programmati dei prossimi 30 giorni."""
+    righe = []
+    aperti = []
+    for q in get_all_quotes():
+        if q.get("stato") not in STATI_CON_INCASSI:
+            continue
+        p = load_quote(q["numero"]) or {}
+        residuo = _residuo_da_saldare(p) if p else 0
+        if residuo > 0.01:
+            aperti.append((residuo, p))
+    aperti.sort(key=lambda x: -x[0])
+    if aperti:
+        righe.append(f"Preventivi da saldare ({len(aperti)}, dal residuo piu' alto; totale da incassare "
+                     f"{_euro(sum(r for r, _ in aperti))}):")
+        for residuo, p in aperti[:limite]:
+            righe.append(f"- #{p.get('numero')}[{p.get('cliente') or p.get('rag_sociale') or '?'}] stato {p.get('stato')}, "
+                         + _riga_soldi(p.get("numero")))
+    else:
+        righe.append("Nessun preventivo confermato da saldare.")
+    oggi = datetime.date.today()
+    prog = incassi_programmati((oggi - datetime.timedelta(days=60)).isoformat(), (oggi + datetime.timedelta(days=30)).isoformat())
+    if prog:
+        righe.append("Incassi programmati (da 60 giorni fa ai prossimi 30; SCADUTO = data passata e non ancora incassato):")
+        righe += [f"- {x['data']} {_euro(x['importo'])} #{x['preventivo']}[{x['cliente']}]" + (" SCADUTO" if x["scaduto"] else "")
+                  + (f" ({x['note']})" if x["note"] else "") for x in prog[:limite * 2]]
+    return "\n".join(righe)
+
+
+def contesto_generale(domanda, profondo=False):
+    """Quello che Ceerlo sa sempre (ultimo report di ogni collega, le tue task aperte, appuntamenti di oggi),
+    piu' i dati che la domanda tira in ballo: report, task del team, agenda, preventivi, saldi, clienti nominati.
+    profondo=True ("controlla piu' a fondo") prende tutto, con limiti piu' larghi."""
+    q = (domanda or "").lower()
+    me, ruolo = session["user_id"], session.get("user_role")
+    parti = []
+    db = _DBSession()
+    try:
+        giorni = 60 if profondo else (30 if "report" in q else 14)
+        dal = (datetime.date.today() - datetime.timedelta(days=giorni)).isoformat()
+        reports = [r.to_dict() for r in db.query(_Report).filter(_Report.stato != "bozza", _Report.creato_il >= dal)
+                   .order_by(_Report.creato_il.desc()).limit(80 if profondo else 40).all()]
+        if profondo or "report" in q:
+            parti.append(f"Report degli ultimi {giorni} giorni (dal piu' recente):\n"
+                         + "\n".join(_riga_report(r) for r in reports[:50 if profondo else 15]))
+        elif reports:
+            parti.append("Ultimo report di ogni collega:\n" + "\n".join(_riga_report(r) for r in ultimi_report_per_autore(reports)))
+        if profondo or any(k in q for k in ("preventiv", "offert", "ordin")):
+            prev = db.query(_Preventivo).order_by(_Preventivo.data.desc()).limit(40 if profondo else 15).all()
+            parti.append("Ultimi preventivi:\n" + "\n".join(
+                f"- #{p.numero}[{p.cliente or '?'}] del {p.data or '?'} stato {p.stato or '?'} (venditore {p.venditore or '?'}): "
+                + _riga_soldi(p.numero) for p in prev))
+        # clienti nominati per nome nella domanda, anche senza #
+        if len(q) >= 4:
+            trovati = []
+            for c in db.query(_Cliente.id_cliente, _Cliente.cliente, _Cliente.rag_sociale).all():
+                for nome in (c.cliente, c.rag_sociale):
+                    if nome and len(nome) >= 4 and nome.lower() in q:
+                        trovati.append(c.id_cliente)
+                        break
+                if len(trovati) >= (6 if profondo else 3):
+                    break
+            for cid in trovati:
+                parti.append(_contesto_cliente(cid, importi=True, profondo=profondo))
+    finally:
+        db.close()
+    if profondo or any(k in q for k in _PAROLE_SOLDI):
+        try:
+            parti.append(_contesto_saldi(40 if profondo else 15))
+        except Exception as e:
+            print(f"[ceerlo] Saldi non letti: {e}")
+    try:
+        visibili = [t for t in load_tasks() if t.get("status") not in ("resolved", "failed")
+                    and task_visibile(t, me, ruolo)]
+        mie = [t for t in visibili if me in [a.replace("@", "") for a in (t.get("assigned_to") or [])]
+               or t.get("created_by") == me]
+        if mie:
+            parti.append("Le task aperte di chi ti scrive:\n" + "\n".join(_riga_task(t) for t in mie[:30 if profondo else 10]))
+        if profondo or "task" in q or "attivit" in q or "da fare" in q:
+            altre = [t for t in visibili if t not in mie]
+            if altre:
+                parti.append("Altre task aperte del team:\n" + "\n".join(_riga_task(t) for t in altre[:60 if profondo else 20]))
+    except Exception as e:
+        print(f"[ceerlo] Task non lette: {e}")
+    if profondo or any(k in q for k in ("appuntament", "calendari", "agenda", "settimana", "domani", "sopralluog", "impegn")):
+        try:
+            if integrazioni_google.calendar_collegato():
+                oggi = datetime.date.today()
+                da = (oggi - datetime.timedelta(days=7 if profondo else 0)).isoformat()
+                fino = (oggi + datetime.timedelta(days=30 if profondo else 14)).isoformat()
+                prossimi = [e for e in eventi_vicini() if da <= e["inizio"][:10] <= fino]
+                parti.append(f"Appuntamenti dal {da} al {fino}:\n" + ("\n".join(_riga_evento(e) for e in prossimi) or "nessuno"))
+            else:
+                parti.append("Il calendario Google non e' ancora collegato.")
+        except Exception as e:
+            print(f"[ceerlo] Calendario non letto: {e}")
+    return "\n\n".join(x for x in parti if x)
+
+
+def _riga_evento(e):
+    return (f"- {e['inizio'][:16].replace('T', ' ')} {e['titolo']}" + (f" (cliente {e['cliente']})" if e.get("cliente") else "")
+            + (" assegnato a " + ", ".join("@" + u for u in e["assegnati"]) if e.get("assegnati") else ""))
+
+
+def contesto_evento(ev):
+    testo = (f"Appuntamento: {ev['titolo']} il {ev['inizio'][:16].replace('T', ' ')}"
+             + (f" a {ev['luogo']}" if ev.get("luogo") else "")
+             + (" (assegnato a " + ", ".join("@" + u for u in ev["assegnati"]) + ")" if ev.get("assegnati") else "")
+             + (f". Note: {ev['descrizione'][:500]}" if ev.get("descrizione") else ""))
+    return testo + "\n" + _contesto_cliente(ev.get("cliente_id", ""), ev.get("cliente", ""))
+
+
+@app.route("/api/ceerlo/chiedi", methods=["POST"])
+@login_required
+def api_ceerlo_chiedi():
+    if not ceerlo.attivo():
+        return jsonify({"ok": False, "error": "Ceerlo non e' ancora configurato."}), 503
+    d = request.get_json(silent=True) or {}
+    storia = [m for m in (d.get("messaggi") or [])[-10:] if isinstance(m, dict) and str(m.get("testo") or "").strip()]
+    if not storia or storia[-1].get("ruolo") != "utente":
+        return jsonify({"ok": False, "error": "Scrivi una domanda."}), 400
+    domanda = str(storia[-1].get("testo") or "")
+    # "controlla piu' a fondo": dal tasto della chat, o rispondendo si' alla domanda che Ceerlo fa in fondo alla risposta rapida
+    precedente = next((str(m.get("testo") or "") for m in reversed(storia[:-1]) if m.get("ruolo") != "utente"), "")
+    profondo = bool(d.get("approfondito")) or (ceerlo.chiede_approfondimento(precedente) and
+                                               bool(re.match(r"\s*(s[iì]'?|ok|certo|vai|controlla|approfondisci)\b", domanda.lower())))
+    if profondo:
+        # la domanda vera e' quella prima del "si'": e' da li' che si capisce quali dati servono
+        prima = [str(m.get("testo") or "") for m in storia[:-1] if m.get("ruolo") == "utente"]
+        domanda = " ".join(prima[-2:] + [domanda])
+    contesto = contesto_ceerlo(str(d.get("pagina") or "")[:200], str(d.get("cliente_id") or "")[:50],
+                               str(d.get("preventivo") or "")[:50], importi=True, profondo=profondo)
+    contesto += "\n\n" + contesto_generale(domanda, profondo=profondo)
+    citati = contesto_tag(domanda, profondo=profondo)
+    if citati:
+        contesto += "\n\nCITATI NELLA DOMANDA (#cliente o #preventivo, @collega):\n" + citati
+    messaggi = [{"role": "system", "content": ceerlo.prompt_sistema(session.get("user_name"), session.get("user_role"),
+                                                                    contesto, profondo=profondo)}]
+    messaggi += [{"role": "user" if m.get("ruolo") == "utente" else "assistant", "content": str(m["testo"])[:4000]} for m in storia]
+    try:
+        jid = ceerlo.aggiungi(session["user_id"], messaggi, ceerlo.PRIO_CHAT, "chat")
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 429
+    return jsonify({"ok": True, "job": jid, "posizione": ceerlo._CODA.posizione(jid)})
+
+
+@app.route("/ceerlo/vai/<codice>")
+@login_required
+def ceerlo_vai(codice):
+    """Link dei #codici nelle risposte di Ceerlo: apre il cliente o il preventivo giusto (anche edile),
+    tollerando prefissi aggiunti dal modello come PREV- o CLIENTE-."""
+    codice = codice.strip().strip("#").upper()
+    candidati = [codice] + [codice[len(pre):] for pre in ("PREV-", "PREVENTIVO-", "CLIENTE-") if codice.startswith(pre)]
+    db = _DBSession()
+    try:
+        for c in candidati:
+            if db.query(_Cliente).filter_by(id_cliente=c).first():
+                return redirect(url_for("dettaglio_cliente", client_id=c))
+            if db.query(_Preventivo).filter_by(numero=c).first():
+                p = load_quote(c) or {}
+                return redirect(url_for("editor_preventivo_edile" if p.get("tipo_preventivo") == "edile" else "editor_preventivo",
+                                        quote_id=c))
+    finally:
+        db.close()
+    flash(f"Ceerlo ha citato {codice}, ma non esiste ne' come cliente ne' come preventivo.", "error")
+    return redirect(request.referrer or url_for("dashboard"))
+
+
+@app.route("/api/ceerlo/job/<jid>")
+@login_required
+def api_ceerlo_job(jid):
+    stato = ceerlo.stato_job(jid, None if session.get("user_role") == "amministratore" else session["user_id"])
+    if not stato:
+        return jsonify({"ok": False, "error": "Richiesta non trovata o scaduta."}), 404
+    return jsonify({"ok": True, **stato})
+
+
+@app.route("/api/ceerlo/riassunto", methods=["POST"])
+@login_required
+def api_ceerlo_riassunto():
+    """Riassunto di un appuntamento chiesto a mano (anche se ce n'e' gia' uno: lo rifa')."""
+    if not ceerlo.attivo():
+        return jsonify({"ok": False, "error": "Ceerlo non e' ancora configurato."}), 503
+    eid = (request.get_json(silent=True) or {}).get("evento_id", "")
+    try:
+        _EVENTI_CACHE["quando"] = 0
+        ev = next((e for e in eventi_vicini() if e["id"] == eid), None)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    if not ev:
+        return jsonify({"ok": False, "error": "Appuntamento non trovato (si possono riassumere quelli dei prossimi 30 giorni)."}), 404
+    jid = ceerlo.chiedi_riassunto(ev, contesto_evento(ev), utente=session["user_id"])
+    return jsonify({"ok": True, "job": jid, "posizione": ceerlo._CODA.posizione(jid)})
+
+
+def _testo_indirizzo(a):
+    luogo = " ".join(x for x in (a.get("cap"), a.get("comune"), f"({a['provincia']})" if a.get("provincia") else "") if x)
+    testo = ", ".join(x for x in ((a.get("indirizzo") or "").strip(), luogo) if x)
+    return f"{a['descrizione']}: {testo}" if a.get("descrizione") and testo else (testo or a.get("descrizione") or "")
+
+
+@app.route("/api/ceerlo/note-cliente/<client_id>")
+@login_required
+def api_ceerlo_note_cliente(client_id):
+    """Riassunto delle note interne del cliente per il fumetto di Ceerlo.
+    ?per=preventivo (chi fa il preventivo) oppure ?per=consegna (quando serve il materiale, fretta, dove consegnare;
+    in piu' gli indirizzi di cantiere salvati sul cliente).
+    stato: 'nessuna' (niente da dire), 'pronto' (testo e/o cantieri), 'in_coda' (con job: Ceerlo lo sta scrivendo)."""
+    if not ceerlo.attivo():
+        return jsonify({"ok": False, "error": "Ceerlo non e' attivo."}), 503
+    scopo = "consegna" if request.args.get("per") == "consegna" else "preventivo"
+    db = _DBSession()
+    try:
+        cli = db.query(_Cliente).filter_by(id_cliente=client_id).first()
+        if not cli:
+            return jsonify({"ok": False, "error": "Cliente non trovato"}), 404
+        voci = voci_note_cliente(cli)
+        nome = cli.cliente or cli.rag_sociale or client_id
+    finally:
+        db.close()
+    cantieri = []
+    if scopo == "consegna":
+        cantieri = [t for t in (_testo_indirizzo(a) for a in (load_client(client_id) or {}).get("indirizzi_cantiere") or []) if t]
+    base = {"ok": True, "cliente": nome, "voci": len(voci), "cantieri": cantieri, "per": scopo}
+    if not voci:
+        return jsonify(dict(base, stato="pronto" if cantieri else "nessuna", testo="",
+                            impronta=hashlib.sha1("|".join(cantieri).encode("utf-8")).hexdigest()[:16]))
+    note = "\n".join(f"- {v['testo']}" + (f" ({v['autore_nome']}, {v['quando'][:10]})" if v.get("autore_nome") else "")
+                     for v in voci)
+    impronta = hashlib.sha1((note + "|" + "|".join(cantieri)).encode("utf-8")).hexdigest()[:16]
+    pronto = ceerlo.riassunto_note(client_id, impronta, scopo)
+    if pronto:
+        niente = pronto.strip().strip(".").upper() == ceerlo.NIENTE_DA_SEGNALARE
+        testo = "" if niente else pronto
+        return jsonify(dict(base, stato="pronto" if (testo or cantieri) else "nessuna", testo=testo, impronta=impronta))
+    try:
+        jid = ceerlo.chiedi_riassunto_note(client_id, nome, note, impronta, session["user_id"], scopo)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    return jsonify(dict(base, stato="in_coda", job=jid, impronta=impronta))
+
+
+@app.route("/api/ceerlo/riassunti")
+@login_required
+def api_ceerlo_riassunti():
+    """Riassunti pronti degli appuntamenti da oggi in poi, per il fumetto di Ceerlo."""
+    oggi = datetime.date.today().isoformat()
+    pronti = [{"evento_id": k, **v} for k, v in ceerlo.riassunti().items() if (v.get("inizio") or "") >= oggi]
+    return jsonify({"ok": True, "riassunti": sorted(pronti, key=lambda r: r["inizio"]), "coda": ceerlo.riepilogo_coda()})
+
+
+@app.route("/impostazioni/ceerlo", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_ceerlo():
+    f = request.form
+    valori = {"attivo": bool(f.get("attivo")), "riassunti_auto": bool(f.get("riassunti_auto")),
+              "url": (f.get("url") or "").strip().rstrip("/"), "modello": (f.get("modello") or "").strip()}
+    for k, minimo, massimo in (("contemporanee", 1, 4), ("ore_anticipo", 1, 168), ("num_ctx", 2048, 131072), ("timeout", 30, 1800)):
+        try:
+            valori[k] = max(minimo, min(massimo, int(f.get(k))))
+        except (TypeError, ValueError):
+            pass
+    valori["url"] = ceerlo.normalizza_url(valori["url"])
+    ceerlo.salva_config(valori)
+    flash("Impostazioni di Ceerlo salvate.", "success")
+    return redirect(url_for("impostazioni_google") + "#ceerlo")
+
+
+@app.route("/impostazioni/ceerlo/prova", methods=["POST"])
+@login_required
+@role_required("amministratore")
+def impostazioni_ceerlo_prova():
+    try:
+        # prova l'indirizzo scritto nel campo, anche se non ancora salvato
+        return jsonify({"ok": True, "modelli": ceerlo.modelli_disponibili(request.form.get("url"))})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Ollama non raggiungibile: {e}"}), 502
+
+
+@app.route("/api/tasks/update", methods=["POST"])
+@login_required
+def api_update_task():
+    data = request.json
+    task_id, new_status, comment_text = data.get("id"), data.get("status"), data.get("comment", "").strip()
+    status_change = data.get("status_change")
+    
+    # --- File: gestionale.py (Intorno alla riga 1554) ---
+    tasks = load_tasks()
+    notification_sent = False # <--- Flag per evitare notifiche doppie
+    notified_assigned = set()  # chi ha gia' avuto l'avviso del cambio stato
+    for t in tasks:
+        if t["id"] == task_id:
+            if not task_visibile(t, session["user_id"], session["user_role"]):
+                return jsonify({"error": "Task non trovata."}), 404
+            t["status"] = new_status
+            if new_status in ['resolved', 'failed'] and status_change:
+                t["concluded_at"] = datetime.datetime.now().strftime("%Y-%m-%d")
+
+            # --- NOTIFICHE SPECIFICHE CAMBIO STATO ---
+            if status_change:
+                all_users = load_users()
+                user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+                mittente = session["user_name"]
+                
+                if status_change == 'support':
+                    for u in all_users:
+                        if u['role'] in ['amministratore', 'ceo'] or u['username'] == t.get('created_by'):
+                            if u['username'] != session['user_id']:
+                                add_notification(u['username'], f"⚠️ {mittente} chiede supporto per {nome_task(t)}", link=f"/tasks#{task_id}", tipo="supporto")
+                                notification_sent = True
+
+                if status_change in ['resolved', 'failed']:
+                    notified_assigned = {session['user_id']}
+                    assigned_list = t.get("assigned_to", [])
+                    label = "COMPLETATA" if status_change == 'resolved' else "FALLITA"
+                    emoji = "✅" if status_change == 'resolved' else "❌"
+                    
+                    ruoli = {(u.get("role") or "").lower() for u in all_users if u.get("role")}
+                    for target in assigned_list:
+                        m_lower = target.replace("@", "").lower()
+                        if _e_gruppo(m_lower, ruoli):
+                            for u_real_id in utenti_del_gruppo(m_lower, all_users):
+                                if u_real_id not in notified_assigned:
+                                    add_notification(u_real_id, f"{emoji} Task {label}: {nome_task(t)}", link=f"/tasks#{task_id}", tipo=status_change)
+                                    notified_assigned.add(u_real_id)
+                                    notification_sent = True
+                        elif m_lower in user_resolver:
+                            u_real_id = user_resolver[m_lower]
+                            if u_real_id not in notified_assigned:
+                                add_notification(u_real_id, f"{emoji} Task {label}: {nome_task(t)}", link=f"/tasks#{task_id}", tipo=status_change)
+                                notified_assigned.add(u_real_id)
+                                notification_sent = True
+            
+            if comment_text:
+                if "comments" not in t: t["comments"] = []
+                t["comments"].append(nuovo_commento(comment_text, status_change))
+                
+                all_users = load_users()
+                user_resolver = {u['username'].lower(): u['username'] for u in all_users}
+                notified = {session["user_id"]} | notified_assigned
+                # Invia notifica commento all'autore solo se non è già stato notificato un cambio stato
+                if not notification_sent and t.get("created_by") and t["created_by"] not in notified:
+                    add_notification(t["created_by"], f"{session['user_name']} ha commentato {nome_task(t)}", link=f"/tasks#{task_id}", tipo="commento")
+                    notified.add(t["created_by"])
+                # Chi viene taggato entra nella task (la vede e riceve gli avvisi) e viene avvisato
+                # anche se il commento accompagna un cambio di stato. Nelle personali niente: restano private.
+                _, gruppi_nuovi = aggiungi_coinvolti(t, comment_text, session["user_id"], all_users)
+                c_mentions = re.findall(r"@(\w+)", comment_text) if t.get("tipo") != "personale" else []
+                for cm_lower in set(m.lower() for m in c_mentions):
+                    if cm_lower in user_resolver:
+                        u_real_id = user_resolver[cm_lower]
+                        if u_real_id not in notified:
+                            add_notification(u_real_id, f"{session['user_name']} ti ha menzionato in {nome_task(t)}", link=f"/tasks#{task_id}", tipo="menzione")
+                            notified.add(u_real_id)
+                for g in gruppi_nuovi:
+                    for u_real_id in utenti_del_gruppo(g, all_users):
+                        if u_real_id not in notified:
+                            add_notification(u_real_id, f"{session['user_name']} ha coinvolto @{g} in {nome_task(t)}", link=f"/tasks#{task_id}", tipo="menzione")
+                            notified.add(u_real_id)
+            break
+    save_tasks(tasks)
+    return jsonify({"success": True})
+
+@app.route("/api/tasks/commento", methods=["POST"])
+@login_required
+def api_task_commento():
+    """Modifica (azione "modifica", con il testo nuovo) o elimina (azione "elimina") un commento di una task.
+    Puo' farlo chi l'ha scritto, oppure admin e CEO. Chi viene taggato nel testo nuovo entra nella task come nei commenti."""
+    data = request.json or {}
+    task_id = str(data.get("id") or "")
+    azione = data.get("azione")
+    testo = str(data.get("testo") or "").strip()
+    if azione not in ("modifica", "elimina"):
+        return jsonify({"error": "Azione non valida."}), 400
+    if azione == "modifica" and not testo:
+        return jsonify({"error": "Il commento non puo' essere vuoto: per toglierlo usa Elimina."}), 400
+    me, my_role, mio_nome = session["user_id"], session["user_role"], session["user_name"]
+    all_users = load_users()
+    db = _DBSession()
+    try:
+        t = db.query(_Task).filter_by(id=task_id).first()
+        if not t or not task_visibile(t.to_dict(), me, my_role):
+            return jsonify({"error": "Task non trovata."}), 404
+        commenti = copy.deepcopy(list(t.comments or []))
+        i = trova_commento(commenti, data.get("cid"), data.get("idx"), data.get("testo_orig"))
+        if i is None:
+            return jsonify({"error": "Commento non trovato: forse e' gia' stato cambiato. Ricarica la pagina."}), 404
+        c = commenti[i]
+        if azione == "elimina":
+            if not puo_eliminare_commento(c, me, mio_nome, my_role):
+                return jsonify({"error": "Non puoi eliminare questo commento."}), 403
+            del commenti[i]
+            t.comments = commenti
+            db.commit()
+            return jsonify({"success": True})
+        if not puo_modificare_commento(c, me, mio_nome, my_role):
+            return jsonify({"error": "Non puoi modificare questo commento."}), 403
+        vecchio = c.get("text") or ""
+        if testo == vecchio:
+            return jsonify({"success": True})
+        c["text"] = testo
+        c.setdefault("id", uuid.uuid4().hex[:12])
+        c["modificato"] = datetime.datetime.now().strftime("%d/%m %H:%M")
+        if c.get("user") != mio_nome:
+            c["modificato_da"] = mio_nome
+        else:
+            c.pop("modificato_da", None)
+        t.comments = commenti
+        td = t.to_dict()
+        nuovi_u, nuovi_g = aggiungi_coinvolti(td, testo, me, all_users)
+        if nuovi_u or nuovi_g:
+            t.assigned_to = list(td["assigned_to"])
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[api_task_commento] Errore: {e}")
+        return jsonify({"error": "Errore interno durante il salvataggio."}), 500
+    finally:
+        db.close()
+    # avvisa solo chi e' taggato adesso e non lo era nel testo di prima
+    if td.get("tipo") != "personale":
+        user_resolver = {u["username"].lower(): u["username"] for u in all_users}
+        prima = {m.lower() for m in re.findall(r"@(\w+)", vecchio)}
+        notified = {me}
+        for nome in {m.lower() for m in re.findall(r"@(\w+)", testo)} - prima:
+            if nome in user_resolver and user_resolver[nome] not in notified:
+                add_notification(user_resolver[nome], f"{mio_nome} ti ha menzionato in {nome_task(td)}", link=f"/tasks#{task_id}", tipo="menzione")
+                notified.add(user_resolver[nome])
+        for g in nuovi_g:
+            for u_real_id in utenti_del_gruppo(g, all_users):
+                if u_real_id not in notified:
+                    add_notification(u_real_id, f"{mio_nome} ha coinvolto @{g} in {nome_task(td)}", link=f"/tasks#{task_id}", tipo="menzione")
+                    notified.add(u_real_id)
+    return jsonify({"success": True})
+
+
+def _ordine_notifica(ts, adesso=None):
+    """Le notifiche hanno l'ora come "gg/mm HH:MM" (senza anno): chiave di ordinamento che regge il cambio d'anno."""
+    adesso = adesso or datetime.datetime.now()
+    try:
+        d = datetime.datetime.strptime(f"{adesso.year}/{ts}", "%Y/%d/%m %H:%M")
+    except (ValueError, TypeError):
+        return datetime.datetime.min
+    if d > adesso + datetime.timedelta(days=1):
+        d = d.replace(year=d.year - 1)
+    return d
+
+
+def load_notifications():
+    """Carica le notifiche dal DB SQLite, dalla piu' recente."""
+    db = _DBSession()
+    try:
+        tutte = [n.to_dict() for n in db.query(_Notification).all()]
+        adesso = datetime.datetime.now()
+        return sorted(tutte, key=lambda n: _ordine_notifica(n.get("timestamp"), adesso), reverse=True)
+    except Exception:
+        return []
+    finally:
+        db.close()
+
+def save_notifications(notifs):
+    """Salva le notifiche nel DB (upsert per id)."""
+    db = _DBSession()
+    try:
+        for n in notifs:
+            nid = n.get("id")
+            if not nid:
+                continue
+            existing = db.query(_Notification).filter_by(id=nid).first()
+            if existing:
+                existing.read = n.get("read", existing.read)
+            else:
+                db.add(_Notification(
+                    id=nid,
+                    target_user=n.get("user_id", n.get("target_user", "")),
+                    text=n.get("text", ""),
+                    link=n.get("link", ""),
+                    timestamp=n.get("timestamp", ""),
+                    read=n.get("read", False),
+                    notif_type=n.get("type", "info")
+                ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[save_notifications] Errore: {e}")
+    finally:
+        db.close()
+
+def add_notification(user_id, text, link="/tasks", tipo="info"):
+    """Aggiunge una notifica al DB per un utente specifico.
+    tipo: task, commento, menzione, supporto, resolved, failed, scadenza, versione, info (icona e colore nel pannello)."""
+    db = _DBSession()
+    try:
+        new_id = uuid.uuid4().hex[:6]
+        db.add(_Notification(
+            id=new_id,
+            target_user=user_id,
+            text=_senza_codici(text),  # #CODICE[nome] -> nome: nelle notifiche si leggono i nomi
+            link=link,
+            timestamp=datetime.datetime.now().strftime("%d/%m %H:%M"),
+            read=False,
+            notif_type=tipo or "info"
+        ))
+        db.flush()
+        # Mantieni solo le ultime 100 notifiche per utente
+        adesso = datetime.datetime.now()
+        all_user_notifs = sorted(db.query(_Notification).filter_by(target_user=user_id).all(),
+                                 key=lambda x: _ordine_notifica(x.timestamp, adesso), reverse=True)
+        if len(all_user_notifs) > 100:
+            for old in all_user_notifs[100:]:
+                db.delete(old)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[add_notification] Errore: {e}")
+    finally:
+        db.close()
+
+def verifica_e_annuncia_aggiornamento():
+    """Controlla se la versione attuale è stata già annunciata. Se no, avvisa tutti via Tagbox e Notifica."""
+    ANNOUNCED_FILE = DATA_DIR / "last_announced_version.txt"
+    last_announced = ""
+    
+    if ANNOUNCED_FILE.exists():
+        last_announced = ANNOUNCED_FILE.read_text().strip()
+    
+    if last_announced != APP_VERSION:
+        print(f"INFO: Annuncio nuova versione {APP_VERSION} in corso...")
+        
+        # 1. Post sulla Tagbox a nome ADMIN
+        shouts = load_tagbox()
+        nuovo_annuncio = {
+            "id": uuid.uuid4().hex[:6],
+            "user": "ADMIN",
+            "user_id": "system_admin",
+            # --- MODIFICA: Inserito il link HTML al changelog all'interno del testo ---
+            "text": f"🚀 Rilasciata Versione {APP_VERSION}! <a href='/changelog' style='color: #0d6efd; text-decoration: underline; font-weight: 600;'>Clicca qui per scoprire le novità</a>",
+            "timestamp": datetime.datetime.now().strftime("%H:%M"),
+            "pinned": True
+        }
+        shouts.insert(0, nuovo_annuncio)
+        save_tagbox(shouts[:50])
+        
+        # 2. Notifica campanella a tutti gli utenti
+        all_users = load_users()
+        for u in all_users:
+            add_notification(
+                user_id=u["username"], 
+                text=f"ADMIN: È disponibile la nuova v{APP_VERSION}.", 
+                link="/changelog", tipo="versione"
+            )
+        
+        # 3. Salva l'avvenuto annuncio
+        ANNOUNCED_FILE.write_text(APP_VERSION)
+
+
+def tipo_notifica(n):
+    """Tipo di una notifica; per quelle vecchie (tutte "info") si ricava dal testo."""
+    tipo = n.get("type") or "info"
+    if tipo != "info":
+        return tipo
+    testo = (n.get("text") or "").lower()
+    for chiave, t in (("supporto", "supporto"), ("completata", "resolved"), ("fallita", "failed"),
+                      ("menzionato", "menzione"), ("tag board", "menzione"), ("commentato", "commento"),
+                      ("nuova v", "versione"), ("task", "task")):
+        if chiave in testo:
+            return t
+    return "info"
+
+
+@app.route("/api/notifications")
+@login_required
+def get_notifications():
+    controlla_task_scadute()
+    controlla_promemoria()
+    me = session["user_id"]
+    my_n = [n for n in load_notifications() if (n.get("target_user") or n.get("user_id")) == me]
+    unread = sum(1 for n in my_n if not n["read"])
+    oggi = datetime.date.today()
+    adesso = datetime.datetime.now()
+    mostrate = []
+    for n in my_n[:40]:
+        d = _ordine_notifica(n.get("timestamp"), adesso)
+        giorni = (oggi - d.date()).days if d != datetime.datetime.min else 99
+        mostrate.append(dict(n, type=tipo_notifica(n),
+                             giorno="oggi" if giorni <= 0 else ("ieri" if giorni == 1 else "prima"),
+                             ora=d.strftime("%H:%M") if d != datetime.datetime.min else ""))
+    return jsonify({"notifications": mostrate, "unread_count": unread})
+
+@app.route("/api/notifications/read", methods=["POST"])
+@login_required
+def mark_notifications_read():
+    """Segna come letta una notifica ({"id": ...}) oppure, senza id, tutte quelle dell'utente."""
+    nid = str((request.get_json(silent=True) or {}).get("id") or "")
+    db = _DBSession()
+    try:
+        q = db.query(_Notification).filter(_Notification.target_user == session["user_id"],
+                                           _Notification.read == False)  # noqa: E712
+        if nid:
+            q = q.filter(_Notification.id == nid)
+        q.update({_Notification.read: True}, synchronize_session=False)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[notifiche lette] Errore: {e}")
+        return jsonify({"success": False}), 500
+    finally:
+        db.close()
+    return jsonify({"success": True})
+
+
+if __name__ == "__main__":
+
+    # ─────────────────────────────────────────────────────────────────────
+    # MODALITA' INSTALLER: Esegue script di setup e termina immediatamente.
+    # Questi flag sono lanciati da Inno Setup [Run] in modo silenzioso.
+    # ─────────────────────────────────────────────────────────────────────
+
+    if "--run-migration" in sys.argv:
+        """
+        Esegue la migrazione dati V2 -> V3 e termina.
+        Chiamato dall'installer Inno Setup post-install (Step 1).
+        """
+        import traceback
+        log_path = DATA_DIR / "migration_installer.log"
+        def _log(msg):
+            print(msg)
+            try:
+                with open(log_path, "a", encoding="utf-8") as _f:
+                    _f.write(msg + "\n")
+            except Exception:
+                pass
+        _log(f"[--run-migration] Avvio alle {__import__('datetime').datetime.now()}")
+        try:
+            from migrate_v3_installer import main as _run_mig
+            _original_argv = sys.argv[:]
+            sys.argv = ["migrate_v3_installer.py", str(DATA_DIR)]
+            try:
+                # L'installer gira nascosto: il riepilogo della migrazione va nel log
+                import contextlib
+                with open(log_path, "a", encoding="utf-8") as _f, contextlib.redirect_stdout(_f):
+                    _esito = _run_mig()
+                _log("[--run-migration] Completata con successo." if not _esito
+                     else "[--run-migration] INCOMPLETA: verra' ritentata al prossimo avvio.")
+            finally:
+                sys.argv = _original_argv
+        except Exception as _e:
+            _log(f"[--run-migration] ERRORE: {_e}")
+            _log(traceback.format_exc())
+        sys.exit(0)
+
+    if "--fix-pagamenti" in sys.argv:
+        """
+        Esegue il fix retrocompatibilita' pagamenti V2 e termina.
+        Chiamato dall'installer Inno Setup post-install (Step 2).
+        """
+        import traceback
+        log_path = DATA_DIR / "fix_pagamenti.log"
+        def _log(msg):
+            print(msg)
+            try:
+                with open(log_path, "a", encoding="utf-8") as _f:
+                    _f.write(msg + "\n")
+            except Exception:
+                pass
+        _log(f"[--fix-pagamenti] Avvio alle {__import__('datetime').datetime.now()}")
+        try:
+            # One-shot: va eseguito solo subito dopo la migrazione, non a ogni aggiornamento
+            _fix_flag = DATA_DIR / "fix_pagamenti_v2_done.flag"
+            if _fix_flag.exists():
+                _log("[--fix-pagamenti] Gia' eseguito in precedenza, skip.")
+            elif not (DATA_DIR / "migration_v3_done.flag").exists():
+                _log("[--fix-pagamenti] Migrazione non completata, skip (verra' ritentato).")
+            else:
+                # Importa ed esegue il fix inline (senza subprocess)
+                from fix_pagamenti_v2 import main as _run_fix
+                import contextlib
+                with open(log_path, "a", encoding="utf-8") as _f, contextlib.redirect_stdout(_f):
+                    _run_fix()
+                _fix_flag.write_text("ok", encoding="utf-8")
+                _log("[--fix-pagamenti] Completato con successo.")
+        except Exception as _e:
+            _log(f"[--fix-pagamenti] ERRORE: {_e}")
+            _log(traceback.format_exc())
+        sys.exit(0)
+
+    # --- MODALITA' DEBUG ---
+    if "--debug" in sys.argv:
+        print(">>> AVVIATO IN MODALITA' DEBUG DIRETTA")
+
+        # In modalità debug, il server Flask con il reloader DEVE girare nel thread principale.
+        # Spostiamo quindi l'icona della tray in un thread in background.
+
+        # 1. Eseguiamo le operazioni di setup iniziali
+        setup_first_run()
+        print("INFO: Avvio servizi principali dell'applicazione...")
+        manage_firewall_rule(PORT)
+
+        # 2. Avviamo l'icona della tray in un thread separato (daemon)
+        tray_thread = threading.Thread(target=run_tray_icon_loop, daemon=True)
+        tray_thread.start()
+        print("INFO: Icona nella tray avviata in background.")
+
+        # 3. Apriamo il browser
+        if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+            webbrowser.open(DISPLAY_URL)    
+
+        # 4. Avviamo il server Flask nel thread principale (questo bloccherà lo script qui)
+        #    Ora l'auto-reloader funzionerà correttamente.
+        run_server()
+
+    # --- MODALITÀ PRODUZIONE (INVARIATA) ---
+    else:
+        # 1. Avvia il launcher e attende la sua chiusura
+        launcher_app = AppLauncher()
+        launcher_app.mainloop()
+
+        # 2. Dopo che il launcher si è chiuso, il codice prosegue qui
+        if launcher_app.should_start_server:
+            # 3. Il thread principale esegue il loop bloccante dell'icona,
+            #    mantenendo l'applicazione e il thread del server (con Waitress) attivi.
+            run_tray_icon_loop()
+        else:
+            # Se non dobbiamo avviare il server (es. durante un update), lo script termina.
+            print("--- Chiusura richiesta dal launcher. ---")

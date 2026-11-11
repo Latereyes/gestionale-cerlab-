@@ -2,133 +2,114 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>Bolla {{ bolla.id }} - Preventivo {{ p.numero }}</title>
+    {% set numero_doc = (bolla.numero_ddt ~ '/' ~ bolla.anno_ddt) if bolla.numero_ddt else bolla.id %}
+    <title>DDT {{ numero_doc }} - Preventivo {{ p.numero }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            font-size: 11px;
+            font-size: 10.5px;
             margin: 0;
-            padding: 40px;
+            padding: 32px;
             color: #1a202c;
             background-color: #fff;
         }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
+        .container { max-width: 800px; margin: 0 auto; }
         header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 30px;
+            margin-bottom: 16px;
         }
-        .logo {
-            height: 60px;
-        }
-        .company-details {
-            font-size: 10px;
-            line-height: 1.4;
-            color: #4a5568;
-        }
-        .document-title h1 {
-            margin: 0;
-            font-size: 24px;
-            text-transform: uppercase;
-            text-align: right;
-            color: #000;
-        }
-        .document-title p {
-            margin: 4px 0 0;
-            text-align: right;
-            font-size: 12px;
-        }
-        .client-info {
-            background-color: #f8f9fa;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 30px;
-            line-height: 1.6;
-        }
-        h3 {
-            font-size: 14px;
-            margin: 0 0 12px 0;
-            border-bottom: 1px solid #e2e8f0;
-            padding-bottom: 8px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        th, td {
-            padding: 10px 12px;
+        .logo { height: 56px; }
+        .company-details { font-size: 9.5px; line-height: 1.4; color: #4a5568; }
+        .document-title { text-align: right; }
+        .document-title h1 { margin: 0; font-size: 19px; text-transform: uppercase; color: #000; letter-spacing: .3px; }
+        .document-title .norma { font-size: 8.5px; color: #64748b; margin: 2px 0 8px; }
+        .doc-num {
+            display: inline-grid;
+            grid-template-columns: auto auto;
+            gap: 2px 10px;
             text-align: left;
-            border-bottom: 1px solid #e2e8f0;
+            border: 1px solid #1a202c;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 11px;
         }
-        thead th {
-            background-color: #f8f9fa;
-            font-size: 10px;
+        .doc-num strong { font-weight: 700; }
+
+        /* Riquadri */
+        .boxes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+        .box {
+            border: 1px solid #94a3b8;
+            border-radius: 4px;
+            padding: 6px 9px;
+            min-height: 22px;
+            line-height: 1.45;
+        }
+        .box-label {
+            display: block;
+            font-size: 8px;
+            font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: .4px;
             color: #64748b;
+            margin-bottom: 2px;
         }
-        tbody tr:nth-child(even) {
-            background-color: #f8f9fa;
+        .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 0; margin-bottom: 10px; }
+        .grid-5 { display: grid; grid-template-columns: 1.6fr .7fr .8fr 1fr .8fr; gap: 0; margin-bottom: 10px; }
+        .grid-3 .box, .grid-5 .box, .grid-vettore .box { border-radius: 0; margin-left: -1px; }
+        .grid-3 .box:first-child, .grid-5 .box:first-child, .grid-vettore .box:first-child { margin-left: 0; }
+        .grid-vettore { display: grid; grid-template-columns: 2fr 1.2fr .8fr; margin-bottom: 10px; }
+        .penna { color: #94a3b8; }
+        .scelta span { margin-right: 10px; white-space: nowrap; }
+        .scelta .sq {
+            display: inline-block; width: 9px; height: 9px; border: 1px solid #1a202c;
+            margin-right: 3px; vertical-align: -1px; text-align: center; line-height: 9px; font-size: 9px; font-weight: 700;
         }
-        .right {
-            text-align: right;
+
+        h3 { font-size: 12px; margin: 14px 0 6px 0; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1; }
+        thead th { background-color: #f1f5f9; font-size: 8.5px; text-transform: uppercase; color: #475569; }
+        .right { text-align: right; }
+        .nowrap { white-space: nowrap; }
+        .nota-riga { display: block; font-size: 9px; color: #6b21a8; margin-top: 2px; font-weight: 600; }
+        .parziale-banner {
+            border: 1px solid #a855f7; background: #faf5ff; color: #6b21a8;
+            padding: 5px 9px; border-radius: 4px; font-weight: 600; margin: 8px 0 0;
         }
-        .nowrap {
-            white-space: nowrap;
-        }
-        .signature-section {
-            margin-top: 80px;
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-        }
-        .signature-box {
-            width: 45%;
-        }
-        .signature-box p {
-            border-top: 1px solid #4a5568;
-            padding-top: 8px;
-        }
+        .annotazioni { min-height: 34px; }
+        .annotazioni-testo { white-space: pre-wrap; }
+
+        .firme { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 26px; font-size: 10px; }
+        .firme-2 { grid-template-columns: 1fr 1fr; gap: 40px; }
+        .grid-ritiro { display: grid; grid-template-columns: 2fr 1fr; margin-bottom: 10px; }
+        .grid-ritiro .box { border-radius: 0; }
+        .grid-ritiro .box + .box { margin-left: -1px; }
+        .firma { border-top: 1px solid #1a202c; padding-top: 5px; text-align: center; }
+        .firma small { display: block; color: #64748b; font-size: 8.5px; }
         footer {
-            margin-top: 40px;
-            font-size: 9px;
+            margin-top: 14px;
+            font-size: 8.5px;
             color: #64748b;
             border-top: 1px solid #e2e8f0;
-            padding-top: 16px;
+            padding-top: 10px;
         }
-        footer h4 {
-            margin: 0 0 8px 0;
-            font-size: 10px;
-        }
-        footer ul {
-            padding-left: 16px;
-            margin: 0;
-        }
+        footer h4 { margin: 0 0 6px 0; font-size: 9px; }
+        footer ul { padding-left: 16px; margin: 0; }
         @media print {
-            /* Regola per evitare che il blocco note/firma venga spezzato su due pagine */
-            .print-footer-block {
-                break-inside: avoid;
-                page-break-inside: avoid; /* Fallback per browser meno recenti */
-            }
-
-            /* Regola per creare un'area piè di pagina su ogni pagina stampata */
+            .print-footer-block { break-inside: avoid; page-break-inside: avoid; }
             @page {
                 size: A4;
-                margin: 40px; /* Margini della pagina */
-
-                /* Creiamo il nostro piè di pagina personalizzato */
+                margin: 28px;
                 @bottom-center {
                     content: "Pagina " counter(page) " di " counter(pages);
                     font-family: 'Inter', sans-serif;
-                    font-size: 10px;
-                    color: var(--text-secondary);
+                    font-size: 9px;
+                    color: #64748b;
                 }
             }
         }
@@ -136,12 +117,19 @@
     {% include "_stampa_print_fixes.html" %}
 </head>
 <body>
+    {% macro campo(valore) -%}
+        {%- if valore %}{{ valore }}{% else %}<span class="penna">&nbsp;</span>{% endif -%}
+    {%- endmacro %}
+    {% macro spunta(valore, voce) -%}
+        <span><i class="sq">{{ 'X' if valore == voce else '' }}</i>{{ voce }}</span>
+    {%- endmacro %}
+    {% set data_doc = bolla.data.split('-') | reverse | join('/') if bolla.data and bolla.data|length == 10 else bolla.data %}
     <div class="container">
         <header>
             <div class="company-info">
                 <img src="{{ url_for('static', filename='logo.png') }}" class="logo" alt="Logo">
                 <div class="company-details">
-                    <strong>CER LAB srl</strong><br>
+                    <strong>CER LAB srl</strong> &mdash; Mittente / Cedente<br>
                     Via Guarneville, 1 – 04011 Aprilia (LT)<br>
                     C.F./P.IVA 03122400595 – KRRH6B9<br>
                     www.cerlab.it – info@cerlab.it<br>
@@ -149,77 +137,173 @@
                 </div>
             </div>
             <div class="document-title">
-                <h1>Bolla di Consegna</h1>
-                <p>
-                    <strong>N. Bolla:</strong> {{ bolla.id }}<br>
-                    <strong>Data:</strong> {{ bolla.data }}<br>
-                    <strong>Rif. Preventivo:</strong> {{ p.numero }}
-                </p>
+                <h1>Documento di Trasporto</h1>
+                <div class="norma">D.D.T. ai sensi del D.P.R. 472/1996 e D.P.R. 627/1978</div>
+                <div class="doc-num">
+                    <span>N. DDT</span><strong>{{ numero_doc }}</strong>
+                    <span>Data</span><strong>{{ data_doc }}</strong>
+                    <span>Rif. preventivo</span><strong>{{ p.numero }}</strong>
+                    {% if p.id_cliente %}<span>Cod. cliente</span><strong>{{ p.id_cliente }}</strong>{% endif %}
+                </div>
             </div>
         </header>
 
-        <div class="client-info">
-            <strong>Spett.le</strong><br>
-            <strong>{{ p.cliente }}</strong><br>
-            {% if p.id_cliente %}<small style="color:#64748b;">N. Cliente: {{ p.id_cliente }}</small><br>{% endif %}
-            {% if indirizzo_consegna %}
-                {{ indirizzo_consegna.indirizzo }}, {{ indirizzo_consegna.cap }} {{ indirizzo_consegna.comune }} ({{ indirizzo_consegna.provincia }})
-                <br><small>Presso: {{ indirizzo_consegna.descrizione }}</small>
-            {% else %}
-                {% if p.rag_sociale %}{{ p.rag_sociale }}<br>{% endif %}
-                {{ p.indirizzo }}, {{ p.cap }} {{ p.comune }} ({{ p.provincia }})
-            {% endif %}
-            {% if p.telefono %}<br>Tel.: {{ p.telefono }}{% endif %}
-        </div>
-
-        <div class="section">
-            <h3>Dettaglio Articoli Consegnati</h3>
-            <table>
-                <colgroup>
-                    <col style="width: 75%;">
-                    <col style="width: 10%;">
-                    <col style="width: 15%;">
-                </colgroup>
-                <thead>
-                    <tr>
-                        <th>Articolo</th>
-                        <th>UM</th>
-                        <th class="right nowrap">Q.tà</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for r in righe_bolla %}
-                    <tr>
-                        <td>{{ r.articolo }}</td>
-                        <td>{{ r.unt }}</td>
-                        <td class="right nowrap">{{ r.qt }}</td>
-                    </tr>
+        <div class="boxes">
+            <div class="box">
+                <span class="box-label">Destinatario / Cessionario</span>
+                <strong>{{ p.rag_sociale or p.cliente }}</strong><br>
+                {% if p.rag_sociale and p.cliente and p.rag_sociale != p.cliente %}{{ p.cliente }}<br>{% endif %}
+                {{ p.indirizzo }}{% if p.cap or p.comune %}, {{ p.cap }} {{ p.comune }}{% endif %}{% if p.provincia %} ({{ p.provincia }}){% endif %}
+                {% if p.p_iva %}<br>P.IVA / C.F.: {{ p.p_iva }}{% endif %}
+                {% if p.telefono %}<br>Tel.: {{ p.telefono }}{% endif %}
+            </div>
+            <div class="box">
+                <span class="box-label">{{ 'Ritiro merce' if bolla.ritiro_negozio else 'Luogo di destinazione' }}</span>
+                {% if bolla.ritiro_negozio %}
+                    {% if bolla.ritiro_sede == 'magazzino' %}
+                    <strong>Ritiro in magazzino a cura del cliente</strong><br>
+                    presso il magazzino CER LAB srl, Via Torre del Padiglione, 8 – 04011 Aprilia (LT)
                     {% else %}
-                    <tr class="empty-items"><td colspan="3">Nessun articolo in questa bolla</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                    <strong>Ritiro in negozio a cura del cliente</strong><br>
+                    presso CER LAB srl, Via Guarneville, 1 – 04011 Aprilia (LT)
+                    {% endif %}
+                {% elif indirizzo_consegna %}
+                    <strong>{{ indirizzo_consegna.descrizione }}</strong><br>
+                    {{ indirizzo_consegna.indirizzo }}, {{ indirizzo_consegna.cap }} {{ indirizzo_consegna.comune }} ({{ indirizzo_consegna.provincia }})
+                {% else %}
+                    Come destinatario
+                {% endif %}
+            </div>
         </div>
-    <div class="print-footer-block">    
-        <footer>
-            <h4>N.B. CON LA FIRMA IL CLIENTE DICHIARA DI AVER PRESO VISIONE DI QUANTO SEGUE:</h4>
-            <ul>
-                <li>L'INTEGRITA' E L'IMBALLAGGIO DELLA MERCE SONO RESPONSABILITA' ESCLUSIVA DEL PRODUTTORE, CERLAB S.r.l. NON RISPONDE PER DANNI DOVUTI ALL'IMBALLO ORIGINALE;</li>
-                <li>UNA VOLTA PRESA IN CARICO LA MERCE, CERLAB S.r.l. NON È RESPONSABILE PER DANNI SUCCESSIVI, CHE RICADONO SUL CLIENTE;</li>
-                <li>NON SONO ACCETTATI RESI O RESTITUZIONI PER DANNI O DIFETTI ESTETICI DEL PRODOTTO, COME PREVISTO DAL CONTRATTO E DALLA NORMATIVA SUL DIRITTO DEL CONSUMO.</li>
-            </ul>
-        </footer>
 
-        <div class="signature-section">
-            <div class="signature-box">
-                <p>Data</p>
+        <div class="grid-3">
+            <div class="box">
+                <span class="box-label">Causale del trasporto</span>
+                {{ campo(bolla.causale) }}
             </div>
-            <div class="signature-box">
-                <p>Firma per Accettazione</p>
+            <div class="box scelta">
+                <span class="box-label">Trasporto a cura del</span>
+                {{ spunta(bolla.trasporto_a_cura, 'Mittente') }}{{ spunta(bolla.trasporto_a_cura, 'Destinatario') }}{{ spunta(bolla.trasporto_a_cura, 'Vettore') }}
             </div>
+            {% if bolla.partenza and not bolla.ritiro_negozio %}
+            <div class="box">
+                <span class="box-label">Luogo di partenza</span>
+                {% if bolla.partenza == 'magazzino' %}Magazzino – Via Torre del Padiglione, 8 – Aprilia (LT){% else %}Negozio – Via Guarneville, 1 – Aprilia (LT){% endif %}
+            </div>
+            {% endif %}
         </div>
-    </div>
+
+        <h3>Descrizione dei beni (natura e qualità)</h3>
+        <table>
+            <colgroup>
+                <col style="width: 6%;">
+                <col style="width: 70%;">
+                <col style="width: 9%;">
+                <col style="width: 15%;">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Descrizione</th>
+                    <th>UM</th>
+                    <th class="right nowrap">Quantità</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in righe_bolla %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.articolo }}{% if r.nota_ddt %}<span class="nota-riga">{{ r.nota_ddt }}</span>{% endif %}</td>
+                    <td>{{ r.unt }}</td>
+                    <td class="right nowrap"><strong>{{ r.qt_ddt }}</strong></td>
+                </tr>
+                {% else %}
+                <tr class="empty-items"><td colspan="4">Nessun articolo in questa bolla</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if bolla.parziale %}
+        <div class="parziale-banner">CONSEGNA PARZIALE — la merce rimanente sarà consegnata con documento successivo.</div>
+        {% endif %}
+
+        <div class="print-footer-block">
+            <div class="grid-5" style="margin-top: 10px;">
+                <div class="box">
+                    <span class="box-label">Aspetto esteriore dei beni</span>
+                    {{ campo(bolla.aspetto_beni) }}
+                </div>
+                <div class="box">
+                    <span class="box-label">N. colli</span>
+                    {{ campo(bolla.n_colli) }}
+                </div>
+                <div class="box">
+                    <span class="box-label">Peso (kg)</span>
+                    {{ campo(bolla.peso_kg) }}
+                </div>
+                <div class="box">
+                    <span class="box-label">{{ 'Data ritiro' if bolla.ritiro_negozio else 'Data inizio trasporto' }}</span>
+                    <span class="penna">____ / ____ / ________</span>
+                </div>
+                <div class="box">
+                    <span class="box-label">{{ 'Ora ritiro' if bolla.ritiro_negozio else 'Ora' }}</span>
+                    <span class="penna">____ : ____</span>
+                </div>
+            </div>
+
+            {% if bolla.ritiro_negozio %}
+            <div class="grid-ritiro">
+                <div class="box">
+                    <span class="box-label">Merce ritirata da (nome e cognome)</span>
+                    {{ campo(bolla.ritirato_da) }}
+                </div>
+                <div class="box">
+                    <span class="box-label">Documento di riconoscimento n.</span>
+                    <span class="penna">&nbsp;</span>
+                </div>
+            </div>
+            {% else %}
+            <div class="grid-vettore">
+                <div class="box">
+                    <span class="box-label">Vettore (ragione sociale, indirizzo)</span>
+                    {{ campo(bolla.vettore) }}
+                </div>
+                <div class="box">
+                    <span class="box-label">Conducente</span>
+                    {{ campo(bolla.conducente) }}
+                </div>
+                <div class="box">
+                    <span class="box-label">Targa</span>
+                    {{ campo(bolla.targa) }}
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="box annotazioni">
+                <span class="box-label">Annotazioni</span><div class="annotazioni-testo">{{ bolla.annotazioni or '' }}</div>
+            </div>
+
+            <footer>
+                <h4>N.B. CON LA FIRMA IL CLIENTE DICHIARA DI AVER PRESO VISIONE DI QUANTO SEGUE:</h4>
+                <ul>
+                    <li>L'INTEGRITA' E L'IMBALLAGGIO DELLA MERCE SONO RESPONSABILITA' ESCLUSIVA DEL PRODUTTORE, CERLAB S.r.l. NON RISPONDE PER DANNI DOVUTI ALL'IMBALLO ORIGINALE;</li>
+                    <li>UNA VOLTA PRESA IN CARICO LA MERCE, CERLAB S.r.l. NON È RESPONSABILE PER DANNI SUCCESSIVI, CHE RICADONO SUL CLIENTE;</li>
+                    <li>NON SONO ACCETTATI RESI O RESTITUZIONI PER DANNI O DIFETTI ESTETICI DEL PRODOTTO, COME PREVISTO DAL CONTRATTO E DALLA NORMATIVA SUL DIRITTO DEL CONSUMO.</li>
+                </ul>
+            </footer>
+
+            {% if bolla.ritiro_negozio %}
+            <div class="firme firme-2">
+                <div class="firma">Firma dell'addetto CER LAB<small>per consegna della merce</small></div>
+                <div class="firma">Firma di chi ritira<small>per ricevuta e accettazione · data ____/____/______</small></div>
+            </div>
+            {% else %}
+            <div class="firme">
+                <div class="firma">Firma del conducente<small>&nbsp;</small></div>
+                <div class="firma">Firma del vettore<small>(se diverso dal conducente)</small></div>
+                <div class="firma">Firma del destinatario<small>per ricevuta e accettazione · data ____/____/______</small></div>
+            </div>
+            {% endif %}
+        </div>
     </div>
 </body>
 </html>
-
