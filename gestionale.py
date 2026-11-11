@@ -1425,8 +1425,10 @@ def aggiorna_stato_consegna_globale(preventivo_data):
             # Lo stato di consegna è quindi "Parziale".
             preventivo_data["stato_consegna_globale"] = "Parziale"
 
-    elif all(s == "Da Consegnare" for s in stati_puliti):
-        # Se TUTTI gli articoli confermati sono "Da Consegnare"
+    elif all(s == "Da Consegnare" for s in stati_puliti) and not any(
+            _to_num(righe_preventivo[i].get("qt_consegnata")) > 0
+            for i in indici_confermati if 0 <= i < len(righe_preventivo)):
+        # Se TUTTI gli articoli confermati sono "Da Consegnare" (e nessuno consegnato in parte)
         preventivo_data["stato_consegna_globale"] = "Da Consegnare"
     else:
         # Se c'è un mix (alcuni consegnati, altri in bolla, altri da consegnare)
@@ -4049,6 +4051,8 @@ def clona_preventivo(quote_id):
         for r in p_clonato["righe"]:
             r.pop("stato_consegna", None); r.pop("bolla_id", None); r.pop("data_consegna", None)
             r.pop("magazzino_scaricato", None)
+            for k in ("qt_consegnata", "qt_bolla", "consegne"):
+                r.pop(k, None)
             
     if "sezioni_edili" in p_clonato:
         for sez in p_clonato["sezioni_edili"]:
@@ -4788,10 +4792,11 @@ def calcola_prenotazioni_magazzino():
             continue
         for r in righe or []:
             aid = _id_articolo_riga(r)
-            if not aid or r.get("magazzino_scaricato") or not str(r.get("articolo", "")).strip():
+            if not aid or not str(r.get("articolo", "")).strip():
                 continue
-            qt = _to_num(r.get("qt"))
-            if qt <= 0:
+            # Con le consegne parziali resta prenotato solo quanto non e' ancora uscito
+            qt = _to_num(r.get("qt")) - _to_num(r.get("magazzino_scaricato"))
+            if qt <= 1e-9:
                 continue
             voce = prenotazioni.setdefault(aid, {"qt": 0.0, "preventivi": []})
             voce["qt"] += qt
@@ -4830,8 +4835,10 @@ def _registra_movimento(db, articolo, delta, tipo, preventivo_id="", note="", co
     return mov
 
 
-def scarica_righe_magazzino(p, indici):
-    """Scala dalla giacenza le righe consegnate prese dal magazzino (una volta sola per riga)."""
+def scarica_righe_magazzino(p, indici, quantita=None):
+    """Scala dalla giacenza le righe consegnate prese dal magazzino.
+    'quantita' (indice -> quantita') serve per le consegne parziali: senza, si scala tutto il
+    residuo della riga. 'magazzino_scaricato' tiene il totale gia' scalato, mai oltre la quantita'."""
     if p.get("tipo_preventivo") == "edile":
         return
     righe = p.get("righe", [])
@@ -4842,14 +4849,17 @@ def scarica_righe_magazzino(p, indici):
                 continue
             r = righe[i]
             aid = _id_articolo_riga(r)
-            if not aid or r.get("magazzino_scaricato"):
+            if not aid:
                 continue
+            gia = _to_num(r.get("magazzino_scaricato"))
+            residuo = _to_num(r.get("qt")) - gia
+            qt = residuo if not quantita or i not in quantita else min(_to_num(quantita[i]), residuo)
             art = db.get(_ArticoloMagazzino, aid)
-            qt = _to_num(r.get("qt"))
-            if not art or qt <= 0:
+            if not art or qt <= 1e-9:
                 continue
-            _registra_movimento(db, art, -qt, "scarico", p.get("numero", ""), "Consegna al cliente")
-            r["magazzino_scaricato"] = _fmt_qt(qt)
+            nota = "Consegna al cliente" if qt >= residuo - 1e-9 and not gia else "Consegna al cliente (parziale)"
+            _registra_movimento(db, art, -qt, "scarico", p.get("numero", ""), nota)
+            r["magazzino_scaricato"] = _fmt_qt(gia + qt)
         db.commit()
     except Exception:
         db.rollback()
@@ -4858,8 +4868,9 @@ def scarica_righe_magazzino(p, indici):
         db.close()
 
 
-def storna_righe_magazzino(p, indici):
-    """Se una consegna viene annullata, rimette in giacenza quanto era stato scaricato."""
+def storna_righe_magazzino(p, indici, quantita=None):
+    """Se una consegna viene annullata, rimette in giacenza quanto era stato scaricato
+    (con 'quantita', indice -> quantita', solo quella parte: annullo di una consegna parziale)."""
     if p.get("tipo_preventivo") == "edile":
         return
     righe = p.get("righe", [])
@@ -4873,10 +4884,16 @@ def storna_righe_magazzino(p, indici):
             scaricato = _to_num(r.get("magazzino_scaricato"))
             if not aid or scaricato <= 0:
                 continue
+            q = scaricato if not quantita or i not in quantita else min(_to_num(quantita[i]), scaricato)
+            if q <= 1e-9:
+                continue
             art = db.get(_ArticoloMagazzino, aid)
             if art:
-                _registra_movimento(db, art, scaricato, "storno", p.get("numero", ""), "Consegna annullata")
-            r.pop("magazzino_scaricato", None)
+                _registra_movimento(db, art, q, "storno", p.get("numero", ""), "Consegna annullata")
+            if scaricato - q > 1e-9:
+                r["magazzino_scaricato"] = _fmt_qt(scaricato - q)
+            else:
+                r.pop("magazzino_scaricato", None)
         db.commit()
     except Exception:
         db.rollback()
@@ -6796,7 +6813,10 @@ def gestione_consegna(quote_id):
         title=f"Gestione Consegna {quote_id}",
         p=p,
         ordini_confermati=ordini_confermati,
-        geo_data=GEO_DATA
+        geo_data=GEO_DATA,
+        prossimo_ddt=prossimo_numero_ddt(),
+        anno_ddt=datetime.date.today().year,
+        bolle_per_id={b.get("id"): b for b in p.get("bolle", [])}
     )
 # --- File: gestionale.py (intorno alla riga 2043) ---
 
@@ -6878,12 +6898,11 @@ def marca_consegnato(quote_id):
                         riga["data_consegna"] = today_str
                     curr_idx += 1
     else:
-        for index in indici_da_marcare:
-            if 0 <= index < len(p["righe"]):
-                p["righe"][index]["stato_consegna"] = "Consegnato"
-                p["righe"][index]["data_consegna"] = today_str
-        # Gli articoli presi dal magazzino escono dalla giacenza alla consegna
-        scarica_righe_magazzino(p, indici_da_marcare)
+        # Si consegna la quantita' della bolla (consegna parziale) o tutto il residuo.
+        # Se resta qualcosa, la riga torna "Pronto per Consegna": la rimanenza attende la prossima bolla.
+        quantita_consegnate = registra_consegna_righe(p, indici_da_marcare, today_str)
+        # Gli articoli presi dal magazzino escono dalla giacenza alla consegna (solo la parte consegnata)
+        scarica_righe_magazzino(p, indici_da_marcare, quantita_consegnate)
 
     aggiorna_stato_consegna_globale(p)
     aggiorna_stato_avanzamento(p)
@@ -6936,28 +6955,18 @@ def annulla_stato_consegna(quote_id):
                                     break
                     curr_idx += 1
     else:
-        target_list = "righe"
-        for index in item_indices:
-            if 0 <= index < len(p[target_list]):
-                riga = p[target_list][index]
-                original_bolla_id = riga.get("bolla_id")
-
-                riga["stato_consegna"] = target_status
-                riga.pop("data_consegna", None) 
-
-                if target_status == "Da Consegnare":
-                    riga.pop("data_arrivo_in_house", None) 
-
-                if original_bolla_id and not keep_bolla:
-                    riga.pop("bolla_id", None)
-                    for bolla in p.get("bolle", []):
-                        if bolla.get("id") == original_bolla_id:
-                            if index in bolla.get("indici_righe", []):
-                                bolla["indici_righe"].remove(index)
-                            break
+        if target_status not in ("Pronto per Consegna", "Da Consegnare", ANNULLA_ULTIMA_CONSEGNA):
+            return jsonify({"success": False, "error": "Stato non valido."})
+        try:
+            da_stornare = annulla_consegne_righe(p, item_indices, target_status, keep_bolla)
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)})
         # Consegna annullata: quanto era stato scaricato dal magazzino torna in giacenza
-        if target_status != "Consegnato":
-            storna_righe_magazzino(p, item_indices)
+        if da_stornare:
+            parziali = {i: q for i, q in da_stornare.items() if q is not None}
+            storna_righe_magazzino(p, [i for i, q in da_stornare.items() if q is None])
+            if parziali:
+                storna_righe_magazzino(p, list(parziali), parziali)
     
     # Ricalcola lo stato globale e salva
     aggiorna_stato_consegna_globale(p)
@@ -6965,6 +6974,230 @@ def annulla_stato_consegna(quote_id):
     save_quote(quote_id, p)
 
     return jsonify({"success": True, "message": "Stato degli articoli aggiornato."})
+
+# --- Documento di trasporto (DDT) e consegne parziali ---
+# Ogni bolla dei preventivi commerciali e' un DDT: numero progressivo annuale (unico fra tutti i
+# preventivi), causale, trasporto a cura di, vettore, aspetto dei beni, colli, peso e
+# annotazioni (niente porto: consegne su gomma in ambito nazionale). Data/ora di inizio trasporto e le firme restano spazi da compilare a penna.
+# Consegna parziale: in bolla va solo una parte della riga ('quantita' della bolla e 'qt_bolla'
+# sulla riga); alla consegna la parte consegnata si somma in 'qt_consegnata' e lo storico va in
+# 'consegne'. Finche' resta un residuo la riga torna "Pronto per Consegna" (in attesa di consegna).
+
+CAMPI_DDT = ("causale", "trasporto_a_cura", "vettore", "conducente", "targa", "aspetto_beni",
+             "n_colli", "peso_kg", "annotazioni")
+ANNULLA_ULTIMA_CONSEGNA = "annulla_ultima_consegna"
+
+
+def _qt_residua(riga):
+    """Quantita' della riga non ancora consegnata."""
+    return max(_to_num(riga.get("qt")) - _to_num(riga.get("qt_consegnata")), 0.0)
+
+
+def prossimo_numero_ddt(anno=None):
+    """Prossimo numero progressivo di DDT dell'anno, fra le bolle di tutti i preventivi."""
+    anno = str(anno or datetime.date.today().year)
+    massimo = 0
+    db = _DBSession()
+    try:
+        for extra, data in db.query(_Bolla.extra, _Bolla.data).all():
+            extra = extra or {}
+            if str(extra.get("anno_ddt") or "") != anno:
+                continue
+            n = str(extra.get("numero_ddt") or "").strip()
+            if n.isdigit():
+                massimo = max(massimo, int(n))
+    finally:
+        db.close()
+    return massimo + 1
+
+
+def _numero_ddt_usato(numero, anno, escludi_bolla=None, escludi_preventivo=None):
+    db = _DBSession()
+    try:
+        for bid, prev_id, extra in db.query(_Bolla.id, _Bolla.preventivo_id, _Bolla.extra).all():
+            extra = extra or {}
+            if (bid, prev_id) == (escludi_bolla, escludi_preventivo):
+                continue
+            if str(extra.get("anno_ddt") or "") == str(anno) and \
+               str(extra.get("numero_ddt") or "").strip().lower() == str(numero).strip().lower():
+                return True
+    finally:
+        db.close()
+    return False
+
+
+def leggi_dati_ddt(form, bolla_id=None):
+    """Campi del DDT dal form di creazione bolla (i vuoti si compilano a penna sulla stampa)."""
+    anno = str(datetime.date.today().year)
+    dati = {"anno_ddt": anno}
+    for campo in CAMPI_DDT:
+        valore = str(form.get(f"ddt_{campo}") or "").strip()[:500]
+        if valore:
+            dati[campo] = valore
+    numero = str(form.get("ddt_numero") or "").strip()[:20]
+    if not numero:
+        numero = str(prossimo_numero_ddt(anno))
+    elif _numero_ddt_usato(numero, anno):
+        raise ValueError(f"Il DDT n. {numero}/{anno} esiste già: scegli un altro numero.")
+    dati["numero_ddt"] = numero
+    return dati
+
+
+def quantita_righe_bolla(p, indici, form):
+    """indice -> {"qt", "parziale", "nota"} per le righe di una nuova bolla.
+    Con la spunta "Consegna parziale" ogni riga puo' avere 'qt_<indice>' (da 0 al residuo)."""
+    parziale = form.get("parziale") == "1"
+    righe = p.get("righe", [])
+    risultato = {}
+    for i in indici:
+        if not (0 <= i < len(righe)):
+            continue
+        r = righe[i]
+        totale = _to_num(r.get("qt"))
+        residuo = _qt_residua(r)
+        q = residuo
+        valore = form.get(f"qt_{i}")
+        if parziale and residuo > 0 and valore not in (None, ""):
+            q = _to_num(valore, -1)
+            if q <= 0 or q > residuo + 1e-9:
+                nome = str(r.get("articolo") or f"riga {i + 1}")[:60]
+                raise ValueError(f"Quantità non valida per «{nome}»: deve essere maggiore di 0 "
+                                 f"e al massimo {_fmt_qt(residuo)} {r.get('unt') or ''}.".replace(" .", "."))
+        e_parziale = q < residuo - 1e-9
+        gia = totale - residuo
+        nota = ""
+        um = (r.get("unt") or "").strip()
+        if e_parziale:
+            nota = (f"Consegna parziale: {_fmt_qt(q)} di {_fmt_qt(totale)} {um}, "
+                    f"restano {_fmt_qt(residuo - q)} {um} da consegnare").replace("  ", " ")
+        elif gia > 1e-9:
+            nota = f"Saldo consegna: {_fmt_qt(q)} di {_fmt_qt(totale)} {um}".replace("  ", " ").strip()
+        risultato[i] = {"qt": _fmt_qt(q), "parziale": e_parziale, "nota": nota}
+    return risultato
+
+
+def registra_consegna_righe(p, indici, oggi):
+    """Segna consegnate le righe (standard) indicate. Restituisce indice -> quantita' consegnata.
+    Se resta un residuo la riga torna "Pronto per Consegna" e lascia la bolla, che resta nello storico."""
+    righe = p.get("righe", [])
+    consegnate = {}
+    for i in indici:
+        if not (0 <= i < len(righe)):
+            continue
+        r = righe[i]
+        totale = _to_num(r.get("qt"))
+        residuo = _qt_residua(r)
+        q = min(_to_num(r.get("qt_bolla")), residuo) if r.get("qt_bolla") else residuo
+        consegnato = totale - residuo + q
+        r["qt_consegnata"] = _fmt_qt(consegnato)
+        r.setdefault("consegne", []).append({"bolla_id": r.get("bolla_id") or "", "qt": _fmt_qt(q), "data": oggi})
+        r.pop("qt_bolla", None)
+        if consegnato < totale - 1e-9:
+            r["stato_consegna"] = "Pronto per Consegna"
+            r.pop("bolla_id", None)
+        else:
+            r["stato_consegna"] = "Consegnato"
+            r["data_consegna"] = oggi
+        consegnate[i] = q
+    return consegnate
+
+
+def _togli_da_bolla(p, bolla_id, indice):
+    for bolla in p.get("bolle", []):
+        if bolla.get("id") == bolla_id:
+            if indice in bolla.get("indici_righe", []):
+                bolla["indici_righe"].remove(indice)
+            for chiave in ("quantita", "note_righe"):
+                if isinstance(bolla.get(chiave), dict):
+                    bolla[chiave].pop(str(indice), None)
+            break
+
+
+def annulla_consegne_righe(p, indici, target_status, keep_bolla):
+    """Annulla lo stato di consegna delle righe standard.
+    Restituisce indice -> quantita' da rimettere in magazzino (None = tutto lo scaricato).
+    - righe consegnate (in tutto o in parte, se si annulla l'ultima consegna): si toglie l'ultima
+      consegna registrata (o tutta la consegna, per le righe vecchie senza storico);
+    - righe pronte/in bolla: cambia solo lo stato ed eventualmente il legame con la bolla."""
+    righe = p.get("righe", [])
+    da_stornare = {}
+    annulla_ultima = target_status == ANNULLA_ULTIMA_CONSEGNA
+    if annulla_ultima:
+        validi = [i for i in indici if 0 <= i < len(righe) and righe[i].get("consegne")
+                  and righe[i].get("stato_consegna") != "In Bolla"]
+        if not validi:
+            raise ValueError("Nessuna consegna da annullare fra gli articoli selezionati "
+                             "(gli articoli già in una nuova bolla vanno prima tolti dalla bolla).")
+        indici = validi
+
+    for i in indici:
+        if not (0 <= i < len(righe)):
+            continue
+        r = righe[i]
+        stato_prima = r.get("stato_consegna") or "Da Consegnare"
+        consegne = r.get("consegne") or []
+
+        if annulla_ultima or stato_prima == "Consegnato":
+            if consegne:
+                ultima = consegne.pop()
+                q = _to_num(ultima.get("qt"))
+                restante = max(_to_num(r.get("qt_consegnata")) - q, 0.0)
+                if restante > 1e-9:
+                    r["qt_consegnata"] = _fmt_qt(restante)
+                else:
+                    r.pop("qt_consegnata", None)
+                if not consegne:
+                    r.pop("consegne", None)
+                da_stornare[i] = q
+                r.pop("data_consegna", None)
+                bolla_ultima = ultima.get("bolla_id") or ""
+                if annulla_ultima or keep_bolla:
+                    # La riga torna legata alla bolla di quella consegna
+                    if bolla_ultima:
+                        r["bolla_id"] = bolla_ultima
+                    if q < _qt_residua(r) - 1e-9:
+                        r["qt_bolla"] = _fmt_qt(q)
+                    else:
+                        r.pop("qt_bolla", None)
+                else:
+                    if bolla_ultima:
+                        _togli_da_bolla(p, bolla_ultima, i)
+                    r.pop("bolla_id", None)
+                    r.pop("qt_bolla", None)
+                r["stato_consegna"] = "In Bolla" if annulla_ultima else target_status
+                if target_status == "Da Consegnare":
+                    r.pop("data_arrivo_in_house", None)
+                continue
+            # Righe consegnate prima delle consegne parziali: si annulla tutta la consegna
+            da_stornare[i] = None
+
+        original_bolla_id = r.get("bolla_id")
+        r["stato_consegna"] = target_status
+        r.pop("data_consegna", None)
+        if target_status == "Da Consegnare":
+            r.pop("data_arrivo_in_house", None)
+        if original_bolla_id and not keep_bolla:
+            r.pop("bolla_id", None)
+            r.pop("qt_bolla", None)
+            _togli_da_bolla(p, original_bolla_id, i)
+    return da_stornare
+
+
+def righe_della_bolla(p, bolla):
+    """Righe da stampare su una bolla, con la quantita' effettivamente in bolla ('qt_ddt')."""
+    is_edile = p.get("tipo_preventivo") == "edile"
+    righe_sorgente = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
+    quantita = bolla.get("quantita") or {}
+    note = bolla.get("note_righe") or {}
+    righe = []
+    for i in bolla.get("indici_righe", []):
+        if 0 <= i < len(righe_sorgente):
+            r = dict(righe_sorgente[i])
+            r["qt_ddt"] = quantita.get(str(i)) or r.get("qt")
+            r["nota_ddt"] = note.get(str(i), "")
+            righe.append(r)
+    return righe
+
 
 def get_new_bolla_id(preventivo_data):
     """Genera un ID progressivo per la bolla, specifico per il preventivo."""
@@ -7003,6 +7236,7 @@ def crea_bolla(quote_id):
     if not indici_righe_bolla:
         return jsonify({"success": False, "error": "Nessun articolo selezionato per la bolla"})
 
+    is_edile = p.get("tipo_preventivo") == "edile"
     bolla_id = get_new_bolla_id(p)
     
     if "bolle" not in p: p["bolle"] = []
@@ -7016,13 +7250,23 @@ def crea_bolla(quote_id):
     if indirizzo_cantiere_id:
         nuova_bolla["indirizzo_cantiere_id"] = indirizzo_cantiere_id
 
+    if not is_edile:
+        # Dati del documento di trasporto e quantita' (anche parziali) di ogni riga
+        try:
+            nuova_bolla.update(leggi_dati_ddt(request.form, bolla_id))
+            quantita_bolla = quantita_righe_bolla(p, indici_righe_bolla, request.form)
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)})
+        nuova_bolla["quantita"] = {str(i): v["qt"] for i, v in quantita_bolla.items()}
+        nuova_bolla["note_righe"] = {str(i): v["nota"] for i, v in quantita_bolla.items() if v["nota"]}
+        nuova_bolla["parziale"] = any(v["parziale"] for v in quantita_bolla.values())
+
     p["bolle"].append(nuova_bolla)
 
     # --- AGGIORNAMENTO STATO IMMEDIATO ---
     # Impostiamo "In Bolla" GIÀ QUI, così anche se il PDF fallisce
     # le righe risultano correttamente associate alla bolla.
     # Il PDF può essere rigenerato in seguito senza creare bolle duplicate.
-    is_edile = p.get("tipo_preventivo") == "edile"
     if is_edile:
         for idx_assoluto in indici_righe_bolla:
             curr_idx = 0
@@ -7033,11 +7277,16 @@ def crea_bolla(quote_id):
                         riga["bolla_id"] = bolla_id
                     curr_idx += 1
     else:
-        target_list = "righe"
         for index in indici_righe_bolla:
-            if 0 <= index < len(p[target_list]):
-                p[target_list][index]["stato_consegna"] = "In Bolla"
-                p[target_list][index]["bolla_id"] = bolla_id
+            if 0 <= index < len(p["righe"]):
+                riga = p["righe"][index]
+                riga["stato_consegna"] = "In Bolla"
+                riga["bolla_id"] = bolla_id
+                # 'qt_bolla' solo se in bolla va una parte del residuo: il resto attende la prossima
+                if quantita_bolla[index]["parziale"]:
+                    riga["qt_bolla"] = quantita_bolla[index]["qt"]
+                else:
+                    riga.pop("qt_bolla", None)
 
     aggiorna_stato_consegna_globale(p)
     aggiorna_stato_avanzamento(p)
@@ -7463,9 +7712,7 @@ def generate_bolla_task(quote_id, bolla_id):
     # Determina sorgente righe e template in base al tipo
     is_edile = p.get("tipo_preventivo") == "edile"
     template_name = "stampa_consegna_lavori.html" if is_edile else "stampa_bolla.html"
-    righe_sorgente = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
-    
-    righe_bolla = [righe_sorgente[i] for i in bolla.get("indici_righe", []) if 0 <= i < len(righe_sorgente)]
+    righe_bolla = righe_della_bolla(p, bolla)
     
     indirizzo_consegna = None
     indirizzo_id = bolla.get("indirizzo_cantiere_id")
@@ -7813,9 +8060,7 @@ def stampa_bolla_html(quote_id, bolla_id):
     # Determina sorgente righe e template in base al tipo
     is_edile = p.get("tipo_preventivo") == "edile"
     template_name = "stampa_consegna_lavori.html" if is_edile else "stampa_bolla.html"
-    righe_sorgente = get_flat_righe_edili(p) if is_edile else p.get("righe", [])
-
-    righe_bolla = [righe_sorgente[i] for i in bolla.get("indici_righe", []) if 0 <= i < len(righe_sorgente)]
+    righe_bolla = righe_della_bolla(p, bolla)
 
     indirizzo_consegna = None
     indirizzo_id = bolla.get("indirizzo_cantiere_id")
