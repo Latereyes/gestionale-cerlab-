@@ -136,6 +136,16 @@
                                 <input type="hidden" name="s[{{s_idx}}][r][{{i}}][hide_cost]" class="hidden-costo calc-trigger" value="{{ r.hide_cost | default('0') }}">
                                 <input type="text" name="s[{{s_idx}}][r][{{i}}][costo_stimato]" value="{{ r.costo_stimato }}" 
                                        class="cell-input right input-money-costo calc-trigger" data-type="currency">
+                                <label class="iva-costo-wrap" title="IVA pagata su questo costo (IVA merci). Serve solo per la Dashboard Direzionale 'con IVA': non cambia il preventivo del cliente.">
+                                    <span>IVA costo</span>
+                                    <select name="s[{{s_idx}}][r][{{i}}][iva_costo]" class="iva-costo-sel">
+                                        {% set ivac = (r.iva_costo | default('22') | string) or '22' %}
+                                        <option value="22" {{ 'selected' if ivac == '22' }}>22%</option>
+                                        <option value="10" {{ 'selected' if ivac == '10' }}>10%</option>
+                                        <option value="4" {{ 'selected' if ivac == '4' }}>4%</option>
+                                        <option value="0" {{ 'selected' if ivac == '0' }}>0%</option>
+                                    </select>
+                                </label>
                                 
                                 <div class="row-hide-cost-indicator" id="hide-cost-ind-{{s_idx}}-{{i}}" style="font-size: 11px; color: #f59e0b; text-align: right; margin-top: 4px; font-weight: 600;" title="Quota Costi Vivi"></div>
                                 
@@ -536,6 +546,8 @@ body { padding-bottom: 90px; }
 }
 input:checked + .slider { background: linear-gradient(135deg, hsl(265,60%,52%) 0%, hsl(265,60%,42%) 100%); }
 input:checked + .slider:before { transform: translateX(18px); }
+.iva-costo-wrap{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:4px;font-size:11px;color:#64748b;font-weight:600;white-space:nowrap}
+.iva-costo-sel{font-size:12px;padding:2px 4px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;width:auto}
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>

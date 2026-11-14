@@ -1,5 +1,23 @@
 [
   {
+    "version": "3.6.1",
+    "date": "14/11/2026",
+    "title": "Dashboard Direzionale, Ceerlo e DDT più semplice",
+    "changes": [
+      "<b>Importi con o senza IVA:</b> nella Dashboard Direzionale c'è l'interruttore \"Mostra importi con IVA\". Spento si vedono gli importi senza IVA (come prima), acceso IVA compresa. La scelta resta memorizzata e una scritta sotto la barra ricorda sempre cosa si sta guardando. Utile e percentuali non cambiano, perché l'IVA non è guadagno.",
+      "<b>Tre schede con nomi semplici:</b> \"Guadagno\" (preventivi confermati nel periodo), \"Cassa\" (soldi entrati e usciti davvero nel periodo) e \"Vendite\" (andamento delle trattative). Ogni scheda spiega in una riga cosa conta e perché i numeri sono diversi dalle altre.",
+      "<b>Etichette più chiare:</b> ogni cifra ha sotto una breve spiegazione (es. \"Incassato\", \"Speso\", \"Saldo di cassa\", \"Ancora da incassare\", \"IVA da versare\"). Con l'IVA accesa il conto dell'utile mostra anche la riga dell'IVA da versare.",
+      "<b>Utile al netto della fee:</b> nella Dashboard Direzionale e nelle pagine Analisi (preventivo e cliente) l'utile ora toglie anche la fee riconosciuta ai referenti. Prima la fee era mostrata ma non sottratta.",
+      "<b>IVA sui costi degli edili:</b> nell'editor dei preventivi edili, sotto il costo di ogni riga, si sceglie la voce IVA costo (22, 10, 4 o 0%). Serve solo alla vista con IVA della Dashboard Direzionale e non cambia il preventivo del cliente. Sulle righe già esistenti vale il 22% finché non si cambia.",
+      "<b>Ceerlo nella Dashboard Direzionale:</b> con \"Chiedi l'analisi a Ceerlo\" l'assistente legge i numeri del periodo, li confronta con il periodo prima e scrive in poche righe com'è andata, cosa va bene, cosa tenere d'occhio e cosa fare. Le analisi restano salvate. Si possono accendere i <b>report periodici</b>: ogni lunedì (settimana scorsa) e il primo del mese (mese scorso) CEO e amministratori ricevono un'email con l'andamento, senza importi, e il tasto per aprire il report completo. C'è anche \"Mandami una prova adesso\".",
+      "<b>Incassi scaduti:</b> nella scheda Cassa i pagamenti programmati con una data già passata sono separati da quelli futuri, con il loro totale e il loro elenco, così si vede subito cosa sollecitare.",
+      "<b>Modulo DDT più semplice:</b> si sceglie subito tra Consegna con nostro mezzo, Consegna con corriere, Ritiro in negozio e Ritiro in magazzino. \"Trasporto a cura del\" si compila da solo e compaiono solo i campi che servono: conducente e targa per il nostro mezzo, corriere per la spedizione, chi ritira per i ritiri. Viene riproposta l'ultima scelta.",
+      "<b>Stampa:</b> con il nostro mezzo il vettore risulta \"Mittente – CER LAB srl, mezzo proprio\" e le firme sono solo quelle che servono.",
+      "<b>Da telefono:</b> nella pagina Consegna ogni articolo è una scheda (stato, quantità, DDT) e il modulo DDT è più compatto.",
+      "<b>Nota:</b> per la merce di magazzino e i costi previsti l'IVA non è registrata, quindi la vista con IVA aggiunge il 22%. Gli Excel non cambiano."
+    ]
+  },
+  {
     "version": "3.6.0",
     "date": "11/11/2026",
     "title": "Consegne: DDT fiscali e consegna parziale",

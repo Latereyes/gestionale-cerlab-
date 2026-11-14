@@ -88,15 +88,15 @@ verifica(not g.load_quote(Q).get("bolle"), "nessuna bolla creata")
 print("3. DDT parziale: 30 mq di gres, 10 di 40 battiscopa, 4 di 10 collante dal magazzino")
 r = c.post(f"/consegna/{Q}/crea-bolla", data={
     "selected_items[]": ["0", "1", "2"], "parziale": "1", "qt_0": "30", "qt_1": "10", "qt_2": "4",
-    "ddt_numero": "", "ddt_causale": "Vendita", "ddt_trasporto_a_cura": "Vettore",
-    "ddt_vettore": "Trasporti Bianchi Srl, Latina", "ddt_conducente": "Luca Verdi", "ddt_targa": "AB123CD",
+    "ddt_numero": "", "ddt_causale": "Vendita", "ddt_trasporto_a_cura": "Mittente",
+    "ddt_vettore": "non va salvato", "ddt_conducente": "Luca Verdi", "ddt_targa": "AB123CD",
     "ddt_aspetto_beni": "Bancali", "ddt_n_colli": "3", "ddt_peso_kg": "1200", "ddt_annotazioni": "Scarico a cura del cliente",
 }).get_json()
 verifica(r["success"], "bolla creata")
 p = g.load_quote(Q)
 b1 = p["bolle"][0]
 verifica(b1.get("numero_ddt") == "1" and b1.get("anno_ddt"), "DDT numero 1 dell'anno")
-verifica(b1.get("causale") == "Vendita" and b1.get("vettore") == "Trasporti Bianchi Srl, Latina"
+verifica(b1.get("causale") == "Vendita" and "vettore" not in b1 and b1.get("trasporto_a_cura") == "Mittente"
          and b1.get("n_colli") == "3" and b1.get("peso_kg") == "1200" and b1.get("targa") == "AB123CD",
          "dati del DDT salvati sulla bolla")
 verifica(b1.get("quantita") == {"0": "30", "1": "10", "2": "4"} and b1.get("parziale") is True, "quantita' della bolla salvate")
@@ -110,7 +110,7 @@ verifica(r.status_code == 200 and "Documento di Trasporto" in html, "stampa DDT"
 for testo in ("Causale del trasporto", "Trasporto a cura del", "Vettore", "Conducente", "Targa",
               "Aspetto esteriore dei beni", "N. colli", "Peso (kg)", "Data inizio trasporto", "Ora",
               "Annotazioni", "Firma del conducente", "Firma del destinatario", "Luogo di destinazione",
-              "P.IVA / C.F.: 01234567890", "Trasporti Bianchi Srl, Latina", "Luca Verdi", "AB123CD"):
+              "P.IVA / C.F.: 01234567890", "Luca Verdi", "AB123CD"):
     verifica(testo in html, f"stampa contiene «{testo}»")
 verifica("<strong>30</strong>" in html and "<strong>10</strong>" in html, "in stampa le quantita' consegnate, non quelle ordinate")
 verifica("Consegna parziale: 30 di 100 MQ, restano 70 MQ da consegnare" in html, "nota di consegna parziale sulla riga")
@@ -233,6 +233,19 @@ html = c.get(f"/stampa-bolla-html/PREV-TEST-6/{b6['id']}").get_data(as_text=True
 verifica(r["success"] and b6.get("partenza") == "magazzino" and "Luogo di partenza" in html
          and "Magazzino – Via Torre del Padiglione, 8" in html, "consegna in partenza dal magazzino")
 verifica(g.load_quote("PREV-TEST-5")["bolle"][0].get("partenza") == "magazzino", "ritiro in magazzino: partenza dal magazzino")
+
+print("16. Consegna con corriere: solo i dati del vettore")
+g.save_quote("PREV-TEST-7", {
+    "numero": "PREV-TEST-7", "id_cliente": "CL-7", "cliente": "Elena", "stato": "Confermato", "tipo_preventivo": "standard",
+    "righe": [{"articolo": "Mosaico", "unt": "MQ", "qt": "5", "stato_consegna": "Pronto per Consegna"}],
+    "ordini_fornitore": [{"ordine_id": "O7", "numero_conferma": "C-7", "azienda": "F", "indici_righe": [0]}]})
+r = c.post("/consegna/PREV-TEST-7/crea-bolla", data={"selected_items[]": ["0"], "ddt_trasporto_a_cura": "Vettore",
+    "ddt_vettore": "Trasporti Bianchi Srl, Latina", "ddt_conducente": "non va salvato"}).get_json()
+b7 = g.load_quote("PREV-TEST-7")["bolle"][0]
+verifica(r["success"] and b7.get("trasporto_a_cura") == "Vettore" and b7.get("vettore") == "Trasporti Bianchi Srl, Latina"
+         and "conducente" not in b7, "corriere salvato senza conducente/targa")
+html = c.get(f"/stampa-bolla-html/PREV-TEST-7/{b7['id']}").get_data(as_text=True)
+verifica("Trasporti Bianchi Srl, Latina" in html, "vettore in stampa")
 
 print()
 if ERRORI:

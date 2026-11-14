@@ -48,7 +48,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "3.6.0"  
+APP_VERSION = "3.6.1"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -3694,7 +3694,8 @@ def salva_righe_edili(quote_id):
                     "articolo": "", 
                     "prezzo_vendita": "0", 
                     "iva_pct": "10", 
-                    "costo_stimato": "0"
+                    "costo_stimato": "0",
+                    "iva_costo": "22"
                 })
         except ValueError:
             pass
@@ -5620,6 +5621,19 @@ def _costo_manuale_edile(p):
     return sum(_to_float(r.get("costo_stimato")) for r in p.get("righe_edili", []))
 
 
+def _costo_manuale_edile_lordo(p):
+    """Costi stimati degli edili IVA compresa: ogni riga usa la sua "IVA costo" scelta nell'editor
+    (campo iva_costo: 22, 10, 4 o 0). Se non e' mai stata indicata vale il 22%."""
+    if p.get("tipo_preventivo") != "edile":
+        return 0.0
+    tot = 0.0
+    for r in p.get("righe_edili", []):
+        raw = r.get("iva_costo")
+        iva = 22.0 if raw is None or str(raw).strip() == "" else _to_float(raw)
+        tot += _to_float(r.get("costo_stimato")) * (1 + iva / 100.0)
+    return tot
+
+
 def _data_transazione_ordine(ordine, p_date):
     """Data di cassa di un ordine fornitore: caricamento conferma d'ordine, poi data arrivo, poi data preventivo."""
     try:
@@ -5637,25 +5651,21 @@ def dashboard_ceo():
     if session.get("user_role") not in ["amministratore", "ceo"]:
         flash("Accesso negato.", "error")
         return redirect(url_for("dashboard"))
+    start_date, end_date, _, _ = _periodo_ceo()
+    cfg_ceerlo = ceerlo.leggi_config()
+    return render_template("dashboard_ceo.html", title="Dashboard Direzionale",
+        **_calcola_dashboard_ceo(start_date, end_date),
+        analisi_ceerlo=analisi_ceo_salvata(start_date, end_date),
+        analisi_recenti=analisi_ceo_recenti(),
+        report_ceo={"settimanale": bool(cfg_ceerlo.get("report_ceo_settimanale")),
+                    "mensile": bool(cfg_ceerlo.get("report_ceo_mensile")),
+                    "destinatari": destinatari_report_ceo(),
+                    "email_attiva": integrazioni_google.email_attiva()})
 
-    # --- 1. GESTIONE DATE ---
+
+def _calcola_dashboard_ceo(start_date, end_date):
+    """Tutti i numeri della Dashboard Direzionale per un periodo (usati dalla pagina e da Ceerlo)."""
     today = datetime.date.today()
-    start_date_str = request.args.get("start_date")
-    end_date_str = request.args.get("end_date")
-    MIN_DATE = datetime.date(2025, 9, 1)
-
-    if start_date_str:
-        start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
-    else:
-        start_date = today.replace(day=1)
-    if start_date < MIN_DATE:
-        start_date = MIN_DATE
-
-    if end_date_str:
-        end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
-    else:
-        next_month = today.replace(day=28) + datetime.timedelta(days=4)
-        end_date = next_month - datetime.timedelta(days=next_month.day)
 
     # --- 2. CARICAMENTO DATI: UNICA QUERY CON EAGER LOAD ORDINI ---
     from sqlalchemy.orm import joinedload
@@ -5676,20 +5686,29 @@ def dashboard_ceo():
     kpi = {
         "imponibile_totale": 0.0, "costi_preventivati_totali": 0.0, "costi_reali_totali": 0.0,
         "scostamento_totale": 0.0, "fee_versata": 0.0, "utile_netto_finale": 0.0,
-        "margine_medio_pct": 0.0, "marginalita_totale_pct": 0.0
+        "margine_medio_pct": 0.0, "marginalita_totale_pct": 0.0,
+        # Valori "con IVA" (solo per l'interruttore a video: non cambiano i conti senza IVA)
+        "imponibile_lordo": 0.0, "costi_lordi": 0.0, "iva_netta": 0.0
     }
+    IVA_STD = 1.22  # dove l'IVA di un costo non e' registrata si aggiunge il 22% (come lo scorporo degli ordini)
     cashflow = {
         "incassato_netto": 0.0, "in_attesa_netto": 0.0, "da_saldare_netto": 0.0,
         "costi_preventivi_in_corso": 0.0,
         "iva_preventivi": 0.0, "iva_ordini": 0.0, "iva_esente": 0.0,
         "fee_versata": 0.0,
-        "bilancio": 0.0, "bilancio_iva": 0.0
+        "bilancio": 0.0, "bilancio_iva": 0.0,
+        # Valori "con IVA" (solo per l'interruttore a video)
+        "incassato_lordo": 0.0, "in_attesa_lordo": 0.0, "da_saldare_lordo": 0.0,
+        "uscite_lorde": 0.0, "bilancio_lordo": 0.0,
+        # Pagamenti programmati con la data gia' passata e non ancora incassati
+        "scaduti_netto": 0.0, "scaduti_lordo": 0.0
     }
     funnel = {"creati": 0, "inviati": 0, "confermati": 0, "annullati": 0,
-              "valore_in_trattativa": 0.0, "tasso_firma": 0.0}
+              "valore_in_trattativa": 0.0, "valore_in_trattativa_lordo": 0.0, "tasso_firma": 0.0}
     venditori_dict = {}
     referenti_dict = {}
     future_payments = []
+    pagamenti_scaduti = []
     daily_stats = {}
 
     # --- 4. SINGOLO CICLO SU TUTTI I PREVENTIVI ---
@@ -5715,6 +5734,8 @@ def dashboard_ceo():
         raw_no_iva = p.get("no_iva")
         is_no_iva = (raw_no_iva is True) or (str(raw_no_iva).lower() == "true")
         ratio_netto = _ratio_netto_incassi(p)
+        # Quanto paga il cliente IVA compresa (esente IVA: solo l'imponibile)
+        lordo_cli = imponibile if (is_no_iva or tot_lordo <= 0) else tot_lordo
 
         # == A. LOGICA COMPETENZA (filtro su data preventivo nel range) ==
         in_periodo = start_date <= p_date <= end_date
@@ -5722,9 +5743,11 @@ def dashboard_ceo():
             funnel["creati"] += 1
             if st == "Bozza":
                 funnel["valore_in_trattativa"] += imponibile
+                funnel["valore_in_trattativa_lordo"] += lordo_cli
             elif st == "Inviato":
                 funnel["inviati"] += 1
                 funnel["valore_in_trattativa"] += imponibile
+                funnel["valore_in_trattativa_lordo"] += lordo_cli
             elif st in ["Confermato", "In Lavorazione", "Chiuso"]:
                 funnel["inviati"] += 1
                 funnel["confermati"] += 1
@@ -5745,7 +5768,10 @@ def dashboard_ceo():
                     )
 
                 # Costo delle righe prese dal magazzino (vale come un ordine fornitore)
-                c_reale += costo_righe_magazzino(p)
+                c_magazzino = costo_righe_magazzino(p)
+                c_reale += c_magazzino
+                # Con IVA: gli edili usano l'"IVA costo" di ogni riga; il magazzino non ha l'IVA registrata -> +22%
+                c_reale_lordo = _costo_manuale_edile_lordo(p) + c_magazzino * IVA_STD
 
                 # Costo da ordini fornitore (usati gli oggetti ORM gia caricati)
                 for ordine_obj in prev_obj.ordini_rel:
@@ -5754,10 +5780,17 @@ def dashboard_ceo():
                     iva_ord = _to_float(ordine.get("iva_ordine", 0))
                     c_ord_netto = (imp_lordo - iva_ord) if iva_ord else imp_lordo / 1.22
                     c_reale += c_ord_netto
+                    c_reale_lordo += imp_lordo
 
                 fee_val = imponibile * (fee_pct / 100.0) if fee_pct > 0 else 0.0
                 c_rif = c_reale if c_reale > 0 else c_presunto
-                margine = imponibile - c_rif
+                c_rif_lordo = c_reale_lordo if c_reale > 0 else c_presunto * IVA_STD
+                # Utile al netto della fee riconosciuta al referente
+                margine = imponibile - c_rif - fee_val
+
+                kpi["imponibile_lordo"] += lordo_cli
+                kpi["costi_lordi"] += c_rif_lordo
+                kpi["iva_netta"] += (lordo_cli - imponibile) - (c_rif_lordo - c_rif)
 
                 kpi["imponibile_totale"] += imponibile
                 kpi["costi_preventivati_totali"] += c_presunto
@@ -5769,10 +5802,11 @@ def dashboard_ceo():
                 vnd = p.get("venditore", "N/D")
                 if vnd not in venditori_dict:
                     venditori_dict[vnd] = {
-                        "nome": vnd, "count": 0, "imponibile": 0.0,
+                        "nome": vnd, "count": 0, "imponibile": 0.0, "imponibile_lordo": 0.0,
                         "utile": 0.0, "inviati": 0, "tasso_conv": 0.0
                     }
                 venditori_dict[vnd]["count"] += 1
+                venditori_dict[vnd]["imponibile_lordo"] += lordo_cli
                 venditori_dict[vnd]["imponibile"] += imponibile
                 venditori_dict[vnd]["utile"] += margine
 
@@ -5780,15 +5814,20 @@ def dashboard_ceo():
                 ref = p.get("referente", "")
                 if ref:
                     if ref not in referenti_dict:
-                        referenti_dict[ref] = {"nome": ref, "preventivo": 0, "imponibile": 0.0, "fee": 0.0}
+                        referenti_dict[ref] = {"nome": ref, "preventivo": 0, "imponibile": 0.0, "imponibile_lordo": 0.0, "fee": 0.0}
                     referenti_dict[ref]["preventivo"] += 1
+                    referenti_dict[ref]["imponibile_lordo"] += lordo_cli
                     referenti_dict[ref]["imponibile"] += imponibile
                     referenti_dict[ref]["fee"] += fee_val
 
                 # Statistiche giornaliere per grafico
                 d_str = raw_date
                 if d_str not in daily_stats:
-                    daily_stats[d_str] = {"imp": 0, "marg": 0, "fee": 0, "c_reale": 0, "c_pres": 0}
+                    daily_stats[d_str] = {"imp": 0, "marg": 0, "fee": 0, "c_reale": 0, "c_pres": 0,
+                                          "imp_l": 0, "c_reale_l": 0, "c_pres_l": 0}
+                daily_stats[d_str]["imp_l"] += lordo_cli
+                daily_stats[d_str]["c_reale_l"] += c_rif_lordo
+                daily_stats[d_str]["c_pres_l"] += c_presunto * IVA_STD
                 daily_stats[d_str]["imp"] += imponibile
                 daily_stats[d_str]["marg"] += margine
                 daily_stats[d_str]["fee"] += fee_val
@@ -5800,6 +5839,7 @@ def dashboard_ceo():
                 inc_tot_quote = sum(_to_float(x.get("importo", 0)) for x in p.get("pagamenti", []))
                 dovuto_lordo = imponibile if is_no_iva else tot_lordo
                 cashflow["da_saldare_netto"] += (dovuto_lordo - inc_tot_quote) * ratio_netto
+                cashflow["da_saldare_lordo"] += (dovuto_lordo - inc_tot_quote)
 
             # == B. LOGICA CASSA (data pagamento, senza filtro periodo competenza) ==
             for pag in p.get("pagamenti", []):
@@ -5815,6 +5855,7 @@ def dashboard_ceo():
 
                 if start_date <= d_pag <= end_date and not pag.get("is_scheduled"):
                     cashflow["incassato_netto"] += val_netto
+                    cashflow["incassato_lordo"] += val_lordo
                     cashflow["fee_versata"] += fee_su_incasso
                     if not is_no_iva:
                         cashflow["iva_preventivi"] += quota_iva
@@ -5823,12 +5864,15 @@ def dashboard_ceo():
                         cashflow["iva_esente"] += val_netto * _to_float(p.get("tot_iva", 0)) / imponibile
 
                 if pag.get("is_scheduled"):
-                    cashflow["in_attesa_netto"] += val_netto
-                    future_payments.append({
+                    scaduto = d_pag < today
+                    cashflow["scaduti_netto" if scaduto else "in_attesa_netto"] += val_netto
+                    cashflow["scaduti_lordo" if scaduto else "in_attesa_lordo"] += val_lordo
+                    (pagamenti_scaduti if scaduto else future_payments).append({
                         "data": d_pag,
                         "cliente": p.get("cliente"),
                         "preventivo": p.get("numero"),
                         "importo_netto": val_netto,
+                        "importo_lordo": val_lordo,
                         "note": pag.get("note", "")
                     })
 
@@ -5838,6 +5882,7 @@ def dashboard_ceo():
                 d_trans = _data_transazione_ordine(ordine, p_date)
                 if start_date <= d_trans <= end_date:
                     cashflow["costi_preventivi_in_corso"] += _get_netto_ordine(ordine)
+                    cashflow["uscite_lorde"] += _to_float(ordine.get("importo", 0))
                     # IVA ordini per cassa: data conferma ordine (allegato) o arrivo, come in V2
                     cashflow["iva_ordini"] += _to_float(ordine.get("iva_ordine", 0))
 
@@ -5845,6 +5890,7 @@ def dashboard_ceo():
             # alla data di conferma (come nell'export cashflow)
             if start_date <= p_date <= end_date:
                 cashflow["costi_preventivi_in_corso"] += _costo_manuale_edile(p)
+                cashflow["uscite_lorde"] += _costo_manuale_edile_lordo(p)
 
         # Conteggio preventivi inviati per tasso conversione venditore
         elif st == "Inviato" and in_periodo:
@@ -5855,6 +5901,7 @@ def dashboard_ceo():
     # Uscite per la merce caricata in magazzino (logica cassa: data del carico, come gli ordini)
     cashflow["acquisti_magazzino"] = sum(a["importo"] for a in acquisti_magazzino(start_date, end_date))
     cashflow["costi_preventivi_in_corso"] += cashflow["acquisti_magazzino"]
+    cashflow["uscite_lorde"] += cashflow["acquisti_magazzino"] * IVA_STD
 
     # --- 5. CALCOLI FINALI ---
     # Tasso conversione per venditore
@@ -5869,6 +5916,11 @@ def dashboard_ceo():
         - cashflow["fee_versata"]
     )
     cashflow["bilancio_iva"] = cashflow["iva_preventivi"] - cashflow["iva_ordini"]
+    cashflow["bilancio_lordo"] = (
+        cashflow["incassato_lordo"]
+        - cashflow["uscite_lorde"]
+        - cashflow["fee_versata"]
+    )
 
     # Finalizzazione KPI
     kpi["scostamento_totale"] = kpi["costi_preventivati_totali"] - kpi["costi_reali_totali"]
@@ -5883,6 +5935,7 @@ def dashboard_ceo():
     venditori_list = sorted(venditori_dict.values(), key=lambda x: x["imponibile"], reverse=True)
     referenti_list = sorted(referenti_dict.values(), key=lambda x: x["fee"], reverse=True)
     future_payments.sort(key=lambda x: x["data"])
+    pagamenti_scaduti.sort(key=lambda x: x["data"])
     sorted_dates = sorted(daily_stats.keys())
 
     grafico_out = {
@@ -5891,18 +5944,379 @@ def dashboard_ceo():
         "utile": [daily_stats[d]["marg"] for d in sorted_dates],
         "fee": [daily_stats[d]["fee"] for d in sorted_dates],
         "costi_effettivi": [daily_stats[d]["c_reale"] for d in sorted_dates],
-        "costi_presunti": [daily_stats[d]["c_pres"] for d in sorted_dates]
+        "costi_presunti": [daily_stats[d]["c_pres"] for d in sorted_dates],
+        "imponibile_lordo": [daily_stats[d]["imp_l"] for d in sorted_dates],
+        "costi_effettivi_lordi": [daily_stats[d]["c_reale_l"] for d in sorted_dates],
+        "costi_presunti_lordi": [daily_stats[d]["c_pres_l"] for d in sorted_dates]
     }
 
-    return render_template("dashboard_ceo.html",
-        title="Dashboard Direzionale",
+    return dict(
         start_date=start_date.strftime("%Y-%m-%d"),
         end_date=end_date.strftime("%Y-%m-%d"),
         kpi=kpi, cashflow=cashflow, funnel=funnel,
         venditori=venditori_list, referenti=referenti_list,
         future_payments=future_payments,
+        pagamenti_scaduti=pagamenti_scaduti,
         grafico=grafico_out
     )
+
+# === CEERLO-CEO: INIZIO (analisi del periodo e report periodici nella Dashboard Direzionale) ===
+FILE_ANALISI_CEO = "analisi_ceo.json"
+FILE_REPORT_CEO = "report_ceo_inviati.json"
+ORA_REPORT_CEO = 7  # i report periodici partono dalle 7 del mattino
+
+
+def _periodo_precedente_ceo(start, end):
+    """Il periodo di confronto: il mese prima se il periodo e' un mese intero, altrimenti gli stessi giorni subito prima."""
+    if start.day == 1 and (end + datetime.timedelta(days=1)).day == 1 and (start.year, start.month) == (end.year, end.month):
+        fine = start - datetime.timedelta(days=1)
+        return fine.replace(day=1), fine
+    giorni = (end - start).days + 1
+    return start - datetime.timedelta(days=giorni), start - datetime.timedelta(days=1)
+
+
+def _indicatori_ceo(d, dp):
+    """Le cifre principali del periodo (d) e del periodo di confronto (dp): (nome, ora, prima, tipo).
+    tipo: 'euro' importo senza IVA, 'saldo' importo che puo' essere negativo, 'num' conteggio, 'pct' percentuale."""
+    def costi(x):
+        return x["kpi"]["imponibile_totale"] - x["kpi"]["fee_versata"] - x["kpi"]["utile_netto_finale"]
+    voci = [
+        ("Venduto (preventivi confermati)", lambda x: x["kpi"]["imponibile_totale"], "euro"),
+        ("Costi fornitori", costi, "euro"),
+        ("Fee ai referenti", lambda x: x["kpi"]["fee_versata"], "euro"),
+        ("Utile (tolta la fee)", lambda x: x["kpi"]["utile_netto_finale"], "euro"),
+        ("Margine sul venduto", lambda x: x["kpi"]["marginalita_totale_pct"], "pct"),
+        ("Incassato dai clienti", lambda x: x["cashflow"]["incassato_netto"], "euro"),
+        ("Speso (fornitori e magazzino)", lambda x: x["cashflow"]["costi_preventivi_in_corso"], "euro"),
+        ("Saldo di cassa", lambda x: x["cashflow"]["bilancio"], "saldo"),
+        ("Preventivi creati", lambda x: x["funnel"]["creati"], "num"),
+        ("Preventivi firmati", lambda x: x["funnel"]["confermati"], "num"),
+        ("Preventivi annullati", lambda x: x["funnel"]["annullati"], "num"),
+        ("Percentuale di firma", lambda x: x["funnel"]["tasso_firma"], "pct"),
+        ("In trattativa (bozze e inviati)", lambda x: x["funnel"]["valore_in_trattativa"], "euro"),
+    ]
+    return [(nome, f(d), f(dp), tipo) for nome, f, tipo in voci]
+
+
+def _variazione_ceo(ora, prima, tipo):
+    """Testo del confronto col periodo prima, senza importi: '+12,3%', '+2', '+1,5 punti'. '' se non confrontabile."""
+    if tipo == "num":
+        diff = int(round(ora - prima))
+        return "uguale" if diff == 0 else f"{diff:+d}"
+    if tipo == "pct":
+        diff = ora - prima
+        return "uguale" if abs(diff) < 0.05 else f"{diff:+.1f} punti".replace(".", ",")
+    if tipo == "saldo":
+        return "uguale" if abs(ora - prima) < 0.005 else ("in miglioramento" if ora > prima else "in peggioramento")
+    if abs(prima) < 0.005:
+        return ""
+    pct = (ora - prima) / abs(prima) * 100
+    return "uguale" if abs(pct) < 0.05 else f"{pct:+.1f}%".replace(".", ",")
+
+
+def _valore_ceo(v, tipo):
+    if tipo in ("euro", "saldo"):
+        return money_ui(v)
+    if tipo == "pct":
+        return f"{v:.1f}%".replace(".", ",")
+    return str(int(round(v)))
+
+
+def _contesto_ceo(d, dp, start, end, pstart, pend):
+    """I numeri della Dashboard Direzionale scritti per Ceerlo, gia' calcolati (confronti compresi)."""
+    f = lambda g: g.strftime("%d/%m/%Y")
+    righe = [f"DASHBOARD DIREZIONALE, periodo dal {f(start)} al {f(end)}. Confronto con il periodo dal {f(pstart)} al {f(pend)}.",
+             "Tutti gli importi sono senza IVA. 'Venduto' e 'Utile' contano i preventivi confermati nel periodo; "
+             "'Incassato' e 'Speso' contano i soldi entrati e usciti davvero nel periodo.", "", "CIFRE PRINCIPALI:"]
+    for nome, ora, prima, tipo in _indicatori_ceo(d, dp):
+        var = _variazione_ceo(ora, prima, tipo)
+        righe.append(f"- {nome}: {_valore_ceo(ora, tipo)} (periodo prima: {_valore_ceo(prima, tipo)}"
+                     + (f", variazione {var}" if var else "") + ")")
+    cf = d["cashflow"]
+    righe += [f"- Incassi gia' in calendario (futuri): {money_ui(cf['in_attesa_netto'])}",
+              f"- Incassi programmati gia' scaduti (data passata, non ancora incassati): {money_ui(cf['scaduti_netto'])} "
+              f"({len(d['pagamenti_scaduti'])} pagamenti)",
+              f"- Ancora da incassare senza una data: {money_ui(cf['da_saldare_netto'])}",
+              f"- IVA: incassata {money_ui(cf['iva_preventivi'])}, pagata {money_ui(cf['iva_ordini'])}, "
+              + (f"da versare {money_ui(cf['bilancio_iva'])}" if cf["bilancio_iva"] >= 0 else f"a credito {money_ui(-cf['bilancio_iva'])}"),
+              "", "VENDITORI (preventivi firmati, venduto, utile, ancora in attesa di risposta, percentuale di chiusura):"]
+    righe += [f"- {v['nome']}: {v['count']} firmati, venduto {money_ui(v['imponibile'])}, utile {money_ui(v['utile'])}, "
+              f"{v['inviati']} in attesa, chiude il {str(v['tasso_conv']).replace('.', ',')}%" for v in d["venditori"][:10]] or ["- nessuna vendita"]
+    righe += ["", "REFERENTI (preventivi firmati, venduto, fee):"]
+    righe += [f"- {r['nome']}: {r['preventivo']} firmati, venduto {money_ui(r['imponibile'])}, fee {money_ui(r['fee'])}"
+              for r in d["referenti"][:10]] or ["- nessuno"]
+    righe += ["", f"INCASSI SCADUTI ({len(d['pagamenti_scaduti'])} in tutto):"]
+    righe += [f"- {p['data'].strftime('%d/%m/%Y')} {p['cliente']}: {money_ui(p['importo_netto'])}"
+              for p in d["pagamenti_scaduti"][:8]] or ["- nessuno"]
+    righe += ["", f"PROSSIMI INCASSI IN CALENDARIO ({len(d['future_payments'])} in tutto):"]
+    righe += [f"- {p['data'].strftime('%d/%m/%Y')} {p['cliente']}: {money_ui(p['importo_netto'])}"
+              for p in d["future_payments"][:8]] or ["- nessuno"]
+    return "\n".join(righe)
+
+
+def _messaggi_analisi_ceo(start, end):
+    """(messaggi per Ceerlo, dati del periodo, dati del periodo di confronto, inizio e fine del confronto)."""
+    pstart, pend = _periodo_precedente_ceo(start, end)
+    d, dp = _calcola_dashboard_ceo(start, end), _calcola_dashboard_ceo(pstart, pend)
+    messaggi = [{"role": "system", "content": ceerlo.prompt_sistema("il CEO", "analisi direzionale",
+                                                                    _contesto_ceo(d, dp, start, end, pstart, pend))},
+                {"role": "user", "content": (
+                    "Scrivi per il CEO l'analisi panoramica del periodo. Quattro parti brevi con questi titoli su righe a se': "
+                    "'In sintesi' (2 o 3 righe: come e' andato il periodo rispetto a quello prima), 'Cosa va bene', "
+                    "'Da tenere d'occhio' e 'Cosa fare adesso' (azioni concrete e semplici). Sotto ogni titolo righe che iniziano "
+                    "con '- '. In tutto massimo 14 righe, frasi corte e chiare, senza termini tecnici. "
+                    "Comincia subito con 'In sintesi', senza saluti ne' frasi di apertura o di chiusura. "
+                    "Usa solo i numeri del contesto, che sono gia' calcolati: non fare calcoli tuoi e ricopia importi e "
+                    "percentuali carattere per carattere, senza confondere le voci ('Speso' non e' 'Costi fornitori'). "
+                    "Costi piu' bassi solo perche' si e' venduto meno non sono una cosa buona. "
+                    "Spese piu' basse in un periodo con poche o nessuna vendita non vanno sotto 'Cosa va bene'. "
+                    "Gli incassi scaduti vanno sotto 'Da tenere d'occhio' o 'Cosa fare adesso'. Se un dato e' zero o manca dillo, senza inventare spiegazioni. "
+                    "Non scrivere #codici e non usare il grassetto.")}]
+    return messaggi, d, dp, pstart, pend
+
+
+def _salva_analisi_ceo(start, end, testo, origine):
+    testo = (testo or "").replace("**", "").strip()
+    if not testo:
+        return
+    tutte = ceerlo._leggi_json(FILE_ANALISI_CEO, {})
+    tutte[f"{start}|{end}"] = {"dal": str(start), "al": str(end), "testo": testo, "origine": origine,
+                              "quando": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+    recenti = sorted(tutte.items(), key=lambda kv: kv[1].get("quando", ""), reverse=True)[:30]
+    ceerlo._scrivi_json(FILE_ANALISI_CEO, dict(recenti))
+
+
+def analisi_ceo_salvata(start, end):
+    return ceerlo._leggi_json(FILE_ANALISI_CEO, {}).get(f"{start}|{end}")
+
+
+def analisi_ceo_recenti(quante=6):
+    tutte = ceerlo._leggi_json(FILE_ANALISI_CEO, {}).values()
+    return [{k: a.get(k, "") for k in ("dal", "al", "quando", "origine")}
+            for a in sorted(tutte, key=lambda a: a.get("quando", ""), reverse=True)[:quante]]
+
+
+def destinatari_report_ceo():
+    """I report periodici vanno solo a CEO e amministratori che hanno un'email in Gestione Utenti."""
+    return sorted({u["email"] for u in load_users() if u.get("role") in ("ceo", "amministratore") and u.get("email")})
+
+
+def _solo_ceo_json():
+    if session.get("user_role") not in ["amministratore", "ceo"]:
+        return jsonify({"ok": False, "error": "Accesso negato."}), 403
+    return None
+
+
+def _date_richiesta_ceo():
+    d = request.get_json(silent=True) or {}
+    try:
+        start = datetime.datetime.strptime(d.get("start_date", ""), "%Y-%m-%d").date()
+        end = datetime.datetime.strptime(d.get("end_date", ""), "%Y-%m-%d").date()
+    except ValueError:
+        return None, None
+    return (start, end) if start <= end else (None, None)
+
+
+@app.route("/dashboard/ceo/ceerlo/analisi", methods=["POST"])
+@login_required
+def ceo_ceerlo_analisi():
+    """Mette in coda l'analisi del periodo: la pagina poi chiede lo stato a /api/ceerlo/job/<id>."""
+    negato = _solo_ceo_json()
+    if negato:
+        return negato
+    if not ceerlo.attivo():
+        return jsonify({"ok": False, "error": f"{ceerlo.NOME} e' spento: si accende in Impostazioni."}), 400
+    start, end = _date_richiesta_ceo()
+    if not start:
+        return jsonify({"ok": False, "error": "Periodo non valido."}), 400
+    messaggi = _messaggi_analisi_ceo(start, end)[0]
+    try:
+        jid = ceerlo.aggiungi(session["user_id"], messaggi, ceerlo.PRIO_RICHIESTA, "analisi_ceo",
+                              al_termine=lambda testo: _salva_analisi_ceo(start, end, testo, "a richiesta"),
+                              chiave=f"ceo:{session['user_id']}:{start}:{end}")
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True, "job": jid})
+
+
+@app.route("/dashboard/ceo/ceerlo/report", methods=["POST"])
+@login_required
+def ceo_ceerlo_report_config():
+    """Accende o spegne i report periodici. All'accensione il periodo in corso si considera gia' fatto:
+    il primo report arriva il lunedi' (o il primo del mese) successivo; per vederlo subito c'e' la prova."""
+    negato = _solo_ceo_json()
+    if negato:
+        return negato
+    d = request.get_json(silent=True) or {}
+    prima = ceerlo.leggi_config()
+    nuovi = {"report_ceo_settimanale": bool(d.get("settimanale")), "report_ceo_mensile": bool(d.get("mensile"))}
+    inviati = ceerlo._leggi_json(FILE_REPORT_CEO, {})
+    for tipo, chiave, _, _ in _report_ceo_dovuti(datetime.datetime.now(), nuovi):
+        if not prima.get(f"report_ceo_{tipo}"):
+            inviati[chiave] = "attivato " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    ceerlo._scrivi_json(FILE_REPORT_CEO, inviati)
+    ceerlo.salva_config(nuovi)
+    return jsonify({"ok": True})
+
+
+@app.route("/dashboard/ceo/ceerlo/report_prova", methods=["POST"])
+@login_required
+def ceo_ceerlo_report_prova():
+    """Manda subito a chi lo chiede il report della settimana scorsa, per vedere com'e' fatto."""
+    negato = _solo_ceo_json()
+    if negato:
+        return negato
+    if not integrazioni_google.email_attiva():
+        return jsonify({"ok": False, "error": "L'email non e' configurata: si imposta in Impostazioni, Email e Google Calendar."}), 400
+    me = next((u for u in load_users() if u["username"] == session["user_id"]), {})
+    if not me.get("email"):
+        return jsonify({"ok": False, "error": "Nel tuo utente manca l'indirizzo email: aggiungilo in Gestione Utenti."}), 400
+    oggi = datetime.date.today()
+    lun = oggi - datetime.timedelta(days=oggi.weekday())
+    start, end = lun - datetime.timedelta(days=7), lun - datetime.timedelta(days=1)
+    threading.Thread(target=manda_report_ceo, args=("settimanale", start, end, [me["email"]]),
+                     daemon=True, name="ReportCeoProva").start()
+    attesa = f" {ceerlo.NOME} scrive prima l'analisi: puo' volerci qualche minuto." if ceerlo.attivo() else ""
+    return jsonify({"ok": True, "messaggio": f"Report di prova in arrivo a {me['email']}.{attesa}"})
+
+
+def _ceerlo_aspetta(messaggi, chiave, minuti):
+    """Mette in coda una richiesta per Ceerlo e aspetta la risposta al massimo `minuti`. '' se non arriva."""
+    try:
+        jid = ceerlo.aggiungi("report_ceo", messaggi, ceerlo.PRIO_RICHIESTA, "report_ceo", chiave=chiave)
+    except Exception as ex:
+        integrazioni_google.log(f"Report CEO: Ceerlo non disponibile ({ex})")
+        return ""
+    fine = time.time() + minuti * 60
+    while time.time() < fine:
+        st = ceerlo.stato_job(jid) or {}
+        if st.get("stato") == "fatto":
+            return (st.get("risposta") or "").replace("**", "").strip()
+        if not st or st.get("stato") == "errore":
+            integrazioni_google.log(f"Report CEO: Ceerlo non ha risposto ({st.get('errore', 'richiesta persa')})")
+            return ""
+        time.sleep(5)
+    integrazioni_google.log(f"Report CEO: Ceerlo non ha finito in {minuti} minuti")
+    return ""
+
+
+def _componi_report_ceo(tipo, start, end, d, dp, con_analisi):
+    """(oggetto, testo, html) dell'email. Come tutte le email del gestionale NON contiene importi:
+    porta l'andamento rispetto al periodo prima e il link alla pagina con tutti i numeri e l'analisi di Ceerlo."""
+    import html as _h
+    f = lambda g: g.strftime("%d/%m/%Y")
+    if tipo == "mensile":
+        titolo = f"Report di {MESI_IT[start.month - 1]} {start.year}"
+    else:
+        titolo = f"Report della settimana dal {f(start)} al {f(end)}"
+    link = f"{indirizzo_gestionale()}dashboard/ceo?start_date={start}&end_date={end}"
+    righe = []
+    for nome, ora, prima, tipo_v in _indicatori_ceo(d, dp):
+        var = _variazione_ceo(ora, prima, tipo_v)
+        if tipo_v == "euro":
+            valore, confronto = "", (var or "nessun confronto")
+        elif tipo_v == "saldo":
+            valore, confronto = ("positivo" if ora >= 0 else "negativo"), var
+        else:
+            valore, confronto = _valore_ceo(ora, tipo_v), (f"prima {_valore_ceo(prima, tipo_v)}" + (f" ({var})" if var else ""))
+        righe.append((nome, valore, confronto))
+    nota_ai = (f"{ceerlo.NOME} ha scritto l'analisi completa: la trovi aprendo il report." if con_analisi
+               else "Questa volta senza l'analisi scritta: i numeri completi sono nella pagina.")
+    t = [titolo.upper(), "", "Andamento rispetto al periodo prima:"]
+    t += [f"- {n}: {(v + ', ') if v else ''}{c}" for n, v, c in righe]
+    t += ["", nota_ai, "Apri il report completo: " + link]
+    def colore(c):
+        if c.startswith("+") or " (+" in c or "miglioramento" in c:
+            return "#059669"
+        return "#dc2626" if c.startswith("-") or " (-" in c or "peggioramento" in c else "#64748b"
+    tab = "".join(
+        f'<tr><td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">{_h.escape(n)}</td>'
+        f'<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:700;color:#111827;text-align:right;">{_h.escape(v)}</td>'
+        f'<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:600;color:{colore(c)};text-align:right;">{_h.escape(c)}</td></tr>'
+        for n, v, c in righe)
+    html = f"""<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>{_h.escape(titolo)}</title></head>
+<body style="margin:0;padding:0;background:#eef0f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef0f5;"><tr><td align="center" style="padding:24px 10px;">
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;">
+<tr><td style="background-color:#1e293b;padding:24px 28px;color:#ffffff;">
+<div style="font-size:12px;letter-spacing:3px;font-weight:700;opacity:.85;">CERLAB · DIREZIONE</div>
+<div style="font-size:22px;font-weight:700;margin-top:6px;">{_h.escape(titolo)}</div>
+<div style="font-size:13px;opacity:.85;margin-top:4px;">Andamento rispetto al periodo prima</div></td></tr>
+<tr><td style="padding:18px 28px 6px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">{tab}</table></td></tr>
+<tr><td style="padding:12px 28px 4px;font-size:14px;color:#1f2937;">🤖 {_h.escape(nota_ai)}</td></tr>
+<tr><td style="padding:14px 28px 24px;"><a href="{_h.escape(link)}" style="display:inline-block;background:#3b4fe4;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:10px 18px;border-radius:8px;">Apri il report completo</a></td></tr>
+<tr><td style="padding:14px 28px;background:#f8fafc;border-top:1px solid #e5e7eb;font-size:11.5px;color:#64748b;line-height:1.5;">
+Email automatica del Gestionale Cerlab per CEO e amministratori, senza importi: le cifre si vedono solo aprendo il gestionale.</td></tr>
+</table></td></tr></table></body></html>"""
+    return titolo, "\n".join(t), html
+
+
+def manda_report_ceo(tipo, start, end, destinatari, minuti=None):
+    """Prepara il report del periodo (analisi di Ceerlo salvata nella pagina + email senza importi) e lo manda."""
+    try:
+        messaggi, d, dp, _, _ = _messaggi_analisi_ceo(start, end)
+        testo = ""
+        if ceerlo.attivo():
+            testo = _ceerlo_aspetta(messaggi, f"reportceo:{tipo}:{start}", MINUTI_ATTESA_CEERLO if minuti is None else minuti)
+            if testo:
+                _salva_analisi_ceo(start, end, testo, f"report {tipo}")
+        oggetto, txt, html = _componi_report_ceo(tipo, start, end, d, dp, bool(testo))
+        return integrazioni_google._manda(destinatari, oggetto, txt, html)
+    except Exception as e:
+        integrazioni_google.log(f"Report CEO {tipo}: errore {e!r}")
+        return False, str(e)
+
+
+def _report_ceo_dovuti(adesso, cfg):
+    """I report periodici accesi il cui periodo e' finito: [(tipo, chiave, inizio, fine)]."""
+    oggi, dovuti = adesso.date(), []
+    if cfg.get("report_ceo_settimanale"):
+        lun = oggi - datetime.timedelta(days=oggi.weekday())
+        dovuti.append(("settimanale", f"settimanale:{lun}", lun - datetime.timedelta(days=7), lun - datetime.timedelta(days=1)))
+    if cfg.get("report_ceo_mensile"):
+        primo = oggi.replace(day=1)
+        fine = primo - datetime.timedelta(days=1)
+        dovuti.append(("mensile", f"mensile:{primo}", fine.replace(day=1), fine))
+    return dovuti
+
+
+def _controlla_report_ceo(adesso=None):
+    """Manda i report periodici non ancora mandati (anche in ritardo, se lunedi' il PC era spento). Tre tentativi al massimo."""
+    adesso = adesso or datetime.datetime.now()
+    cfg = ceerlo.leggi_config()
+    if adesso.hour < ORA_REPORT_CEO or not integrazioni_google.email_attiva():
+        return
+    for tipo, chiave, start, end in _report_ceo_dovuti(adesso, cfg):
+        inviati = ceerlo._leggi_json(FILE_REPORT_CEO, {})
+        stato = str(inviati.get(chiave, ""))
+        if stato and not stato.startswith("tentativo"):
+            continue
+        tentativi = int(stato.split()[-1]) if stato else 0
+        if tentativi >= 3:
+            continue
+        destinatari = destinatari_report_ceo()
+        if not destinatari:
+            return
+        ok, _ = manda_report_ceo(tipo, start, end, destinatari)
+        inviati = ceerlo._leggi_json(FILE_REPORT_CEO, {})
+        inviati[chiave] = ("inviato " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M")) if ok else f"tentativo {tentativi + 1}"
+        ceerlo._scrivi_json(FILE_REPORT_CEO, inviati)
+
+
+def avvia_report_ceo():
+    """Ogni 10 minuti controlla se c'e' un report periodico da mandare."""
+    def _giro():
+        time.sleep(120)
+        while True:
+            try:
+                _controlla_report_ceo()
+            except Exception as e:
+                print(f"[report ceo] {e}")
+            time.sleep(600)
+    threading.Thread(target=_giro, daemon=True, name="ReportCeo").start()
+# === CEERLO-CEO: FINE ===
+
 
 def _periodo_ceo():
     """Periodo richiesto dalla dashboard CEO (stesse regole e stessa data minima della dashboard)."""
@@ -6409,7 +6823,7 @@ def analisi_preventivo(quote_id):
     # --------------------------------------
 
     # Calcolo Utile Effettivo
-    utile_netto_effettivo = imponibile_cliente - costi_effettivi_netti
+    utile_netto_effettivo = imponibile_cliente - costi_effettivi_netti - fee_semplice_valore
 
     # 4. Assembla i dati di analisi
     analisi = {
@@ -6534,7 +6948,7 @@ def analisi_cliente(client_id):
             profitti_dettaglio = _calculate_profits_from_quote(p) 
             utile_stimato = profitti_dettaglio.get('profitto', 0.0)
 
-            utile_effettivo = imp_cliente - costo_eff
+            utile_effettivo = imp_cliente - costo_eff - fee_val
 
             # E. Scostamento
             scostamento = costo_prev - costo_eff if costo_eff > 0 else 0.0
@@ -7044,6 +7458,14 @@ def leggi_dati_ddt(form, bolla_id=None):
         dati["partenza"] = dati["ritiro_sede"]
     else:
         dati.pop("ritirato_da", None)
+        # Consegna: con nostro mezzo (mittente) o con corriere (vettore). Mai "destinatario":
+        # quando il trasporto e' del cliente si usa il ritiro.
+        dati["trasporto_a_cura"] = "Vettore" if dati.get("trasporto_a_cura") == "Vettore" else "Mittente"
+        if dati["trasporto_a_cura"] == "Vettore":
+            dati.pop("conducente", None)
+            dati.pop("targa", None)
+        else:
+            dati.pop("vettore", None)
         # Luogo di partenza della merce: negozio (predefinito) o magazzino
         dati["partenza"] = "magazzino" if dati.get("partenza") == "magazzino" else "negozio"
     numero = str(form.get("ddt_numero") or "").strip()[:20]
@@ -8421,6 +8843,7 @@ def run_server():
         integrazioni_google.avvia_riepilogo_giornaliero(report_per_riepilogo, lambda: indirizzi_email("email_report"),
                                                         componi=componi_riepilogo)
         avvia_chiusura_report()
+        avvia_report_ceo()
         avvia_controllo_postazioni()
         ceerlo.avvia_riassunti_automatici(prossimi_eventi, contesto_evento, dopo=_riassunto_pronto)
         threading.Timer(90, titoli_mancanti).start()  # le task aperte senza titolo lo ricevono da Ceerlo

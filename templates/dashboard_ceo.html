@@ -117,69 +117,180 @@
 .mt-4{margin-top:1.5rem}
 @media(max-width:1100px){.overview-grid{grid-template-columns:1fr}.cf-grid{grid-template-columns:1fr 1fr}.iva-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:640px){.cf-grid{grid-template-columns:1fr}.iva-grid{grid-template-columns:1fr}}
+
+/* Interruttore IVA e spiegazioni */
+.ceo-root:not(.con-iva) .v-lordo{display:none!important}
+.ceo-root.con-iva .v-netto{display:none!important}
+.iva-switch{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:7px 14px 7px 10px;color:#e2e8f0;font-size:13px;font-weight:600}
+.iva-switch input{position:absolute;opacity:0;width:0;height:0}
+.iva-switch .trk{position:relative;width:42px;height:24px;border-radius:999px;background:#475569;transition:background .2s;flex-shrink:0}
+.iva-switch .trk::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s}
+.iva-switch input:checked + .trk{background:#10b981}
+.iva-switch input:checked + .trk::after{transform:translateX(18px)}
+.iva-switch input:focus-visible + .trk{outline:2px solid #a5b4fc;outline-offset:2px}
+.bar-row2{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;width:100%;border-top:1px solid rgba(255,255,255,.1);padding-top:14px}
+.ceo-stato{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-8px 0 20px;font-size:13px;color:#475569}
+.ceo-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-weight:700;font-size:12px}
+.ceo-chip.netto{background:#e0f2fe;color:#0369a1}
+.ceo-chip.lordo{background:#d1fae5;color:#065f46}
+.ceo-spiega{background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #6366f1;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#475569;line-height:1.5}
+.ceo-spiega strong{color:#1e293b}
+.eq-label small{display:block;font-size:11px;font-weight:400;color:#94a3b8;text-transform:none;letter-spacing:0;margin-top:2px}
+.mfc-sub{display:block;font-size:11px;color:#94a3b8;margin-top:2px}
+.ceo-two{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:900px){.ceo-two{grid-template-columns:1fr}}
+.ceo-three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:24px}
+@media(max-width:900px){.ceo-three{grid-template-columns:1fr}}
+.eq-val,.perf-table td.right,.ct-amount,.iva-amount{white-space:nowrap}
+.eq-label{padding-right:10px}
+@media(max-width:640px){.ceo-root{padding:12px}.ceo-filter-bar{padding:16px}.ceo-filter-bar .date-inputs{flex-wrap:wrap}.date-sep{display:none}.table-fixed{overflow-x:auto}.ceo-tab-btn{padding:12px 14px}}
+
+/* Ceerlo nella pagina CEO */
+.ceerlo-grid{display:grid;grid-template-columns:3fr 2fr;gap:28px}
+@media(max-width:900px){.ceerlo-grid{grid-template-columns:1fr}}
+.cc-titolo{font-size:12px;letter-spacing:.6px;text-transform:uppercase;font-weight:700;color:#6366f1;margin-bottom:10px}
+.cc-testo{font-size:14px;line-height:1.55;color:#1f2937}
+.cc-testo .cc-h{font-weight:700;color:#1e293b;margin:12px 0 4px}
+.cc-testo .cc-h:first-child{margin-top:0}
+.cc-testo ul{margin:0 0 6px;padding-left:20px}
+.cc-testo li{margin:3px 0}
+.cc-vuoto{color:#64748b;font-size:14px;line-height:1.5}
+.cc-meta{font-size:12px;color:#94a3b8;margin:10px 0}
+.cc-azioni{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.cc-btn2{background:#fff;border:1px solid #cbd5e1;color:#334155;padding:8px 14px;border-radius:10px;font-weight:600;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif}
+.cc-btn2:hover{border-color:#6366f1;color:#4f46e5}
+.btn-ceo-primary:disabled,.cc-btn2:disabled{opacity:.55;cursor:default}
+.cc-msg{font-size:13px;margin-top:10px;color:#475569}
+.cc-msg.err{color:#dc2626}
+.cc-msg.ok{color:#059669}
+.cc-recenti{margin-top:14px;font-size:12.5px;color:#64748b}
+.cc-recenti a{color:#4f46e5;text-decoration:none;margin-right:12px;white-space:nowrap}
+.sw-chiaro{background:#f8fafc;border-color:#e2e8f0;color:#1e293b;border-radius:12px;padding:10px 14px;margin-bottom:8px;font-size:13.5px;justify-content:flex-start}
+.sw-chiaro small{display:block;font-weight:400;color:#64748b;font-size:12px}
+.sw-chiaro .trk{background:#cbd5e1}
 </style>
 
-<div class="ceo-root">
+{% macro eur(n, l) %}<span class="v-netto">{{ n | money_ui }}</span><span class="v-lordo">{{ l | money_ui }}</span>{% endmacro %}
+{% macro dicitura() %}<span class="v-netto">senza IVA</span><span class="v-lordo">IVA compresa</span>{% endmacro %}
+<div class="ceo-root" id="ceo-root">
+<script>try{if(localStorage.getItem('ceo_con_iva')==='1')document.getElementById('ceo-root').classList.add('con-iva');}catch(e){}</script>
 
 <form method="GET" action="{{ url_for('dashboard_ceo') }}" id="ceo-form">
   <div class="ceo-filter-bar">
     <div class="date-inputs">
-      <div class="date-icon-wrap"><i class="fas fa-calendar-alt ico"></i><input type="date" id="start_date" name="start_date" value="{{ start_date }}" min="2025-09-01"></div>
+      <div class="date-icon-wrap"><i class="fas fa-calendar-alt ico"></i><input type="date" id="start_date" name="start_date" value="{{ start_date }}" min="2025-09-01" title="Dal giorno"></div>
       <span class="date-sep">&#8594;</span>
-      <div class="date-icon-wrap"><i class="fas fa-calendar-alt ico"></i><input type="date" id="end_date" name="end_date" value="{{ end_date }}" min="2025-09-01"></div>
+      <div class="date-icon-wrap"><i class="fas fa-calendar-alt ico"></i><input type="date" id="end_date" name="end_date" value="{{ end_date }}" min="2025-09-01" title="Al giorno"></div>
       <div class="filter-actions">
-        <button type="submit" class="btn-ceo-primary"><i class="fas fa-filter"></i> Analizza</button>
-        <button type="button" onclick="downloadExport('{{ url_for('export_excel_ceo') }}')" class="btn-ceo-success"><i class="fas fa-file-excel"></i> Analisi</button>
-        <button type="button" onclick="downloadExport('{{ url_for('export_cashflow_excel') }}')" class="btn-ceo-blue"><i class="fas fa-file-invoice-dollar"></i> Cashflow</button>
+        <button type="submit" class="btn-ceo-primary"><i class="fas fa-sync-alt"></i> Aggiorna</button>
       </div>
     </div>
     <div class="presets">
-      <button type="button" class="preset-btn" data-preset="this-month">Mese Corrente</button>
-      <button type="button" class="preset-btn" data-preset="last-month">Mese Scorso</button>
-      <button type="button" class="preset-btn" data-preset="this-year">Anno in Corso</button>
-      <button type="button" class="preset-btn" data-preset="last-12">Ultimi 12 Mesi</button>
+      <button type="button" class="preset-btn" data-preset="this-month">Questo mese</button>
+      <button type="button" class="preset-btn" data-preset="last-month">Mese scorso</button>
+      <button type="button" class="preset-btn" data-preset="this-year">Quest'anno</button>
+      <button type="button" class="preset-btn" data-preset="last-12">Ultimi 12 mesi</button>
+    </div>
+    <div class="bar-row2">
+      <label class="iva-switch" title="Acceso: importi IVA compresa. Spento: importi senza IVA. La scelta resta memorizzata.">
+        <input type="checkbox" id="iva-toggle" role="switch">
+        <span class="trk"></span>
+        <span>Mostra importi con IVA</span>
+      </label>
+      <div class="filter-actions">
+        <button type="button" onclick="downloadExport('{{ url_for('export_excel_ceo') }}')" class="btn-ceo-success" title="Scarica in Excel l'analisi dei preventivi del periodo"><i class="fas fa-file-excel"></i> Excel analisi</button>
+        <button type="button" onclick="downloadExport('{{ url_for('export_cashflow_excel') }}')" class="btn-ceo-blue" title="Scarica in Excel entrate e uscite del periodo"><i class="fas fa-file-invoice-dollar"></i> Excel cassa</button>
+      </div>
     </div>
   </div>
 </form>
 
-<div class="ceo-tabs-nav">
-  <button class="ceo-tab-btn active" data-tab="tab-overview"><i class="fas fa-tachometer-alt"></i> Overview &amp; Profitti</button>
-  <button class="ceo-tab-btn" data-tab="tab-cashflow"><i class="fas fa-wallet"></i> Cash Flow</button>
-  <button class="ceo-tab-btn" data-tab="tab-commerciale"><i class="fas fa-bullseye"></i> Commerciale</button>
+<div class="ceo-stato">
+  <span>Stai guardando gli importi</span>
+  <span class="ceo-chip netto v-netto"><i class="fas fa-circle-info"></i> SENZA IVA</span>
+  <span class="ceo-chip lordo v-lordo"><i class="fas fa-circle-info"></i> CON IVA</span>
+  <span>&middot; L'utile e le percentuali non cambiano: l'IVA non &egrave; guadagno.</span>
 </div>
 
-<!-- TAB OVERVIEW -->
+<div class="glass-card" id="ceerlo-ceo">
+  <div class="glass-card-header"><h3><i class="fas fa-robot"></i> Ceerlo: analisi e report</h3>
+    <button type="button" class="cc-btn2" id="ceerlo-apri-chiudi">Nascondi</button></div>
+  <div class="glass-card-body" id="ceerlo-corpo">
+    <div class="ceerlo-grid">
+      <div>
+        <div class="cc-titolo">Analisi del periodo scritta da Ceerlo</div>
+        <div id="ceerlo-testo" class="cc-testo"></div>
+        <div id="ceerlo-vuoto" class="cc-vuoto">Ceerlo legge i numeri di questa pagina, li confronta con il periodo prima e scrive in poche righe com'&egrave; andata, cosa va bene, cosa tenere d'occhio e cosa fare.</div>
+        <div id="ceerlo-meta" class="cc-meta"></div>
+        <div class="cc-azioni">
+          <button type="button" class="btn-ceo-primary" id="ceerlo-analisi-btn" {{ '' if ceerlo_attivo else 'disabled' }}><i class="fas fa-wand-magic-sparkles"></i> <span id="ceerlo-analisi-lbl">Chiedi l'analisi a Ceerlo</span></button>
+          {% if not ceerlo_attivo %}<span class="cc-msg">Ceerlo &egrave; spento: si accende in Impostazioni.</span>{% endif %}
+        </div>
+        <div id="ceerlo-analisi-msg" class="cc-msg"></div>
+        {% if analisi_recenti %}
+        <div class="cc-recenti">Analisi gi&agrave; fatte:
+          {% for a in analisi_recenti %}<a href="{{ url_for('dashboard_ceo', start_date=a.dal, end_date=a.al) }}">{{ a.dal[8:10] }}/{{ a.dal[5:7] }} &rarr; {{ a.al[8:10] }}/{{ a.al[5:7] }}/{{ a.al[:4] }}</a>{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      <div>
+        <div class="cc-titolo">Report periodici via email</div>
+        <label class="iva-switch sw-chiaro"><input type="checkbox" id="rep-settimanale" role="switch" {{ 'checked' if report_ceo.settimanale }}><span class="trk"></span><span>Ogni luned&igrave; mattina<small>Com'&egrave; andata la settimana scorsa</small></span></label>
+        <label class="iva-switch sw-chiaro"><input type="checkbox" id="rep-mensile" role="switch" {{ 'checked' if report_ceo.mensile }}><span class="trk"></span><span>Il primo di ogni mese<small>Com'&egrave; andato il mese scorso</small></span></label>
+        <div class="cc-vuoto" style="font-size:12.5px;margin-top:10px">
+          {% if report_ceo.destinatari %}Arrivano a: <strong>{{ report_ceo.destinatari | join(', ') }}</strong> (CEO e amministratori con un'email in Gestione Utenti).
+          {% else %}<span style="color:#b45309">Nessun CEO o amministratore ha un'email in Gestione Utenti: aggiungila l&igrave;.</span>{% endif %}
+          {% if not report_ceo.email_attiva %}<br><span style="color:#b45309">L'invio delle email non &egrave; ancora configurato (Impostazioni, Email e Google Calendar).</span>{% endif %}
+          <br>L'email non contiene importi: dice l'andamento rispetto al periodo prima e ha il tasto per aprire qui il report completo con l'analisi di Ceerlo.
+        </div>
+        <div class="cc-azioni"><button type="button" class="cc-btn2" id="rep-prova"><i class="fas fa-paper-plane"></i> Mandami una prova adesso</button></div>
+        <div id="rep-msg" class="cc-msg"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="ceo-tabs-nav">
+  <button class="ceo-tab-btn active" data-tab="tab-overview"><i class="fas fa-coins"></i> Guadagno</button>
+  <button class="ceo-tab-btn" data-tab="tab-cashflow"><i class="fas fa-wallet"></i> Cassa</button>
+  <button class="ceo-tab-btn" data-tab="tab-commerciale"><i class="fas fa-bullseye"></i> Vendite</button>
+</div>
+
+<!-- TAB GUADAGNO -->
 <div id="tab-overview" class="ceo-tab-content active">
+  <div class="ceo-spiega"><strong>Quanto si &egrave; guadagnato.</strong> Conta i preventivi <strong>confermati nel periodo</strong> (alla data di conferma), anche se il cliente non ha ancora pagato. Per i soldi entrati e usciti davvero guarda la scheda <strong>Cassa</strong>.</div>
   <div class="overview-grid">
     <div>
       <div class="glass-card">
-        <div class="glass-card-header"><h3><i class="fas fa-calculator"></i> Analisi Periodo</h3></div>
+        <div class="glass-card-header"><h3><i class="fas fa-calculator"></i> Come si arriva all'utile</h3></div>
         {% set costi_reali = kpi.imponibile_totale - kpi.fee_versata - kpi.utile_netto_finale %}
-        <div class="math-eq-row top"><span class="eq-label">IMPONIBILE PERIODO</span><span class="eq-val">{{ kpi.imponibile_totale | money_ui }}</span></div>
-        <div class="math-eq-row subtracted"><span class="eq-label">- COSTI FORNITORI</span><span class="eq-val">{{ costi_reali | money_ui }}</span></div>
-        <div class="math-eq-row fee-row"><span class="eq-label">- FEE VERSATA</span><span class="eq-val">{{ kpi.fee_versata | money_ui }}</span></div>
+        {% set costi_reali_lordi = kpi.costi_lordi %}
+        <div class="math-eq-row top"><span class="eq-label">VENDUTO<small>Preventivi confermati, {{ dicitura() }}</small></span><span class="eq-val">{{ eur(kpi.imponibile_totale, kpi.imponibile_lordo) }}</span></div>
+        <div class="math-eq-row subtracted"><span class="eq-label">- COSTI FORNITORI<small>Ordini, magazzino e lavori edili, {{ dicitura() }}</small></span><span class="eq-val">{{ eur(costi_reali, costi_reali_lordi) }}</span></div>
+        <div class="math-eq-row fee-row"><span class="eq-label">- FEE AI REFERENTI<small>Percentuale riconosciuta a chi porta il cliente</small></span><span class="eq-val">{{ kpi.fee_versata | money_ui }}</span></div>
+        <div class="math-eq-row {{ 'subtracted' if kpi.iva_netta >= 0 else '' }} v-lordo"><span class="eq-label">{{ '- IVA DA VERSARE' if kpi.iva_netta >= 0 else '+ IVA A CREDITO' }}<small>IVA sulle vendite meno IVA sugli acquisti</small></span><span class="eq-val">{{ (kpi.iva_netta | abs) | money_ui }}</span></div>
         <div class="math-eq-divider"></div>
-        <div class="math-eq-row result"><span class="eq-label">= UTILE TOTALE</span><span class="eq-val">{{ kpi.utile_netto_finale | money_ui }}</span></div>
+        <div class="math-eq-row result"><span class="eq-label">= UTILE<small style="color:#047857">Gi&agrave; tolta la fee ai referenti</small></span><span class="eq-val">{{ kpi.utile_netto_finale | money_ui }}</span></div>
         <div class="math-footer-grid">
-          <div class="math-footer-cell"><span class="mfc-label">RICARICO MEDIO</span><span class="mfc-value">{{ "%.1f"|format(kpi.margine_medio_pct) }}%</span></div>
-          <div class="math-footer-cell"><span class="mfc-label">MARGINALITA TOT.</span><span class="mfc-value">{{ "%.1f"|format(kpi.marginalita_totale_pct) }}%</span></div>
+          <div class="math-footer-cell"><span class="mfc-label">RICARICO MEDIO</span><span class="mfc-value">{{ "%.1f"|format(kpi.margine_medio_pct) }}%</span><span class="mfc-sub">utile rispetto a costi e fee</span></div>
+          <div class="math-footer-cell"><span class="mfc-label">MARGINE SUL VENDUTO</span><span class="mfc-value">{{ "%.1f"|format(kpi.marginalita_totale_pct) }}%</span><span class="mfc-sub">utile rispetto al venduto</span></div>
         </div>
       </div>
     </div>
 
     <div class="overview-right">
       <div class="glass-card">
-        <div class="glass-card-header"><h3><i class="fas fa-chart-area"></i> Andamento Periodo</h3></div>
+        <div class="glass-card-header"><h3><i class="fas fa-chart-area"></i> Andamento giorno per giorno</h3><span style="font-size:12px;color:#94a3b8">Clicca le voci in alto per mostrarle o nasconderle</span></div>
         <div class="glass-card-body"><div class="chart-container"><canvas id="profitChart"></canvas></div></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <div class="ceo-two">
         <div class="glass-card">
-          <div class="glass-card-header"><h3><i class="fas fa-briefcase"></i> Performance Venditori</h3></div>
+          <div class="glass-card-header"><h3><i class="fas fa-briefcase"></i> Venditori</h3></div>
           <div class="table-fixed"><table class="perf-table">
-            <thead><tr><th>Venditore</th><th class="center">Prev.</th><th class="right">Imponibile</th><th class="right">Utile</th></tr></thead>
+            <thead><tr><th>Venditore</th><th class="center" title="Preventivi confermati">Confermati</th><th class="right">Venduto</th><th class="right">Utile</th></tr></thead>
             <tbody>
               {% for v in venditori %}
-              <tr><td><strong>{{ v.nome }}</strong></td><td class="center"><span class="badge-pill">{{ v.count }}</span></td><td class="right"><strong>{{ v.imponibile | money_ui }}</strong></td><td class="right" style="color:#10b981;font-weight:700">{{ v.utile | money_ui }}</td></tr>
+              <tr><td><strong>{{ v.nome }}</strong></td><td class="center"><span class="badge-pill">{{ v.count }}</span></td><td class="right"><strong>{{ eur(v.imponibile, v.imponibile_lordo) }}</strong></td><td class="right" style="color:#10b981;font-weight:700">{{ v.utile | money_ui }}</td></tr>
               {% else %}
               <tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px">Nessuna vendita nel periodo.</td></tr>
               {% endfor %}
@@ -187,12 +298,12 @@
           </table></div>
         </div>
         <div class="glass-card">
-          <div class="glass-card-header"><h3><i class="fas fa-users"></i> Performance Referenti</h3></div>
+          <div class="glass-card-header"><h3><i class="fas fa-users"></i> Referenti</h3></div>
           <div class="table-fixed"><table class="perf-table">
-            <thead><tr><th>Referente</th><th class="center">Prev.</th><th class="right">Imponibile</th><th class="right">Fee</th></tr></thead>
+            <thead><tr><th>Referente</th><th class="center" title="Preventivi confermati">Confermati</th><th class="right">Venduto</th><th class="right">Fee</th></tr></thead>
             <tbody>
               {% for ref in referenti %}
-              <tr><td>{{ ref.nome }}</td><td class="center"><span class="badge-pill badge-blue">{{ ref.preventivo }}</span></td><td class="right" style="color:#64748b">{{ ref.imponibile | money_ui }}</td><td class="right" style="color:#8b5cf6;font-weight:700">{{ ref.fee | money_ui }}</td></tr>
+              <tr><td>{{ ref.nome }}</td><td class="center"><span class="badge-pill badge-blue">{{ ref.preventivo }}</span></td><td class="right" style="color:#64748b">{{ eur(ref.imponibile, ref.imponibile_lordo) }}</td><td class="right" style="color:#8b5cf6;font-weight:700">{{ ref.fee | money_ui }}</td></tr>
               {% else %}
               <tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px">Nessun dato.</td></tr>
               {% endfor %}
@@ -204,87 +315,113 @@
   </div>
 </div>
 
-<!-- TAB CASHFLOW -->
+<!-- TAB CASSA -->
 <div id="tab-cashflow" class="ceo-tab-content">
+  <div class="ceo-spiega"><strong>Soldi entrati e usciti davvero.</strong> Conta gli incassi dai clienti e i pagamenti ai fornitori <strong>con data nel periodo</strong>, di qualsiasi preventivo. Per questo i numeri sono diversi dalla scheda <strong>Guadagno</strong>.</div>
   <div class="cf-grid">
-    <div class="cf-tile green"><div class="ct-header"><i class="fas fa-check-circle" style="color:#10b981"></i> Gia Incassato</div><div class="ct-amount">{{ cashflow.incassato_netto | money_ui }}</div><div class="ct-sub">Liquidita netta entrata nel periodo</div></div>
-    <div class="cf-tile red"><div class="ct-header"><i class="fas fa-shopping-cart" style="color:#ef4444"></i> Uscite Ordini</div><div class="ct-amount">{{ cashflow.costi_preventivi_in_corso | money_ui }}</div><div class="ct-sub">Fornitori e carichi magazzino del periodo</div></div>
-    <div class="cf-tile purple"><div class="ct-header"><i class="fas fa-percentage" style="color:#8b5cf6"></i> Fee Versate</div><div class="ct-amount">{{ cashflow.fee_versata | money_ui }}</div><div class="ct-sub">Calcolate su incassi del periodo</div></div>
-    <div class="cf-tile dark"><div class="ct-header"><i class="fas fa-scale-balanced"></i> Bilancio Cassa</div><div class="ct-amount {{ 'text-success' if cashflow.bilancio >= 0 else 'text-danger' }}">{{ '+' if cashflow.bilancio > 0 else '' }} {{ cashflow.bilancio | money_ui }}</div><div class="ct-sub">Incassato - Uscite - Fee</div></div>
+    <div class="cf-tile green"><div class="ct-header"><i class="fas fa-check-circle" style="color:#10b981"></i> Incassato</div><div class="ct-amount">{{ eur(cashflow.incassato_netto, cashflow.incassato_lordo) }}</div><div class="ct-sub">Pagamenti ricevuti dai clienti, {{ dicitura() }}</div></div>
+    <div class="cf-tile red"><div class="ct-header"><i class="fas fa-shopping-cart" style="color:#ef4444"></i> Speso</div><div class="ct-amount">{{ eur(cashflow.costi_preventivi_in_corso, cashflow.uscite_lorde) }}</div><div class="ct-sub">Ordini ai fornitori e merce caricata in magazzino, {{ dicitura() }}</div></div>
+    <div class="cf-tile purple"><div class="ct-header"><i class="fas fa-percentage" style="color:#8b5cf6"></i> Fee ai referenti</div><div class="ct-amount">{{ cashflow.fee_versata | money_ui }}</div><div class="ct-sub">Calcolate sugli incassi del periodo</div></div>
+    <div class="cf-tile dark"><div class="ct-header"><i class="fas fa-scale-balanced"></i> Saldo di cassa</div>
+      <div class="ct-amount v-netto {{ 'text-success' if cashflow.bilancio >= 0 else 'text-danger' }}">{{ '+' if cashflow.bilancio > 0 else '' }} {{ cashflow.bilancio | money_ui }}</div>
+      <div class="ct-amount v-lordo {{ 'text-success' if cashflow.bilancio_lordo >= 0 else 'text-danger' }}">{{ '+' if cashflow.bilancio_lordo > 0 else '' }} {{ cashflow.bilancio_lordo | money_ui }}</div>
+      <div class="ct-sub">Incassato - Speso - Fee</div></div>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
-    <div class="cf-tile blue"><div class="ct-header"><i class="fas fa-clock" style="color:#3b82f6"></i> Saldi Programmati</div><div class="ct-amount">{{ cashflow.in_attesa_netto | money_ui }}</div><div class="ct-sub">Futuri gia pianificati</div></div>
-    <div class="cf-tile amber"><div class="ct-header"><i class="fas fa-exclamation-circle" style="color:#f59e0b"></i> Da Incassare</div><div class="ct-amount">{{ cashflow.da_saldare_netto | money_ui }}</div><div class="ct-sub">Residuo non ancora pianificato</div></div>
+  <div class="ceo-three">
+    <div class="cf-tile blue"><div class="ct-header"><i class="fas fa-clock" style="color:#3b82f6"></i> Incassi in calendario</div><div class="ct-amount">{{ eur(cashflow.in_attesa_netto, cashflow.in_attesa_lordo) }}</div><div class="ct-sub">Pagamenti dei clienti programmati con una data da oggi in poi (elenco in fondo)</div></div>
+    <div class="cf-tile red"><div class="ct-header"><i class="fas fa-calendar-xmark" style="color:#ef4444"></i> Incassi scaduti</div><div class="ct-amount">{{ eur(cashflow.scaduti_netto, cashflow.scaduti_lordo) }}</div><div class="ct-sub">Programmati con una data gi&agrave; passata e non ancora registrati come incassati: da sollecitare o da aggiornare</div></div>
+    <div class="cf-tile amber"><div class="ct-header"><i class="fas fa-exclamation-circle" style="color:#f59e0b"></i> Ancora da incassare</div><div class="ct-amount">{{ eur(cashflow.da_saldare_netto, cashflow.da_saldare_lordo) }}</div><div class="ct-sub">Resto dei preventivi confermati nel periodo, senza una data di pagamento</div></div>
   </div>
   <div class="glass-card">
-    <div class="glass-card-header"><h3><i class="fas fa-percent"></i> Analisi IVA</h3></div>
+    <div class="glass-card-header"><h3><i class="fas fa-percent"></i> IVA del periodo</h3><span style="font-size:12px;color:#94a3b8">Solo l'IVA: questi importi non cambiano con l'interruttore</span></div>
     <div class="glass-card-body">
       <div class="iva-grid">
-        <div class="iva-tile"><div class="iva-header" style="color:#3b82f6"><i class="fas fa-university"></i> IVA Preventivi</div><div class="iva-amount">{{ cashflow.iva_preventivi | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Su vendite incassate</div></div>
-        <div class="iva-tile"><div class="iva-header" style="color:#ef4444"><i class="fas fa-arrow-down"></i> IVA Ordini</div><div class="iva-amount">{{ cashflow.iva_ordini | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Su acquisti periodo</div></div>
-        <div class="iva-tile"><div class="iva-header" style="color:{{ '#059669' if cashflow.bilancio_iva >= 0 else '#dc2626' }}"><i class="fas fa-balance-scale"></i> Bilancio IVA</div><div class="iva-amount {{ 'text-success' if cashflow.bilancio_iva >= 0 else 'text-danger' }}"> {{ '+' if cashflow.bilancio_iva > 0 else '' }} {{ cashflow.bilancio_iva | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Debito/Credito IVA</div></div>
-        <div class="iva-tile"><div class="iva-header" style="color:#059669"><i class="fas fa-file-contract"></i> IVA Esente</div><div class="iva-amount">{{ cashflow.iva_esente | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Non applicata sugli incassi esenti</div></div>
+        <div class="iva-tile"><div class="iva-header" style="color:#3b82f6"><i class="fas fa-university"></i> IVA incassata</div><div class="iva-amount">{{ cashflow.iva_preventivi | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Dentro i pagamenti dei clienti</div></div>
+        <div class="iva-tile"><div class="iva-header" style="color:#ef4444"><i class="fas fa-arrow-down"></i> IVA pagata</div><div class="iva-amount">{{ cashflow.iva_ordini | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Dentro gli ordini ai fornitori</div></div>
+        <div class="iva-tile"><div class="iva-header" style="color:{{ '#dc2626' if cashflow.bilancio_iva >= 0 else '#059669' }}"><i class="fas fa-balance-scale"></i> {{ 'IVA da versare' if cashflow.bilancio_iva >= 0 else 'IVA a credito' }}</div><div class="iva-amount">{{ (cashflow.bilancio_iva | abs) | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">IVA incassata - IVA pagata</div></div>
+        <div class="iva-tile"><div class="iva-header" style="color:#059669"><i class="fas fa-file-contract"></i> IVA non applicata</div><div class="iva-amount">{{ cashflow.iva_esente | money_ui }}</div><div style="font-size:11px;color:#94a3b8;margin-top:4px">Sugli incassi dei preventivi esenti IVA</div></div>
       </div>
     </div>
   </div>
+  {% if pagamenti_scaduti %}
   <div class="glass-card">
-    <div class="glass-card-header"><h3><i class="fas fa-calendar-check"></i> Prossimi Pagamenti Programmati</h3><span style="font-size:12px;color:#94a3b8">{{ future_payments | length }} in lista</span></div>
+    <div class="glass-card-header"><h3 style="color:#dc2626"><i class="fas fa-calendar-xmark"></i> Incassi scaduti</h3><span style="font-size:12px;color:#94a3b8">{{ pagamenti_scaduti | length }} in lista</span></div>
     <div class="table-scroll"><table class="perf-table">
-      <thead><tr><th>Data</th><th>Cliente</th><th>Preventivo</th><th class="right">Importo Netto</th><th>Note</th><th class="center"></th></tr></thead>
+      <thead><tr><th>Data</th><th>Cliente</th><th>Preventivo</th><th class="right">Importo ({{ dicitura() }})</th><th>Note</th><th class="center"></th></tr></thead>
+      <tbody>
+        {% for pag in pagamenti_scaduti %}
+        <tr>
+          <td><strong style="color:#dc2626">{{ pag.data.strftime('%d/%m/%Y') }}</strong></td>
+          <td>{{ pag.cliente }}</td>
+          <td><span class="badge-pill badge-blue">{{ pag.preventivo }}</span></td>
+          <td class="right" style="color:#dc2626;font-weight:700">{{ eur(pag.importo_netto, pag.importo_lordo) }}</td>
+          <td style="font-size:12px;color:#94a3b8">{{ pag.note }}</td>
+          <td class="center"><a href="{{ url_for('gestione_pagamenti', quote_id=pag.preventivo) }}" target="_blank" title="Apri i pagamenti del preventivo" style="color:#6366f1;font-size:13px"><i class="fas fa-external-link-alt"></i></a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+  {% endif %}
+  <div class="glass-card">
+    <div class="glass-card-header"><h3><i class="fas fa-calendar-check"></i> Incassi in calendario</h3><span style="font-size:12px;color:#94a3b8">{{ future_payments | length }} in lista</span></div>
+    <div class="table-scroll"><table class="perf-table">
+      <thead><tr><th>Data</th><th>Cliente</th><th>Preventivo</th><th class="right">Importo ({{ dicitura() }})</th><th>Note</th><th class="center"></th></tr></thead>
       <tbody>
         {% for pag in future_payments %}
         <tr>
           <td><strong>{{ pag.data.strftime('%d/%m/%Y') }}</strong></td>
           <td>{{ pag.cliente }}</td>
           <td><span class="badge-pill badge-blue">{{ pag.preventivo }}</span></td>
-          <td class="right" style="color:#3b82f6;font-weight:700">{{ pag.importo_netto | money_ui }}</td>
+          <td class="right" style="color:#3b82f6;font-weight:700">{{ eur(pag.importo_netto, pag.importo_lordo) }}</td>
           <td style="font-size:12px;color:#94a3b8">{{ pag.note }}</td>
-          <td class="center"><a href="{{ url_for('gestione_pagamenti', quote_id=pag.preventivo) }}" target="_blank" style="color:#6366f1;font-size:13px"><i class="fas fa-external-link-alt"></i></a></td>
+          <td class="center"><a href="{{ url_for('gestione_pagamenti', quote_id=pag.preventivo) }}" target="_blank" title="Apri i pagamenti del preventivo" style="color:#6366f1;font-size:13px"><i class="fas fa-external-link-alt"></i></a></td>
         </tr>
         {% else %}
-        <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">Nessun pagamento futuro programmato.</td></tr>
+        <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">Nessun incasso programmato.</td></tr>
         {% endfor %}
       </tbody>
     </table></div>
   </div>
 </div>
 
-<!-- TAB COMMERCIALE -->
+<!-- TAB VENDITE -->
 <div id="tab-commerciale" class="ceo-tab-content">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
+  <div class="ceo-spiega"><strong>Come vanno le trattative.</strong> Conta i preventivi <strong>creati nel periodo</strong>: quanti sono stati inviati, firmati o annullati, e come lavora ogni venditore.</div>
+  <div class="ceo-two" style="margin-bottom:24px">
     <div class="glass-card">
-      <div class="glass-card-header"><h3><i class="fas fa-filter"></i> Funnel Commerciale</h3></div>
+      <div class="glass-card-header"><h3><i class="fas fa-filter"></i> Preventivi del periodo</h3></div>
       <div class="glass-card-body">
         {% set max_count = [funnel.creati, 1] | max %}
         <div class="funnel-wrap">
           <div class="funnel-row"><span class="f-label-col">Creati</span><div class="f-bar-track"><div class="f-bar-fill created" style="width:100%"></div></div><span class="f-count" style="color:#3b82f6">{{ funnel.creati }}</span></div>
           <div class="funnel-row"><span class="f-label-col">Inviati</span><div class="f-bar-track"><div class="f-bar-fill sent" style="width:{{ (funnel.inviati / max_count * 100) | int }}%"></div></div><span class="f-count" style="color:#f59e0b">{{ funnel.inviati }}</span></div>
-          <div class="funnel-row"><span class="f-label-col">Confermati</span><div class="f-bar-track"><div class="f-bar-fill confirmed" style="width:{{ (funnel.confermati / max_count * 100) | int }}%"></div></div><span class="f-count" style="color:#10b981">{{ funnel.confermati }}</span></div>
+          <div class="funnel-row"><span class="f-label-col">Firmati</span><div class="f-bar-track"><div class="f-bar-fill confirmed" style="width:{{ (funnel.confermati / max_count * 100) | int }}%"></div></div><span class="f-count" style="color:#10b981">{{ funnel.confermati }}</span></div>
           <div class="funnel-row"><span class="f-label-col">Annullati</span><div class="f-bar-track"><div class="f-bar-fill cancelled" style="width:{{ (funnel.annullati / max_count * 100) | int }}%"></div></div><span class="f-count" style="color:#ef4444">{{ funnel.annullati }}</span></div>
         </div>
       </div>
     </div>
     <div class="glass-card">
-      <div class="glass-card-header"><h3><i class="fas fa-trophy"></i> KPI Commerciali</h3></div>
+      <div class="glass-card-header"><h3><i class="fas fa-trophy"></i> In sintesi</h3></div>
       <div class="big-stat-row" style="border-bottom:1px solid #f1f5f9">
-        <div class="big-stat-block"><div class="bs-value">{{ "%.1f"|format(funnel.tasso_firma) }}%</div><div class="bs-label">Tasso di Firma</div><div class="bs-sub">Confermati / Creati</div></div>
-        <div class="big-stat-block"><div class="bs-value" style="color:#10b981">{{ funnel.confermati }}</div><div class="bs-label">Contratti Firmati</div><div class="bs-sub">nel periodo</div></div>
+        <div class="big-stat-block"><div class="bs-value">{{ "%.1f"|format(funnel.tasso_firma) }}%</div><div class="bs-label">Percentuale di firma</div><div class="bs-sub">Firmati su creati</div></div>
+        <div class="big-stat-block"><div class="bs-value" style="color:#10b981">{{ funnel.confermati }}</div><div class="bs-label">Preventivi firmati</div><div class="bs-sub">nel periodo</div></div>
       </div>
       <div class="big-stat-row">
-        <div class="big-stat-block"><div class="bs-value" style="color:#f59e0b;font-size:26px">{{ funnel.valore_in_trattativa | money_ui }}</div><div class="bs-label">In Trattativa</div><div class="bs-sub">Bozze + Inviati</div></div>
+        <div class="big-stat-block"><div class="bs-value" style="color:#f59e0b;font-size:26px">{{ eur(funnel.valore_in_trattativa, funnel.valore_in_trattativa_lordo) }}</div><div class="bs-label">In trattativa</div><div class="bs-sub">Bozze e inviati non ancora firmati, {{ dicitura() }}</div></div>
         <div class="big-stat-block"><div class="bs-value" style="color:#ef4444;font-size:32px">{{ funnel.annullati }}</div><div class="bs-label">Annullati</div><div class="bs-sub">nel periodo</div></div>
       </div>
     </div>
   </div>
 
   <div class="glass-card">
-    <div class="glass-card-header"><h3><i class="fas fa-user-tie"></i> Tasso di Conversione per Venditore</h3><span style="font-size:12px;color:#94a3b8">Confermati / (Confermati + Inviati aperti)</span></div>
+    <div class="glass-card-header"><h3><i class="fas fa-user-tie"></i> Quanti preventivi chiude ogni venditore</h3><span style="font-size:12px;color:#94a3b8">Firmati rispetto a firmati + ancora in attesa di risposta</span></div>
     <div>
       {% for v in venditori %}
       <div class="conv-row">
         <span class="conv-name">{{ v.nome }}</span>
-        <div class="conv-metric"><span class="clabel">Conf.</span><span class="cvalue" style="color:#10b981">{{ v.count }}</span></div>
-        <div class="conv-metric"><span class="clabel">Aperti</span><span class="cvalue" style="color:#f59e0b">{{ v.inviati }}</span></div>
+        <div class="conv-metric"><span class="clabel">Firmati</span><span class="cvalue" style="color:#10b981">{{ v.count }}</span></div>
+        <div class="conv-metric"><span class="clabel">In attesa</span><span class="cvalue" style="color:#f59e0b">{{ v.inviati }}</span></div>
         <div class="conv-bar-wrap"><div class="conv-bar-bg"><div class="conv-bar-fg" style="width:{{ v.tasso_conv }}%"></div></div></div>
         <span class="conv-rate">{{ v.tasso_conv }}%</span>
       </div>
@@ -295,15 +432,15 @@
   </div>
 
   <div class="glass-card">
-    <div class="glass-card-header"><h3><i class="fas fa-handshake"></i> Dettaglio Referenti</h3></div>
+    <div class="glass-card-header"><h3><i class="fas fa-handshake"></i> Referenti in dettaglio</h3></div>
     <div class="table-scroll"><table class="perf-table">
-      <thead><tr><th>Referente</th><th class="center">Preventivi</th><th class="right">Imponibile</th><th class="right">Fee Generata</th><th class="right">Fee / Prev.</th></tr></thead>
+      <thead><tr><th>Referente</th><th class="center">Preventivi firmati</th><th class="right">Venduto ({{ dicitura() }})</th><th class="right">Fee totale</th><th class="right">Fee media a preventivo</th></tr></thead>
       <tbody>
         {% for ref in referenti %}
         <tr>
           <td><strong>{{ ref.nome }}</strong></td>
           <td class="center"><span class="badge-pill badge-blue">{{ ref.preventivo }}</span></td>
-          <td class="right">{{ ref.imponibile | money_ui }}</td>
+          <td class="right">{{ eur(ref.imponibile, ref.imponibile_lordo) }}</td>
           <td class="right" style="color:#8b5cf6;font-weight:700">{{ ref.fee | money_ui }}</td>
           <td class="right" style="color:#64748b">{% if ref.preventivo > 0 %}{{ (ref.fee / ref.preventivo) | money_ui }}{% else %}--{% endif %}</td>
         </tr>
@@ -366,17 +503,18 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const ctx = document.getElementById('profitChart');
+  let ceoChart = null;
   if (ctx) {
-    new Chart(ctx, {
+    ceoChart = new Chart(ctx, {
       type: 'line',
       data: {
         labels: graficoData.labels,
         datasets: [
-          { label: 'Imponibile', data: graficoData.imponibile, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.08)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 3, pointHoverRadius: 6 },
-          { label: 'Utile Netto', data: graficoData.utile, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.06)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 3, pointHoverRadius: 6 },
-          { label: 'Fee Generata', data: graficoData.fee, borderColor: '#8b5cf6', fill: false, tension: 0.4, borderWidth: 2, borderDash: [5,5], pointRadius: 2, hidden: true },
-          { label: 'Costi Effettivi', data: graficoData.costi_effettivi, borderColor: '#f59e0b', fill: false, tension: 0.4, borderWidth: 2, borderDash: [3,3], pointRadius: 2, hidden: true },
-          { label: 'Costi Presunti', data: graficoData.costi_presunti, borderColor: '#94a3b8', fill: false, tension: 0.4, borderWidth: 1, borderDash: [4,4], pointRadius: 2, hidden: true }
+          { label: 'Venduto', data: graficoData.imponibile, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.08)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 3, pointHoverRadius: 6 },
+          { label: 'Utile', data: graficoData.utile, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.06)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 3, pointHoverRadius: 6 },
+          { label: 'Fee ai referenti', data: graficoData.fee, borderColor: '#8b5cf6', fill: false, tension: 0.4, borderWidth: 2, borderDash: [5,5], pointRadius: 2, hidden: true },
+          { label: 'Costi fornitori', data: graficoData.costi_effettivi, borderColor: '#f59e0b', fill: false, tension: 0.4, borderWidth: 2, borderDash: [3,3], pointRadius: 2, hidden: true },
+          { label: 'Costi previsti nel preventivo', data: graficoData.costi_presunti, borderColor: '#94a3b8', fill: false, tension: 0.4, borderWidth: 1, borderDash: [4,4], pointRadius: 2, hidden: true }
         ]
       },
       options: {
@@ -396,6 +534,103 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+  // Interruttore importi con / senza IVA (scelta ricordata su questo dispositivo)
+  const root = document.getElementById('ceo-root');
+  const ivaToggle = document.getElementById('iva-toggle');
+  function applicaIva(conIva) {
+    root.classList.toggle('con-iva', conIva);
+    ivaToggle.checked = conIva;
+    if (ceoChart) {
+      const ds = ceoChart.data.datasets;
+      ds[0].data = conIva ? graficoData.imponibile_lordo : graficoData.imponibile;
+      ds[3].data = conIva ? graficoData.costi_effettivi_lordi : graficoData.costi_effettivi;
+      ds[4].data = conIva ? graficoData.costi_presunti_lordi : graficoData.costi_presunti;
+      ceoChart.update();
+    }
+  }
+  let ivaSalvata = false;
+  try { ivaSalvata = localStorage.getItem('ceo_con_iva') === '1'; } catch(e) {}
+  applicaIva(ivaSalvata);
+  ivaToggle.addEventListener('change', () => {
+    applicaIva(ivaToggle.checked);
+    try { localStorage.setItem('ceo_con_iva', ivaToggle.checked ? '1' : '0'); } catch(e) {}
+  });
+  // --- Ceerlo: analisi del periodo e report periodici ---
+  const analisiSalvata = {{ analisi_ceerlo | tojson | safe }};
+  const elTesto = document.getElementById('ceerlo-testo'), elVuoto = document.getElementById('ceerlo-vuoto');
+  const elMeta = document.getElementById('ceerlo-meta'), elMsg = document.getElementById('ceerlo-analisi-msg');
+  const btnAnalisi = document.getElementById('ceerlo-analisi-btn'), lblAnalisi = document.getElementById('ceerlo-analisi-lbl');
+  function mostraAnalisi(testo, quando) {
+    elTesto.innerHTML = '';
+    let ul = null;
+    String(testo || '').replace(/\*\*/g, '').split('\n').forEach(riga => {
+      const r = riga.trim();
+      if (!r) return;
+      if (/^[-*\u2022]\s+/.test(r)) {
+        if (!ul) { ul = document.createElement('ul'); elTesto.appendChild(ul); }
+        const li = document.createElement('li'); li.textContent = r.replace(/^[-*\u2022]\s+/, ''); ul.appendChild(li);
+      } else {
+        ul = null;
+        const h = document.createElement('div'); h.className = 'cc-h'; h.textContent = r.replace(/^#+\s*/, '').replace(/:$/, ''); elTesto.appendChild(h);
+      }
+    });
+    elVuoto.style.display = 'none';
+    elMeta.textContent = quando ? 'Scritta da Ceerlo il ' + quando + '. Importi senza IVA. Controlla sempre i numeri nelle schede qui sotto.' : '';
+    lblAnalisi.textContent = 'Rifai l\'analisi';
+  }
+  if (analisiSalvata && analisiSalvata.testo) {
+    const q = analisiSalvata.quando || '';
+    mostraAnalisi(analisiSalvata.testo, q ? q.slice(8,10) + '/' + q.slice(5,7) + '/' + q.slice(0,4) + ' alle ' + q.slice(11) : '');
+  }
+  async function postJson(url, corpo) {
+    const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(corpo || {})});
+    let d = {}; try { d = await r.json(); } catch(e) {}
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Operazione non riuscita.');
+    return d;
+  }
+  function msg(el, testo, tipo) { el.textContent = testo || ''; el.className = 'cc-msg' + (tipo ? ' ' + tipo : ''); }
+  btnAnalisi.addEventListener('click', async () => {
+    btnAnalisi.disabled = true; msg(elMsg, 'Ceerlo sta leggendo i numeri: di solito serve circa un minuto.');
+    try {
+      const d = await postJson('{{ url_for("ceo_ceerlo_analisi") }}', {start_date: '{{ start_date }}', end_date: '{{ end_date }}'});
+      const inizio = Date.now();
+      while (true) {
+        await new Promise(ok => setTimeout(ok, 3000));
+        const r = await fetch('{{ url_for("api_ceerlo_job", jid="JID") }}'.replace('JID', d.job));
+        const st = await r.json();
+        if (!r.ok || !st.ok) throw new Error(st.error || 'Richiesta persa, riprova.');
+        if (st.stato === 'fatto') {
+          const ora = new Date();
+          mostraAnalisi(st.risposta, ora.toLocaleDateString('it-IT') + ' alle ' + ora.toTimeString().slice(0,5));
+          msg(elMsg, ''); break;
+        }
+        if (st.stato === 'errore') throw new Error('Ceerlo non ha risposto: ' + (st.errore || 'riprova tra poco.'));
+        if (st.stato === 'in_coda' && st.posizione > 0) msg(elMsg, 'Ceerlo sta finendo altre ' + st.posizione + ' richieste, poi tocca a questa.');
+        else msg(elMsg, 'Ceerlo sta scrivendo l\'analisi...');
+        if (Date.now() - inizio > 15 * 60000) throw new Error('Ceerlo ci sta mettendo troppo: riprova tra poco.');
+      }
+    } catch (e) { msg(elMsg, e.message, 'err'); }
+    btnAnalisi.disabled = false;
+  });
+  const repSett = document.getElementById('rep-settimanale'), repMese = document.getElementById('rep-mensile'), repMsg = document.getElementById('rep-msg');
+  async function salvaReport(ev) {
+    try {
+      await postJson('{{ url_for("ceo_ceerlo_report_config") }}', {settimanale: repSett.checked, mensile: repMese.checked});
+      msg(repMsg, (repSett.checked || repMese.checked) ? 'Salvato. Il prossimo report parte da solo dopo le 7 del mattino.' : 'Salvato: report periodici spenti.', 'ok');
+    } catch (e) { ev.target.checked = !ev.target.checked; msg(repMsg, e.message, 'err'); }
+  }
+  repSett.addEventListener('change', salvaReport); repMese.addEventListener('change', salvaReport);
+  document.getElementById('rep-prova').addEventListener('click', async (ev) => {
+    ev.currentTarget.disabled = true; const b = ev.currentTarget;
+    try { const d = await postJson('{{ url_for("ceo_ceerlo_report_prova") }}'); msg(repMsg, d.messaggio, 'ok'); }
+    catch (e) { msg(repMsg, e.message, 'err'); }
+    setTimeout(() => { b.disabled = false; }, 20000);
+  });
+  const corpoC = document.getElementById('ceerlo-corpo'), btnAC = document.getElementById('ceerlo-apri-chiudi');
+  function apriChiudi(chiuso) { corpoC.style.display = chiuso ? 'none' : ''; btnAC.textContent = chiuso ? 'Mostra' : 'Nascondi'; }
+  let ceerloChiuso = false; try { ceerloChiuso = localStorage.getItem('ceo_ceerlo_chiuso') === '1'; } catch(e) {}
+  apriChiudi(ceerloChiuso);
+  btnAC.addEventListener('click', () => { ceerloChiuso = !ceerloChiuso; apriChiudi(ceerloChiuso); try { localStorage.setItem('ceo_ceerlo_chiuso', ceerloChiuso ? '1' : '0'); } catch(e) {} });
 });
 </script>
 {% endblock %}

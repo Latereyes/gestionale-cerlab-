@@ -265,7 +265,7 @@
             <div class="grid-vettore">
                 <div class="box">
                     <span class="box-label">Vettore (ragione sociale, indirizzo)</span>
-                    {{ campo(bolla.vettore) }}
+                    {% if bolla.trasporto_a_cura == 'Mittente' %}Mittente – CER LAB srl, mezzo proprio{% else %}{{ campo(bolla.vettore) }}{% endif %}
                 </div>
                 <div class="box">
                     <span class="box-label">Conducente</span>
@@ -295,6 +295,11 @@
             <div class="firme firme-2">
                 <div class="firma">Firma dell'addetto CER LAB<small>per consegna della merce</small></div>
                 <div class="firma">Firma di chi ritira<small>per ricevuta e accettazione · data ____/____/______</small></div>
+            </div>
+            {% elif bolla.trasporto_a_cura in ('Mittente', 'Vettore') %}
+            <div class="firme firme-2">
+                <div class="firma">{{ 'Firma del conducente' if bolla.trasporto_a_cura == 'Mittente' else 'Firma del vettore / conducente' }}<small>&nbsp;</small></div>
+                <div class="firma">Firma del destinatario<small>per ricevuta e accettazione · data ____/____/______</small></div>
             </div>
             {% else %}
             <div class="firme">
