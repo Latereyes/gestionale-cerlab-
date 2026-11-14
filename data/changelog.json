@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.6.1",
+    "date": "14/11/2026",
+    "title": "DDT più semplice e consegne da telefono",
+    "changes": [
+      "<b>Modulo DDT più semplice:</b> si sceglie subito tra Consegna con nostro mezzo, Consegna con corriere, Ritiro in negozio e Ritiro in magazzino. \"Trasporto a cura del\" si compila da solo e compaiono solo i campi che servono: conducente e targa per il nostro mezzo, corriere per la spedizione, chi ritira per i ritiri. Viene riproposta l'ultima scelta.",
+      "<b>Stampa:</b> con il nostro mezzo il vettore risulta \"Mittente – CER LAB srl, mezzo proprio\" e le firme sono solo quelle che servono.",
+      "<b>Da telefono:</b> nella pagina Consegna ogni articolo è una scheda (stato, quantità, DDT) e il modulo DDT è più compatto."
+    ]
+  },
+  {
     "version": "3.6.0",
     "date": "11/11/2026",
     "title": "Consegne: DDT fiscali e consegna parziale",
