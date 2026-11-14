@@ -7044,6 +7044,14 @@ def leggi_dati_ddt(form, bolla_id=None):
         dati["partenza"] = dati["ritiro_sede"]
     else:
         dati.pop("ritirato_da", None)
+        # Consegna: con nostro mezzo (mittente) o con corriere (vettore). Mai "destinatario":
+        # quando il trasporto e' del cliente si usa il ritiro.
+        dati["trasporto_a_cura"] = "Vettore" if dati.get("trasporto_a_cura") == "Vettore" else "Mittente"
+        if dati["trasporto_a_cura"] == "Vettore":
+            dati.pop("conducente", None)
+            dati.pop("targa", None)
+        else:
+            dati.pop("vettore", None)
         # Luogo di partenza della merce: negozio (predefinito) o magazzino
         dati["partenza"] = "magazzino" if dati.get("partenza") == "magazzino" else "negozio"
     numero = str(form.get("ddt_numero") or "").strip()[:20]

@@ -61,7 +61,7 @@
                     <tbody>
                         {% for item in ordine.articoli %}
                         <tr>
-                            <td>
+                            <td class="cell-check">
                                 <input 
                                         type="checkbox" 
                                         class="large-checkbox"
@@ -76,7 +76,7 @@
                                         data-qt="{{ item.qt }}"
                                         data-qt-consegnata="{{ item.qt_consegnata | default('0', true) }}">
                             </td>
-                            <td>{{ item.articolo }}
+                            <td class="cell-articolo">{{ item.articolo }}
                                 {% if item.consegne and not is_edile %}
                                 <div class="consegne-storico">
                                     {% for c in item.consegne %}
@@ -90,8 +90,8 @@
                                 </div>
                                 {% endif %}
                             </td>
-                            <td>{{ item.unt }}</td>
-                            <td class="right">{{ item.qt }}
+                            <td class="cell-um">{{ item.unt }}</td>
+                            <td class="right cell-qta" data-label="Q.tà">{{ item.qt }} <span class="um-mobile">{{ item.unt }}</span>
                                 {% set status_q = item.stato_consegna | default('Da Consegnare', true) %}
                                 {% if not is_edile and item.qt_consegnata and status_q != 'Consegnato' %}
                                 <div class="qt-sub">consegnati {{ item.qt_consegnata }}</div>
@@ -100,8 +100,8 @@
                                 <div class="qt-sub qt-bolla">in bolla {{ item.qt_bolla }}</div>
                                 {% endif %}
                             </td>
-                            <td class="center muted">{{ ordine.data_arrivo or '...' }}</td>
-                            <td>
+                            <td class="center muted cell-previsto" data-label="Arrivo previsto">{{ ordine.data_arrivo or '...' }}</td>
+                            <td class="cell-stato" data-label="Stato">
                                 {% set status = item.stato_consegna | default('Da Consegnare', true) %}
                                 {% if status | lower == 'consegnato' %}
                                      <span class="status-tag success">Consegnato</span>
@@ -116,8 +116,8 @@
                                      <span class="status-tag danger">In Arrivo</span>
                                 {% endif %}
                             </td>
-                            <td class="center muted">{{ item.data_arrivo_in_house or '...' }}</td>
-                            <td class="center muted">{{ item.data_consegna or '...' }}</td>
+                            <td class="center muted cell-arrivo" data-label="Arrivato">{{ item.data_arrivo_in_house or '...' }}</td>
+                            <td class="center muted cell-consegna{{ '' if item.data_consegna else ' vuota' }}" data-label="Consegnato">{{ item.data_consegna or '...' }}</td>
                             <td class="row-actions">
                                 {% if item.bolla_id %}
                                     {% set bolle_match = p.bolle | default([]) | selectattr('id', 'equalto', item.bolla_id) | list %}
@@ -191,10 +191,13 @@
         <h3><i class="fas fa-file-alt"></i> Documento di Trasporto (DDT)</h3>
         <p class="muted small-note">I campi lasciati vuoti restano come spazi da compilare a penna. Data e ora di inizio trasporto e le firme si compilano sempre a mano sulla stampa.</p>
         <form id="ddt-form" onsubmit="return false;">
+            {# Una sola scelta decide anche "trasporto a cura del": nostro mezzo = mittente,
+               corriere = vettore, ritiro = destinatario (il cliente porta via la merce) #}
             <div class="ddt-tipo">
-                <label><input type="radio" name="ddt_tipo" value="consegna" checked> <i class="fas fa-truck"></i> Consegna al cliente</label>
-                <label><input type="radio" name="ddt_tipo" value="ritiro_negozio"> <i class="fas fa-store"></i> Ritiro in negozio</label>
-                <label><input type="radio" name="ddt_tipo" value="ritiro_magazzino"> <i class="fas fa-warehouse"></i> Ritiro in magazzino</label>
+                <label><input type="radio" name="ddt_tipo" value="mittente" checked> <i class="fas fa-truck"></i><span>Consegna<small>con nostro mezzo</small></span></label>
+                <label><input type="radio" name="ddt_tipo" value="vettore"> <i class="fas fa-shipping-fast"></i><span>Consegna<small>con corriere</small></span></label>
+                <label><input type="radio" name="ddt_tipo" value="ritiro_negozio"> <i class="fas fa-store"></i><span>Ritiro<small>in negozio</small></span></label>
+                <label><input type="radio" name="ddt_tipo" value="ritiro_magazzino"> <i class="fas fa-warehouse"></i><span>Ritiro<small>in magazzino</small></span></label>
             </div>
             <div class="form-grid ddt-grid">
                 <div class="form-group">
@@ -209,14 +212,6 @@
                     </datalist>
                 </div>
                 <div class="form-group solo-consegna">
-                    <label>Trasporto a cura del</label>
-                    <select name="ddt_trasporto_a_cura">
-                        <option value="Mittente">Mittente</option>
-                        <option value="Destinatario">Destinatario</option>
-                        <option value="Vettore">Vettore</option>
-                    </select>
-                </div>
-                <div class="form-group solo-consegna">
                     <label>Partenza da</label>
                     <select name="ddt_partenza">
                         <option value="negozio">Negozio – Via Guarneville, 1</option>
@@ -227,15 +222,15 @@
                     <label>Ritirato da</label>
                     <input name="ddt_ritirato_da" placeholder="Nome e cognome di chi ritira">
                 </div>
-                <div class="form-group full-width solo-consegna">
-                    <label>Vettore (ragione sociale e indirizzo)</label>
-                    <input name="ddt_vettore" placeholder="Vuoto se il trasporto è a cura del mittente">
+                <div class="form-group full-width solo-vettore hidden">
+                    <label>Corriere / vettore (ragione sociale e indirizzo)</label>
+                    <input name="ddt_vettore" placeholder="es. Trasporti Rossi Srl, Latina">
                 </div>
-                <div class="form-group solo-consegna">
+                <div class="form-group solo-mittente">
                     <label>Conducente</label>
                     <input name="ddt_conducente" placeholder="Nome e cognome">
                 </div>
-                <div class="form-group solo-consegna">
+                <div class="form-group solo-mittente">
                     <label>Targa automezzo</label>
                     <input name="ddt_targa" placeholder="AB123CD">
                 </div>
@@ -252,7 +247,7 @@
                 </div>
                 <div class="form-group full-width">
                     <label>Annotazioni</label>
-                    <textarea name="ddt_annotazioni" rows="2" placeholder="es. Scarico a cura del cliente, consegna al piano..."></textarea>
+                    <textarea name="ddt_annotazioni" rows="2" placeholder="es. Consegna al piano, scarico a cura del cliente..."></textarea>
                 </div>
             </div>
 
@@ -496,8 +491,10 @@
 .consegna-chip a { color: var(--accent); font-weight: 600; }
 .small-note { font-size: 12px; margin: 0 0 14px; }
 .ddt-grid textarea { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; width: 100%; font-size: 14px; background: var(--surface); color: var(--text); font-family: inherit; resize: vertical; }
-.ddt-tipo { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
-.ddt-tipo label { flex: 1; min-width: 170px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; font-weight: 600; font-size: 14px; }
+.ddt-tipo { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+.ddt-tipo label { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; font-weight: 600; font-size: 14px; line-height: 1.2; }
+.ddt-tipo label span { display: flex; flex-direction: column; }
+.ddt-tipo label small { font-weight: 400; font-size: 11.5px; color: var(--text-muted); }
 .ddt-tipo label:has(input:checked) { border-color: var(--accent); background: var(--accent-light); color: var(--accent); }
 .ddt-tipo input { width: auto !important; margin: 0; }
 .ddt-numero { display: flex; align-items: center; gap: 6px; }
@@ -514,13 +511,40 @@
 .parziale-table input.errore { border-color: var(--danger, #dc2626); box-shadow: 0 0 0 2px hsl(0,80%,90%); }
 .parziale-table .um { color: var(--text-muted); margin-left: 4px; font-size: 12px; }
 #ddt-modal .modal-content { max-height: 92vh; overflow-y: auto; }
+.um-mobile { display: none; }
 @media (max-width: 640px) {
-    .form-grid { grid-template-columns: 1fr; }
-    /* Da telefono la tabella scorre di lato invece di schiacciare le colonne */
-    .order-card .styled-table { min-width: 760px; }
-    .order-card .large-checkbox { transform: scale(1.6); width: 18px; height: 18px; min-width: 18px; }
-    .order-card .col-check { width: 48px; }
-    .parziale-table input { width: 70px; }
+    .editor-container { padding: 0 10px; margin-top: 12px; }
+    .form-grid { grid-template-columns: 1fr; gap: 10px; }
+    .ddt-tipo { grid-template-columns: 1fr 1fr; }
+    .ddt-tipo label { padding: 8px; font-size: 13px; }
+    .modal-content.wide { padding: 18px 14px; }
+    .modal-actions { position: sticky; bottom: -18px; background: var(--surface); padding: 10px 0; margin-top: 12px; }
+
+    /* Da telefono ogni articolo diventa una scheda: spunta e nome in alto, poi stato e quantità */
+    .order-card .styled-table, .order-card .styled-table tbody { display: block; width: 100%; min-width: 0; table-layout: auto; }
+    .order-card .styled-table thead { display: none; }
+    .order-card .styled-table tbody tr {
+        display: grid; grid-template-columns: 40px 1fr auto; gap: 4px 10px; align-items: center;
+        padding: 12px 6px; border-bottom: 1px solid var(--border);
+    }
+    .order-card .styled-table td { display: block; padding: 0; border: none; text-align: left; }
+    .order-card td.cell-check { grid-row: 1 / span 2; align-self: start; padding-top: 4px; }
+    .order-card .large-checkbox { transform: scale(1.5); width: 18px; height: 18px; margin-left: 6px; }
+    .order-card td.cell-articolo { grid-column: 2 / 4; font-weight: 600; }
+    .order-card td.cell-um, .order-card td.cell-previsto, .order-card td.cell-arrivo { display: none; }
+    .order-card td.cell-stato { grid-column: 2; grid-row: 2; }
+    .order-card td.cell-qta { grid-column: 3; grid-row: 2; text-align: right; white-space: nowrap; }
+    .order-card td.cell-qta .qt-sub { text-align: right; }
+    .order-card .um-mobile { display: inline; color: var(--text-muted); font-size: 12px; }
+    .order-card td.cell-consegna { grid-column: 2; grid-row: 3; font-size: 12px; }
+    .order-card td.cell-consegna.vuota { display: none; }
+    .order-card td.row-actions { grid-column: 3; grid-row: 3; display: flex; gap: 6px; justify-content: flex-end; }
+    .order-card td.row-actions:empty { display: none; }
+    .order-card td[data-label]::before { content: attr(data-label) " "; font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; margin-right: 4px; }
+    .order-card td.cell-stato::before, .order-card td.cell-qta::before { display: none; }
+    .parziale-table input { width: 64px; }
+    .parziale-table td:last-child { white-space: nowrap; }
+    .parziale-table th { font-size: 9.5px; }
 }
 
 .empty-state {
@@ -583,7 +607,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnRevertUltima = document.getElementById('btn-revert-ultima-consegna');
     let ddtEntries = [];
     // Valori del DDT ricordati su questo dispositivo per la bolla successiva
-    const DDT_RICORDA = ['ddt_causale', 'ddt_trasporto_a_cura', 'ddt_partenza', 'ddt_vettore', 'ddt_conducente', 'ddt_targa', 'ddt_aspetto_beni'];
+    const DDT_RICORDA = ['ddt_causale', 'ddt_partenza', 'ddt_vettore', 'ddt_conducente', 'ddt_targa', 'ddt_aspetto_beni'];
     const DDT_STORAGE = 'gestionale_ddt_ultimi';
     const cantiereAddressModal = document.getElementById('cantiere-address-modal');
     const cantiereForm = document.getElementById('cantiere-form');
@@ -634,34 +658,46 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         ddtParziale.checked = false;
         parzialeRighe.classList.add('hidden');
-        ddtForm.querySelector('input[name="ddt_tipo"][value="consegna"]').checked = true;
+        // Tipo di DDT: si ripropone l'ultimo usato su questo dispositivo
+        let ultimoTipo = 'mittente';
+        try { ultimoTipo = localStorage.getItem(DDT_STORAGE + '_tipo') || 'mittente'; } catch (e) { /* ignorato */ }
+        const radioTipo = ddtForm.querySelector(`input[name="ddt_tipo"][value="${ultimoTipo}"]`)
+            || ddtForm.querySelector('input[name="ddt_tipo"][value="mittente"]');
+        radioTipo.checked = true;
         ddtForm.elements['ddt_ritirato_da'].value = '';
         aggiornaTipoDdt();
         ddtModal.style.display = 'flex';
     }
 
-    function eRitiro() {
+    function tipoDdt() {
         const r = ddtForm.querySelector('input[name="ddt_tipo"]:checked');
-        return !!r && r.value.startsWith('ritiro');
+        return r ? r.value : 'mittente';
     }
+    function eRitiro() { return tipoDdt().startsWith('ritiro'); }
     function aggiornaTipoDdt() {
-        const ritiro = eRitiro();
+        const tipo = tipoDdt(), ritiro = eRitiro();
         ddtForm.querySelectorAll('.solo-consegna').forEach(el => el.classList.toggle('hidden', ritiro));
         ddtForm.querySelectorAll('.solo-ritiro').forEach(el => el.classList.toggle('hidden', !ritiro));
+        ddtForm.querySelectorAll('.solo-mittente').forEach(el => el.classList.toggle('hidden', tipo !== 'mittente'));
+        ddtForm.querySelectorAll('.solo-vettore').forEach(el => el.classList.toggle('hidden', tipo !== 'vettore'));
     }
     ddtForm.querySelectorAll('input[name="ddt_tipo"]').forEach(r => r.addEventListener('change', aggiornaTipoDdt));
 
     function confermaDdt() {
         const entries = [];
-        const ritiro = eRitiro();
-        // Ritiro in negozio: niente vettore/conducente/targa, trasporto a cura del destinatario
-        const soloConsegna = ['ddt_trasporto_a_cura', 'ddt_partenza', 'ddt_vettore', 'ddt_conducente', 'ddt_targa'];
+        const tipo = tipoDdt(), ritiro = eRitiro();
+        // Si inviano solo i campi del tipo scelto (gli altri sono nascosti)
+        const campiDelTipo = {
+            ddt_partenza: !ritiro, ddt_ritirato_da: ritiro,
+            ddt_vettore: tipo === 'vettore',
+            ddt_conducente: tipo === 'mittente', ddt_targa: tipo === 'mittente',
+        };
         new FormData(ddtForm).forEach((v, k) => {
             if (k === 'parziale' || k === 'ddt_tipo') return;
-            if (ritiro && soloConsegna.includes(k)) return;
-            if (!ritiro && k === 'ddt_ritirato_da') return;
+            if (k in campiDelTipo && !campiDelTipo[k]) return;
             entries.push([k, v]);
         });
+        if (!ritiro) entries.push(['ddt_trasporto_a_cura', tipo === 'vettore' ? 'Vettore' : 'Mittente']);
         if (ritiro) {
             entries.push(['ritiro_negozio', '1']);
             entries.push(['ritiro_sede', ddtForm.querySelector('input[name="ddt_tipo"]:checked').value === 'ritiro_magazzino' ? 'magazzino' : 'negozio']);
@@ -685,6 +721,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const daSalvare = {};
             DDT_RICORDA.forEach(k => { if (ddtForm.elements[k]) daSalvare[k] = ddtForm.elements[k].value; });
             localStorage.setItem(DDT_STORAGE, JSON.stringify(daSalvare));
+            localStorage.setItem(DDT_STORAGE + '_tipo', tipo);
         } catch (e) { /* ignorato */ }
         ddtEntries = entries;
         ddtModal.style.display = 'none';
