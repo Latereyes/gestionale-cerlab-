@@ -52,23 +52,24 @@ print("1) Preventivo esistente, nessuna scelta salvata")
 h = stampa()
 corpo = h.split("</style>")[-1]
 verifica('class="section-total"' not in corpo and 'class="row-price"' not in corpo, "solo totale finale, come prima")
-verifica('value="totale" selected' in c.get(f"/preventivo-edile/edit/{Q}").get_data(as_text=True), "editor propone 'Solo totale finale'")
+ed = c.get(f"/preventivo-edile/edit/{Q}").get_data(as_text=True)
+verifica('window._prezziStampa = "totale"' in ed and 'id="prezzi-stampa-modal"' in ed, "finestra presente, propone 'Solo totale finale'")
+verifica('prezzi-stampa-select' not in ed, "nessuna tendina nell'editor")
 
 
-def salva(scelta):
-    p = g.load_quote(Q)
-    form = {"is_ajax": "1", "is_locked": "false", "data": p["data"], "riepilogo": "", "prezzi_stampa_edile": scelta}
-    for si, s in enumerate(p["sezioni_edili"]):
-        form[f"s[{si}][titolo]"] = s["titolo"]
-        for ri, r in enumerate(s["righe"]):
-            for k, v in r.items():
-                form[f"s[{si}][r][{ri}][{k}]"] = v
-    r = c.post(f"/salva-righe-edili/{Q}", data=form)
-    return r.status_code
+# Il PDF vero non serve: si finge che la stampa fallisca, la scelta va salvata comunque prima
+g.print_url_to_pdf = lambda *a, **k: False
+g._weasyprint_to_pdf = lambda *a, **k: False
+
+
+def salva(scelta, invia=True):
+    """Come la finestra all'invio: /generate-pdf-task/<id>?invia=1&prezzi=<scelta>."""
+    q = f"?invia=1&prezzi={scelta}" if invia else f"?prezzi={scelta}"
+    return c.get(f"/generate-pdf-task/{Q}{q}").status_code
 
 
 print("2) Totale di ogni sezione")
-verifica(salva("sezioni") == 200, "salvataggio ok")
+salva("sezioni")
 verifica(g.load_quote(Q).get("prezzi_stampa_edile") == "sezioni", "scelta salvata nel preventivo")
 h = stampa()
 corpo = h.split("</style>")[-1]
@@ -79,7 +80,7 @@ print("3) Prezzo di ogni voce + totale sezione")
 salva("voci")
 corpo = stampa().split("</style>")[-1]
 verifica("1200,50 €" in corpo and "300,00 €" in corpo and "1500,50 €" in corpo, "prezzi voce e totale sezione presenti")
-verifica('value="voci" selected' in c.get(f"/preventivo-edile/edit/{Q}").get_data(as_text=True), "editor ricorda la scelta")
+verifica('window._prezziStampa = "voci"' in c.get(f"/preventivo-edile/edit/{Q}").get_data(as_text=True), "la finestra ripropone l'ultima scelta")
 
 print("4) Valore non valido o campo assente non cambia la scelta")
 salva("boh")

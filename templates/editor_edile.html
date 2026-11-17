@@ -63,15 +63,6 @@
                     <label>Descrizione generale lavori e approntamento cantiere</label>
                     <textarea name="riepilogo" class="cell-input textarea-autosize" placeholder="Inserisci qui le note sull'approntamento cantiere e note generali..." style="min-height: 100px;">{{ p.riepilogo }}</textarea>
                 </div>
-                <div class="form-group" style="margin-top: 12px;">
-                    <label for="prezzi-stampa-select">Prezzi nel preventivo stampato (PDF)</label>
-                    <select name="prezzi_stampa_edile" id="prezzi-stampa-select">
-                        {% set _ps = p.prezzi_stampa_edile or 'totale' %}
-                        <option value="totale" {% if _ps == 'totale' %}selected{% endif %}>Solo totale finale (nessun prezzo per voce o sezione)</option>
-                        <option value="sezioni" {% if _ps == 'sezioni' %}selected{% endif %}>Totale di ogni sezione (prezzi delle singole voci nascosti)</option>
-                        <option value="voci" {% if _ps == 'voci' %}selected{% endif %}>Prezzo di ogni voce + totale di ogni sezione</option>
-                    </select>
-                </div>
             </div>
         </div>
 
@@ -560,6 +551,40 @@ input:checked + .slider:before { transform: translateX(18px); }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
+<!-- Scelta prezzi nel PDF edile: si apre su "Imposta come Inviato" e "Crea PDF Ufficiale" -->
+<div id="prezzi-stampa-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 480px;">
+        <h3>Prezzi nel preventivo</h3>
+        <p>Cosa vuoi mostrare al cliente nel PDF?</p>
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
+            <button type="button" class="btn btn-outline prezzi-stampa-opt" data-mode="totale">Solo totale finale</button>
+            <button type="button" class="btn btn-outline prezzi-stampa-opt" data-mode="sezioni">Totale di ogni sezione (prezzi delle voci nascosti)</button>
+            <button type="button" class="btn btn-outline prezzi-stampa-opt" data-mode="voci">Prezzo di ogni voce + totale di ogni sezione</button>
+        </div>
+        <div class="modal-actions" style="margin-top: 16px;">
+            <button type="button" class="btn" id="prezzi-stampa-annulla">Annulla</button>
+        </div>
+    </div>
+</div>
+<script>
+    // Ultima scelta usata per questo preventivo (evidenziata nella finestra)
+    window._prezziStampa = "{{ p.prezzi_stampa_edile or 'totale' }}";
+    window.chiediPrezziStampa = function() {
+        return new Promise(resolve => {
+            const modal = document.getElementById('prezzi-stampa-modal');
+            const chiudi = (val) => { modal.style.display = 'none'; resolve(val); };
+            modal.querySelectorAll('.prezzi-stampa-opt').forEach(b => {
+                const scelto = b.dataset.mode === window._prezziStampa;
+                b.classList.toggle('primary', scelto);
+                b.classList.toggle('btn-outline', !scelto);
+                b.onclick = () => { window._prezziStampa = b.dataset.mode; chiudi(b.dataset.mode); };
+            });
+            document.getElementById('prezzi-stampa-annulla').onclick = () => chiudi(null);
+            modal.style.display = 'flex';
+        });
+    };
+</script>
 
 <div id="delete-section-modal" class="modal-overlay" style="display: none;">
     <div class="modal-content">
@@ -1052,6 +1077,13 @@ async function triggerUpload(index) {
         event.preventDefault();
         const form = document.getElementById('grid-form');
         const btn = event.currentTarget;
+        // Invio: prima si sceglie quali prezzi mostrare nel PDF (Annulla = non succede nulla)
+        if (targetActionUrlName === 'invia_preventivo' && !event._prezziScelti) {
+            chiediPrezziStampa().then(m => {
+                if (m) handleStateChangeAndSave({ preventDefault() {}, currentTarget: btn, _prezziScelti: true }, targetActionUrlName);
+            });
+            return;
+        }
         const originalHtml = btn.innerHTML;
         
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Attendi...';
@@ -1070,7 +1102,7 @@ async function triggerUpload(index) {
             // "Inviato": si genera il PDF e lo stato cambia lato server solo se il PDF è stato creato
             if (targetActionUrlName === 'invia_preventivo') {
                 btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Genero PDF...';
-                return fetch(`/generate-pdf-task/${quoteId}?invia=1`).then(r => r.json().then(d => {
+                return fetch(`/generate-pdf-task/${quoteId}?invia=1&prezzi=${encodeURIComponent(window._prezziStampa)}`).then(r => r.json().then(d => {
                     if (!d.pdf_url) throw new Error("Il PDF non è stato generato, quindi il preventivo NON è stato segnato come Inviato.\n\n" + (d.error || ''));
                     window.open(d.pdf_url, '_blank');
                     return { ok: true };
@@ -1262,14 +1294,16 @@ async function triggerUpload(index) {
     };
 
     // 3. Funzione Generazione PDF
-    window.handlePdf = function(ev) {
+    window.handlePdf = async function(ev) {
         ev.preventDefault();
         const btn = ev.currentTarget;
         const original = btn.innerHTML;
+        const prezzi = await chiediPrezziStampa();
+        if (!prezzi) return;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Genero PDF...';
         
         // Chiamata al task di generazione (già esistente in gestionale.py)
-        fetch(`/generate-pdf-task/{{p.numero}}`)
+        fetch(`/generate-pdf-task/{{p.numero}}?prezzi=${encodeURIComponent(prezzi)}`)
             .then(res => res.json())
             .then(data => {
                 if(data.pdf_url) {

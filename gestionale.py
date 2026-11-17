@@ -3645,9 +3645,6 @@ def salva_righe_edili(quote_id):
         p["referente"] = form.get("referente", p.get("referente"))
         p["riepilogo"] = form.get("riepilogo", p.get("riepilogo", ""))
         p["no_iva"] = True if form.get("no_iva") else False 
-    # Prezzi nel PDF edile: 'totale' (come sempre), 'sezioni' (totale per sezione) o 'voci' (prezzo per voce)
-    if form.get("prezzi_stampa_edile") in ("totale", "sezioni", "voci"):
-        p["prezzi_stampa_edile"] = form.get("prezzi_stampa_edile")
 
     nuove_sezioni = []
     pat = re.compile(r"^s\[(\d+)\](?:\[titolo\]|\[costi_vivi_json\]|\[r\]\[(\d+)\]\[(.+)\])$")
@@ -8701,6 +8698,14 @@ def _generate_pdf_task_locked(quote_id):
         return jsonify({"error": "Non è possibile generare un PDF per un preventivo in stato di Bozza."}), 400
     if invia and p.get("stato") not in ("Bozza", "Inviato"):
         invia = False  # già confermato/in lavorazione: si genera solo la nuova revisione
+
+    # Edili: prezzi da mostrare nel PDF, scelti nella finestra all'invio / "Crea PDF Ufficiale".
+    # 'totale' (come sempre), 'sezioni' (totale per sezione) o 'voci' (prezzo per voce). Resta salvata
+    # nel preventivo e vale anche per l'anteprima e le revisioni successive.
+    prezzi_scelti = request.args.get("prezzi")
+    if p.get("tipo_preventivo") == "edile" and prezzi_scelti in ("totale", "sezioni", "voci"):
+        p["prezzi_stampa_edile"] = prezzi_scelti
+        save_quote(quote_id, p)
 
     # Scelta del Template (supporto Standard, Semplice, Edile)
     template_choice = request.args.get('template', 'standard')
