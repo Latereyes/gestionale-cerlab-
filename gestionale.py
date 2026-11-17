@@ -1689,6 +1689,18 @@ def data_it_filter(value):
     except (ValueError, TypeError):
         return value or ""
 app.jinja_env.filters['data_it'] = data_it_filter
+
+from markupsafe import Markup, escape  # noqa: E402
+
+def badge_revisione(p):
+    """Etichetta "In revisione" per un preventivo già confermato e riportato in Bozza/Inviato:
+    ha ancora la data di conferma originale, che resta anche alla riconferma."""
+    if not p or p.get("stato") not in ("Bozza", "Inviato") or not p.get("data_conferma"):
+        return ""
+    data = data_it_filter(p.get("data_conferma"))
+    return Markup(f'<span class="status-badge status-revisione" title="Confermato il {escape(data)} e riaperto per modifiche: '
+                  f'alla nuova conferma resta questa data">In revisione</span>')
+app.jinja_env.globals["badge_revisione"] = badge_revisione
 app.jinja_env.globals['enumerate'] = enumerate
 
 def _str_to_date(date_str):

@@ -97,7 +97,7 @@
                         </td>
                         
                         <td>
-                            <span class="status-badge status-principale status-{{ p.stato | lower | replace(' ', '-') }}">{{ p.stato }}</span>
+                            <span class="status-badge status-principale status-{{ p.stato | lower | replace(' ', '-') }}">{{ p.stato }}</span>{{ badge_revisione(p) }}
                         </td>
                         
                         <td class="right"><strong>{{ money_ui(p.totale) }}</strong></td>
