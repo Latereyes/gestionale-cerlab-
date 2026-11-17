@@ -187,7 +187,7 @@
             {% set tot_sez = namespace(v=0) %}
             {% for riga in sezione.righe %}{% set tot_sez.v = tot_sez.v + to_num(riga.prezzo_vendita) %}{% endfor %}
             <div class="section-total">
-                <span>Totale {{ s_num }}.0 {{ sezione.titolo | upper }}</span>
+                <span>Totale {{ sezione.titolo | upper }}</span>
                 <span>{{ money_ui(tot_sez.v) }}</span>
             </div>
         {% endif %}
