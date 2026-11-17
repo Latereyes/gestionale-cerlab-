@@ -248,7 +248,8 @@
       <div class="footer-status-controls">
           <div class="status-display">
             <label>Stato Attuale</label>
-            <div class="status-badge status-{{ p.stato | lower | replace(' ', '-') }}">{{ p.stato }}</div>
+            <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;"><div class="status-badge status-{{ p.stato | lower | replace(' ', '-') }}">{{ p.stato }}</div>{{ badge_revisione(p) }}</div>
+            {% if badge_revisione(p) %}<div class="revisione-nota" style="font-size: 11px; color: #b45309; margin-top: 4px;">Confermato il {{ p.data_conferma | data_it }}: alla riconferma resta questa data</div>{% endif %}
           </div>
           
           <div class="status-actions">
@@ -264,7 +265,7 @@
                 <div>
                   <label>&nbsp;</label>
                   <button type="button" class="btn success" onclick="handleStateChangeAndSave(event, 'conferma_preventivo')">
-                      <i class="fas fa-check"></i> Imposta come Confermato
+                      <i class="fas fa-check"></i> {% if p.data_conferma %}Riconferma{% else %}Imposta come Confermato{% endif %}
                   </button>
                 </div>
            {% elif p.stato not in ['Bozza', 'Inviato', 'Annullato'] %}
