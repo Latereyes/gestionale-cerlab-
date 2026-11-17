@@ -2,6 +2,14 @@
   {
     "version": "3.6.3",
     "date": "17/11/2026",
+    "title": "Preventivi in revisione nei conti",
+    "changes": [
+      "<b>Preventivi in revisione nei conti:</b> un preventivo già confermato e riportato in Bozza per modifiche (etichetta \"In revisione\") resta nel venduto, nel guadagno e nella cassa della Dashboard Direzionale, nell'Analisi cliente e negli Excel della direzione, con la data della prima conferma. Prima spariva dai conti finché non veniva riconfermato."
+    ]
+  },
+  {
+    "version": "3.6.2",
+    "date": "17/11/2026",
     "title": "Prezzi per sezione negli edili e preventivi in revisione",
     "changes": [
       "<b>Prezzi nel preventivo stampato:</b> nei preventivi edili, quando si preme \"Imposta come Inviato\" o \"Crea PDF Ufficiale\", si apre una finestra per scegliere cosa mostrare nel PDF: \"Solo totale finale\" (come prima), \"Totale di ogni sezione\" (i prezzi delle singole voci restano nascosti) oppure \"Prezzo di ogni voce + totale di ogni sezione\". La finestra ripropone l'ultima scelta fatta per quel preventivo, che vale anche per l'Anteprima.",

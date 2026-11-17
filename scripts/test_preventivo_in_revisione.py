@@ -62,6 +62,29 @@ for url in ("/cliente/dettaglio/" + CL, "/preventivi-cliente", "/preventivo/anal
     st, h = pagina(url)
     verifica(st == 200 and 'class="status-badge status-revisione"' in h, f"{url}: etichetta presente")
 
+print("4) Conti: un preventivo in revisione resta nel venduto con la data della prima conferma")
+import datetime  # noqa: E402
+g.save_quote("REV-SOLDI", {**base, "numero": "REV-SOLDI", "stato": "Confermato", "data": "2026-09-20",
+                           "data_conferma": "2026-10-03", "tot_imponibile_cliente": "1000", "tot_imponibile_negozio": "600",
+                           "totale": "1220", "righe": [],
+                           "pagamenti": [{"data": "2026-10-04", "importo": "500", "is_scheduled": False}]})
+ottobre = (datetime.date(2026, 10, 1), datetime.date(2026, 10, 31))
+prima = g._calcola_dashboard_ceo(*ottobre)
+p = g.load_quote("REV-SOLDI"); p["stato"] = "Bozza"; g.save_quote("REV-SOLDI", p)  # riportato in Bozza
+dopo = g._calcola_dashboard_ceo(*ottobre)
+verifica(prima["kpi"]["imponibile_totale"] == dopo["kpi"]["imponibile_totale"] and dopo["kpi"]["imponibile_totale"] >= 1000,
+         f"venduto di ottobre invariato ({prima['kpi']['imponibile_totale']} -> {dopo['kpi']['imponibile_totale']})")
+verifica(prima["cashflow"]["incassato_netto"] == dopo["cashflow"]["incassato_netto"] and dopo["cashflow"]["incassato_netto"] > 0,
+         "incassato di ottobre invariato")
+verifica(prima["funnel"]["confermati"] == dopo["funnel"]["confermati"], "conteggio confermati invariato")
+verifica(dopo["funnel"]["valore_in_trattativa"] == prima["funnel"]["valore_in_trattativa"], "non finisce anche fra le trattative")
+st, h = pagina("/cliente/analisi/" + CL)
+verifica(st == 200, "Analisi cliente si apre")
+verifica(any(p.get("numero") == "REV-SOLDI" for p, _ in g._preventivi_attivi_ceo()), "presente negli export Excel della direzione")
+mai = {**base, "numero": "MAI-CONF", "stato": "Bozza", "data": "2026-10-10", "tot_imponibile_cliente": "777", "righe": []}
+g.save_quote("MAI-CONF", mai)
+verifica(not any(p.get("numero") == "MAI-CONF" for p, _ in g._preventivi_attivi_ceo()), "una Bozza mai confermata resta fuori")
+
 print()
 print("TUTTO OK" if not ERRORI else f"{len(ERRORI)} ERRORI")
 sys.exit(1 if ERRORI else 0)
