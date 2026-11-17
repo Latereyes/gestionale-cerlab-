@@ -48,7 +48,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 
-APP_VERSION = "3.6.1"  
+APP_VERSION = "3.6.2"  
 
 GITHUB_REPO_OWNER = "Latereyes" 
 GITHUB_REPO_NAME = "gestionale-cerlab-"
@@ -1689,6 +1689,29 @@ def data_it_filter(value):
     except (ValueError, TypeError):
         return value or ""
 app.jinja_env.filters['data_it'] = data_it_filter
+
+from markupsafe import Markup, escape  # noqa: E402
+
+def in_revisione(p):
+    """Preventivo già confermato e riportato in Bozza/Inviato per modifiche (ha ancora la data di conferma)."""
+    return bool(p) and p.get("stato") in ("Bozza", "Inviato") and bool(p.get("data_conferma"))
+
+
+def stato_contabile(p):
+    """Stato da usare per venduto/guadagno/cassa: un preventivo in revisione resta "Confermato",
+    con la data della prima conferma (decisione utente 2026-11-17), così non esce dai conti mentre lo si modifica."""
+    return "Confermato" if in_revisione(p) else (p or {}).get("stato", "")
+
+
+def badge_revisione(p):
+    """Etichetta "In revisione" per un preventivo già confermato e riportato in Bozza/Inviato:
+    ha ancora la data di conferma originale, che resta anche alla riconferma."""
+    if not in_revisione(p):
+        return ""
+    data = data_it_filter(p.get("data_conferma"))
+    return Markup(f'<span class="status-badge status-revisione" title="Confermato il {escape(data)} e riaperto per modifiche: '
+                  f'alla nuova conferma resta questa data">In revisione</span>')
+app.jinja_env.globals["badge_revisione"] = badge_revisione
 app.jinja_env.globals['enumerate'] = enumerate
 
 def _str_to_date(date_str):
@@ -4006,7 +4029,8 @@ def _to_num(x, default=0.0):
         return float(s)
     except (ValueError, TypeError):
         return float(default)
-    
+app.jinja_env.globals["to_num"] = _to_num  # usato da stampa_edile.html per i totali di sezione
+
 @app.route("/preventivo/<quote_id>/clona")
 @login_required
 def clona_preventivo(quote_id):
@@ -5715,7 +5739,7 @@ def _calcola_dashboard_ceo(start_date, end_date):
     for prev_obj in all_preventivi:
         p = prev_obj.to_dict()  # Converte in dict compatibile col codice esistente
 
-        st = p.get("stato", "")
+        st = stato_contabile(p)  # i preventivi "In revisione" contano come confermati
 
         # Data di riferimento per la competenza
         raw_date = (
@@ -6342,7 +6366,7 @@ def _preventivi_attivi_ceo():
         out = []
         for prev_obj in prevs:
             p = prev_obj.to_dict()
-            if p.get("stato") not in ("Confermato", "In Lavorazione", "Chiuso"):
+            if stato_contabile(p) not in ("Confermato", "In Lavorazione", "Chiuso"):
                 continue
             p_date = _str_to_date(p.get("data_conferma")) or _str_to_date(p.get("data"))
             if p_date:
@@ -6621,7 +6645,7 @@ def export_cashflow_excel():
     programmati = []
     for p, p_date in _preventivi_attivi_ceo():
         base = {"N. PREVENTIVO": p.get("numero"), "CLIENTE": p.get("cliente"),
-                "STATO": p.get("stato"), "VENDITORE": p.get("venditore")}
+                "STATO": stato_contabile(p), "VENDITORE": p.get("venditore")}
         is_no_iva = (p.get("no_iva") is True) or (str(p.get("no_iva")).lower() == "true")
         imponibile = _to_float(p.get("tot_imponibile_cliente", 0))
         ratio_netto = _ratio_netto_incassi(p)
@@ -6750,7 +6774,7 @@ def export_excel_ceo():
             "N. Preventivo": p.get("numero"),
             "Data": p_date,
             "Cliente": p.get("cliente"),
-            "Stato": p.get("stato"),
+            "Stato": stato_contabile(p),
             "Totale Preventivo (€)": totale,
             "Imponibile Cliente (€)": imponibile,
             "IVA (€)": _to_float(p.get("tot_iva", 0)),
@@ -6915,7 +6939,7 @@ def analisi_cliente(client_id):
         if not p or p.get("id_cliente") != client_id:
             continue
 
-        stato = p.get("stato")
+        stato = stato_contabile(p)  # i preventivi "In revisione" contano come confermati
         
         # Funnel Counters
         funnel['creati'] += 1
@@ -8697,6 +8721,14 @@ def _generate_pdf_task_locked(quote_id):
         return jsonify({"error": "Non è possibile generare un PDF per un preventivo in stato di Bozza."}), 400
     if invia and p.get("stato") not in ("Bozza", "Inviato"):
         invia = False  # già confermato/in lavorazione: si genera solo la nuova revisione
+
+    # Edili: prezzi da mostrare nel PDF, scelti nella finestra all'invio / "Crea PDF Ufficiale".
+    # 'totale' (come sempre), 'sezioni' (totale per sezione) o 'voci' (prezzo per voce). Resta salvata
+    # nel preventivo e vale anche per l'anteprima e le revisioni successive.
+    prezzi_scelti = request.args.get("prezzi")
+    if p.get("tipo_preventivo") == "edile" and prezzi_scelti in ("totale", "sezioni", "voci"):
+        p["prezzi_stampa_edile"] = prezzi_scelti
+        save_quote(quote_id, p)
 
     # Scelta del Template (supporto Standard, Semplice, Edile)
     template_choice = request.args.get('template', 'standard')
