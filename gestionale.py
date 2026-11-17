@@ -3645,6 +3645,9 @@ def salva_righe_edili(quote_id):
         p["referente"] = form.get("referente", p.get("referente"))
         p["riepilogo"] = form.get("riepilogo", p.get("riepilogo", ""))
         p["no_iva"] = True if form.get("no_iva") else False 
+    # Prezzi nel PDF edile: 'totale' (come sempre), 'sezioni' (totale per sezione) o 'voci' (prezzo per voce)
+    if form.get("prezzi_stampa_edile") in ("totale", "sezioni", "voci"):
+        p["prezzi_stampa_edile"] = form.get("prezzi_stampa_edile")
 
     nuove_sezioni = []
     pat = re.compile(r"^s\[(\d+)\](?:\[titolo\]|\[costi_vivi_json\]|\[r\]\[(\d+)\]\[(.+)\])$")
@@ -4006,7 +4009,8 @@ def _to_num(x, default=0.0):
         return float(s)
     except (ValueError, TypeError):
         return float(default)
-    
+app.jinja_env.globals["to_num"] = _to_num  # usato da stampa_edile.html per i totali di sezione
+
 @app.route("/preventivo/<quote_id>/clona")
 @login_required
 def clona_preventivo(quote_id):

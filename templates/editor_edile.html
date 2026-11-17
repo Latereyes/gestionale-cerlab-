@@ -63,6 +63,15 @@
                     <label>Descrizione generale lavori e approntamento cantiere</label>
                     <textarea name="riepilogo" class="cell-input textarea-autosize" placeholder="Inserisci qui le note sull'approntamento cantiere e note generali..." style="min-height: 100px;">{{ p.riepilogo }}</textarea>
                 </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="prezzi-stampa-select">Prezzi nel preventivo stampato (PDF)</label>
+                    <select name="prezzi_stampa_edile" id="prezzi-stampa-select">
+                        {% set _ps = p.prezzi_stampa_edile or 'totale' %}
+                        <option value="totale" {% if _ps == 'totale' %}selected{% endif %}>Solo totale finale (nessun prezzo per voce o sezione)</option>
+                        <option value="sezioni" {% if _ps == 'sezioni' %}selected{% endif %}>Totale di ogni sezione (prezzi delle singole voci nascosti)</option>
+                        <option value="voci" {% if _ps == 'voci' %}selected{% endif %}>Prezzo di ogni voce + totale di ogni sezione</option>
+                    </select>
+                </div>
             </div>
         </div>
 

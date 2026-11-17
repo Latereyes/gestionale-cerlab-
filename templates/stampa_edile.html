@@ -79,6 +79,16 @@
             font-family: monospace; /* Mantiene i numeri allineati */
         }
         
+        /* Prezzi per voce / totale di sezione (scelta "Prezzi nel preventivo stampato" nell'editor) */
+        .row-price { white-space: nowrap; font-weight: 600; text-align: right; min-width: 90px; }
+        .section-total {
+            display: flex; justify-content: space-between; gap: 10px;
+            margin: 4px 0 18px 0; padding: 6px 10px;
+            background: var(--bg-light); border-top: 1px solid var(--border-color);
+            font-size: 10.5pt; font-weight: 700;
+            page-break-inside: avoid; page-break-before: avoid;
+        }
+
         .riepilogo-box, .totals-section, .print-footer-block {
             page-break-inside: avoid; /* Protegge i blocchi interi */
         }
@@ -159,6 +169,7 @@
     {% endif %}
 
     <!-- ELENCO LAVORAZIONI CON STRUTTURA A PARAGRAFI -->
+    {% set prezzi_mode = p.prezzi_stampa_edile or 'totale' %}
     {% for sezione in p.sezioni_edili %}
         {% set s_num = loop.index + 1 %}
         <div class="section-title">{{ s_num }}.0 {{ sezione.titolo | upper }}</div>
@@ -168,9 +179,18 @@
                 <div class="row-item" style="display: flex; gap: 10px; align-items: flex-start;">
                     <span style="font-weight: 600; min-width: 30px;">{{ s_num }}.{{ loop.index }}</span>
                     <div style="flex: 1;">{{ riga.articolo | replace('\n', '<br>') | safe }}</div>
+                    {% if prezzi_mode == 'voci' %}<div class="row-price">{{ money_ui(to_num(riga.prezzo_vendita)) }}</div>{% endif %}
                 </div>
             {% endif %}
         {% endfor %}
+        {% if prezzi_mode in ('sezioni', 'voci') %}
+            {% set tot_sez = namespace(v=0) %}
+            {% for riga in sezione.righe %}{% set tot_sez.v = tot_sez.v + to_num(riga.prezzo_vendita) %}{% endfor %}
+            <div class="section-total">
+                <span>Totale {{ s_num }}.0 {{ sezione.titolo | upper }}</span>
+                <span>{{ money_ui(tot_sez.v) }}</span>
+            </div>
+        {% endif %}
     {% endfor %}
 
 

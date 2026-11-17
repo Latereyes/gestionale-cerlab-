@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.6.3",
+    "date": "17/11/2026",
+    "title": "Preventivi edili: prezzi per voce o per sezione",
+    "changes": [
+      "<b>Prezzi nel preventivo stampato:</b> nell'editor dei preventivi edili, sotto il riepilogo, si sceglie cosa mostrare nel PDF: \"Solo totale finale\" (come prima), \"Totale di ogni sezione\" (i prezzi delle singole voci restano nascosti) oppure \"Prezzo di ogni voce + totale di ogni sezione\". La scelta resta salvata nel preventivo.",
+      "<b>Nessun cambiamento sui preventivi esistenti:</b> finché non si cambia la scelta, la stampa resta quella di sempre con il solo totale finale."
+    ]
+  },
+  {
     "version": "3.6.1",
     "date": "14/11/2026",
     "title": "Dashboard Direzionale, Ceerlo e DDT più semplice",
