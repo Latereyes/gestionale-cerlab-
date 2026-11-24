@@ -812,24 +812,34 @@ def inject_debug_mode():
     """Rende la variabile 'debug_mode' disponibile in tutti i template."""
     return dict(debug_mode=app.config['DEBUG'])
 
-# --- NOTE CLIENTE (pannello laterale nelle pagine di un preventivo) ---
+# --- NOTE (pannello laterale nelle pagine di un preventivo e nella cartella del cliente) ---
 @app.context_processor
 def inject_current_quote_client():
-    """Sulle pagine di un preventivo (URL con <quote_id>) espone il cliente collegato,
-    usato da base.html per mostrare il pulsante "Note Cliente"."""
-    quote_id = (request.view_args or {}).get("quote_id")
-    if not quote_id or "user_id" not in session:
+    """Sulle pagine di un preventivo (URL con <quote_id>) espone il cliente e il preventivo collegati;
+    nella cartella del cliente espone il cliente e l'elenco dei suoi preventivi (per le note preventivo).
+    Usato da base.html per mostrare il pulsante "Note"."""
+    args = request.view_args or {}
+    quote_id = args.get("quote_id")
+    client_id = args.get("client_id") if request.endpoint == "dettaglio_cliente" else None
+    if (not quote_id and not client_id) or "user_id" not in session:
         return {}
     db = _DBSession()
     try:
-        prev = db.query(_Preventivo).filter_by(numero=quote_id).first()
-        if not prev or not prev.id_cliente:
-            return {}
-        cli = db.query(_Cliente).filter_by(id_cliente=prev.id_cliente).first()
+        if quote_id:
+            prev = db.query(_Preventivo).filter_by(numero=quote_id).first()
+            if not prev or not prev.id_cliente:
+                return {}
+            client_id = prev.id_cliente
+        cli = db.query(_Cliente).filter_by(id_cliente=client_id).first()
         if not cli:
             return {}
-        return dict(current_quote_id=quote_id, current_client_id=cli.id_cliente,
-                    current_client_name=cli.cliente or cli.rag_sociale or cli.id_cliente)
+        out = dict(current_quote_id=quote_id, current_client_id=cli.id_cliente,
+                   current_client_name=cli.cliente or cli.rag_sociale or cli.id_cliente)
+        if not quote_id:
+            out["current_client_quotes"] = [
+                {"numero": q.numero, "stato": q.stato or "", "data": (q.data or "")[:10]}
+                for q in db.query(_Preventivo).filter_by(id_cliente=cli.id_cliente).order_by(_Preventivo.numero.desc()).all()]
+        return out
     except Exception as e:
         print(f"[note_cliente] Errore context: {e}")
         return {}
@@ -9001,33 +9011,61 @@ def api_get_chat_history(other_user):
     finally:
         db.close()
 
-def voci_note_cliente(cli):
-    """Le note del cliente a voci; le note scritte prima (testo libero) diventano una voce per riga."""
+def voci_note_cliente(cli, preventivo=None):
+    """Le note del cliente a voci; le note scritte prima (testo libero) diventano una voce per riga.
+    Ogni voce ha 'tipo': 'cliente' (visibile ovunque per quel cliente) o 'preventivo' (con 'preventivo' = numero,
+    visibile solo su quel preventivo e nella cartella del cliente). Le voci senza tipo (scritte prima) sono note cliente.
+    Con preventivo=<numero> restituisce solo le note cliente e quelle di quel preventivo."""
     if cli.note_voci:
-        return list(cli.note_voci)
-    return [{"id": f"v{i}", "testo": t.strip().lstrip("•-* ").strip(), "autore": "", "autore_nome": "", "quando": ""}
-            for i, t in enumerate((cli.note_interne or "").splitlines()) if t.strip().lstrip("•-* ").strip()]
+        voci = [dict(v) for v in cli.note_voci if isinstance(v, dict)]
+    else:
+        voci = [{"id": f"v{i}", "testo": t.strip().lstrip("•-* ").strip(), "autore": "", "autore_nome": "", "quando": ""}
+                for i, t in enumerate((cli.note_interne or "").splitlines()) if t.strip().lstrip("•-* ").strip()]
+    for v in voci:
+        if v.get("tipo") != "preventivo" or not v.get("preventivo"):
+            v["tipo"], v["preventivo"] = "cliente", ""
+    if preventivo:
+        voci = [v for v in voci if v["tipo"] == "cliente" or v["preventivo"] == preventivo]
+    return voci
+
+
+def testo_note_cliente(voci):
+    """Il testo di 'note_interne' (per Ceerlo e le ricerche): le note preventivo portano il numero davanti."""
+    return "\n".join(f"• [Preventivo {v['preventivo']}] {v['testo']}" if v.get("tipo") == "preventivo" else f"• {v['testo']}"
+                     for v in voci)
 
 
 @app.route("/api/cliente/<client_id>/note", methods=["GET", "POST"])
 @login_required
 def api_note_cliente(client_id):
-    """Legge (GET) o salva (POST {voci: [...]}) le note interne di un cliente, a voci come i report.
-    Ogni voce: id, testo, autore, autore_nome, quando. 'note_interne' resta il testo (per Ceerlo e le ricerche)."""
+    """Legge (GET) o salva (POST {voci: [...]}) le note di un cliente, a voci come i report.
+    Ogni voce: id, testo, tipo ('cliente'/'preventivo'), preventivo (numero), autore, autore_nome, quando.
+    ?preventivo=<numero> (pagine di un preventivo): si leggono e si salvano solo le note cliente e quelle di quel
+    preventivo; le note degli altri preventivi restano come sono. Senza (cartella cliente): tutte le note.
+    'note_interne' resta il testo (per Ceerlo e le ricerche)."""
     db = _DBSession()
     try:
         cli = db.query(_Cliente).filter_by(id_cliente=client_id).first()
         if not cli:
             return jsonify({"ok": False, "error": "Cliente non trovato"}), 404
-        vecchie = voci_note_cliente(cli)
+        contesto = (request.args.get("preventivo") or "").strip()
+        numeri = {q.numero for q in db.query(_Preventivo.numero).filter_by(id_cliente=client_id).all()}
+        if contesto and contesto not in numeri:
+            return jsonify({"ok": False, "error": "Preventivo non di questo cliente"}), 400
+        tutte = voci_note_cliente(cli)
+        if contesto:
+            in_vista = [v for v in tutte if v["tipo"] == "cliente" or v["preventivo"] == contesto]
+            fuori = [v for v in tutte if not (v["tipo"] == "cliente" or v["preventivo"] == contesto)]
+        else:
+            in_vista, fuori = tutte, []
         if request.method == "GET":
-            return jsonify({"ok": True, "voci": vecchie, "note": cli.note_interne or "",
-                            "cliente": cli.cliente or cli.rag_sociale or client_id})
+            return jsonify({"ok": True, "voci": in_vista, "note": cli.note_interne or "",
+                            "cliente": cli.cliente or cli.rag_sociale or client_id, "preventivo": contesto})
         data = request.get_json(silent=True) or {}
         grezze = data.get("voci")
         if not isinstance(grezze, list):  # vecchio formato: testo libero, una voce per riga
             grezze = [{"testo": t} for t in str(data.get("note", "")).splitlines()]
-        per_id = {v["id"]: v for v in vecchie}
+        per_id = {v["id"]: v for v in in_vista}
         adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         voci = []
         for g in grezze[:200]:
@@ -9037,16 +9075,28 @@ def api_note_cliente(client_id):
             if not testo:
                 continue
             prima = per_id.get(str(g.get("id") or ""))
+            tipo, numero = "cliente", ""
+            if g.get("tipo") == "preventivo":
+                numero = contesto or str(g.get("preventivo") or "").strip()
+                # un preventivo eliminato non e' piu' nell'elenco: la sua nota gia' scritta si puo' tenere
+                if numero not in numeri and not (prima and prima.get("preventivo") == numero):
+                    return jsonify({"ok": False, "error": "Scegli il preventivo della nota"}), 400
+                tipo = "preventivo"
             if prima and prima["testo"] == testo:
-                voci.append(prima)  # voce invariata: resta di chi l'ha scritta
+                voce = dict(prima)  # testo invariato: resta di chi l'ha scritta (anche se cambia solo il tipo)
             else:
-                voci.append({"id": (prima or {}).get("id") or uuid.uuid4().hex[:8], "testo": testo,
-                             "autore": session["user_id"], "autore_nome": session.get("user_name") or session["user_id"],
-                             "quando": adesso})
-        cli.note_voci = voci
-        cli.note_interne = "\n".join(f"• {v['testo']}" for v in voci)
+                voce = {"id": (prima or {}).get("id") or uuid.uuid4().hex[:8], "testo": testo,
+                        "autore": session["user_id"], "autore_nome": session.get("user_name") or session["user_id"],
+                        "quando": adesso}
+            voce["tipo"], voce["preventivo"] = tipo, numero
+            voci.append(voce)
+        # in cima le note preventivo, poi le note cliente (ognuna nel suo ordine)
+        salvate = [v for v in voci + fuori if v["tipo"] == "preventivo"] + [v for v in voci + fuori if v["tipo"] == "cliente"]
+        cli.note_voci = salvate
+        cli.note_interne = testo_note_cliente(salvate)
         db.commit()
-        return jsonify({"ok": True, "voci": voci})
+        visibili = [v for v in salvate if not contesto or v["tipo"] == "cliente" or v["preventivo"] == contesto]
+        return jsonify({"ok": True, "voci": visibili})
     except Exception as e:
         db.rollback()
         print(f"[note_cliente] Errore: {e}")
@@ -11630,7 +11680,7 @@ def api_ceerlo_note_cliente(client_id):
         cli = db.query(_Cliente).filter_by(id_cliente=client_id).first()
         if not cli:
             return jsonify({"ok": False, "error": "Cliente non trovato"}), 404
-        voci = voci_note_cliente(cli)
+        voci = voci_note_cliente(cli, (request.args.get("preventivo") or "").strip() or None)
         nome = cli.cliente or cli.rag_sociale or client_id
     finally:
         db.close()
@@ -11641,8 +11691,8 @@ def api_ceerlo_note_cliente(client_id):
     if not voci:
         return jsonify(dict(base, stato="pronto" if cantieri else "nessuna", testo="",
                             impronta=hashlib.sha1("|".join(cantieri).encode("utf-8")).hexdigest()[:16]))
-    note = "\n".join(f"- {v['testo']}" + (f" ({v['autore_nome']}, {v['quando'][:10]})" if v.get("autore_nome") else "")
-                     for v in voci)
+    note = "\n".join(("- (nota di questo preventivo) " if v.get("tipo") == "preventivo" else "- ") + v['testo'] +
+                     (f" ({v['autore_nome']}, {v['quando'][:10]})" if v.get("autore_nome") else "") for v in voci)
     impronta = hashlib.sha1((note + "|" + "|".join(cantieri)).encode("utf-8")).hexdigest()[:16]
     pronto = ceerlo.riassunto_note(client_id, impronta, scopo)
     if pronto:

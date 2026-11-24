@@ -258,8 +258,29 @@
     font-family: var(--font); font-size: 14px; line-height: 1.5; padding: 3px 0; min-height: 26px; overflow: hidden; color: var(--text); }
 .ncp-voce .ncp-togli { width: 28px; height: 28px; border: none; background: none; color: var(--text-subtle); cursor: pointer; border-radius: 8px; padding: 0; }
 .ncp-voce .ncp-togli:hover { color: var(--danger); background: var(--danger-bg); }
-.ncp-voce .ncp-meta { grid-column: 2 / 4; font-size: 11px; color: var(--text-muted, #64748b); }
-.ncp-voce .ncp-meta:empty { display: none; }
+.ncp-voce .ncp-meta { grid-column: 2 / 4; font-size: 11px; color: var(--text-muted, #64748b); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* note cliente (verdi) e note preventivo (arancio, sempre in cima) */
+.ncp-voce.is-cli { border-left: 4px solid hsl(152,55%,38%); }
+.ncp-voce.is-prev { border-left: 4px solid hsl(28,90%,52%); background: hsla(36,100%,55%,.08); }
+.ncp-voce.is-prev > i { color: hsl(28,90%,50%); }
+.ncp-voce[hidden] { display: none; }
+.note-cliente-panel select.ncp-sel { font: inherit; font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 2px 22px 2px 9px; max-width: 100%;
+    width: auto; height: auto; min-height: 0; line-height: 1.5; margin: 0; box-shadow: none;
+    border: 1px solid var(--border, #e2e8f0); background-color: var(--surface, #fff); color: var(--text); cursor: pointer; }
+.note-cliente-panel .ncp-voce.is-cli select.ncp-tipo { color: hsl(152,55%,30%); border-color: hsla(152,55%,38%,.45); background: hsla(152,55%,45%,.10); }
+.note-cliente-panel .ncp-voce.is-prev select.ncp-tipo { color: hsl(24,85%,40%); border-color: hsla(28,90%,52%,.5); background: hsla(36,100%,55%,.14); }
+.ncp-h-cli { color: hsl(152,55%,32%); font-weight: 600; }
+.ncp-h-prev { color: hsl(24,85%,42%); font-weight: 600; }
+.ncp-filtro { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--surface-2, #f1f5f9); border: 1px solid var(--border, #e2e8f0); }
+.ncp-filtro button { flex: 1; border: none; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text-muted, #64748b);
+    padding: 6px 4px; border-radius: 7px; cursor: pointer; min-height: 32px; }
+.ncp-filtro button b { font-weight: 700; font-size: 11px; opacity: .75; margin-left: 2px; }
+.ncp-filtro button.on { background: var(--surface, #fff); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.ncp-filtro button[data-f="cliente"].on { color: hsl(152,55%,30%); }
+.ncp-filtro button[data-f="preventivo"].on { color: hsl(24,85%,40%); }
+@media (max-width: 768px) { .note-cliente-panel select.ncp-sel { font-size: 16px !important; } }   /* niente zoom su iPhone */
+.ncp-nuova { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted, #64748b); margin-top: 4px; }
+.note-cliente-panel .ncp-nuova select.ncp-sel { flex: 1; min-width: 0; font-size: 12.5px; padding: 5px 24px 5px 10px; border-radius: 8px; }
 .ncp-aggiungi { border: 1px dashed var(--border-strong, #cbd5e1); background: none; border-radius: var(--radius-md, 8px); width: 100%; padding: 8px;
     font: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; }
 .ncp-aggiungi:hover { color: var(--accent); border-color: var(--accent); }
@@ -1561,11 +1582,20 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
 <aside class="note-cliente-panel" id="noteClientePanel" aria-hidden="true">
     <div class="ncp-header">
         <div class="ncp-title"><i class="fas fa-sticky-note" style="color: hsl(152,55%,38%);"></i><span>{{ current_client_name }}</span></div>
-        <span class="ncp-badge">Note interne</span>
+        <span class="ncp-badge">Note</span>
     </div>
     <div class="ncp-body">
-        <div class="ncp-hint">Una nota per voce, come nei report. Visibili da tutti i preventivi di questo cliente; non compaiono nelle stampe.</div>
+        <div class="ncp-filtro" id="noteFiltro" role="group" aria-label="Filtra le note">
+            <button type="button" data-f="tutte" class="on">Tutte <b></b></button>
+            <button type="button" data-f="preventivo">Preventivo <b></b></button>
+            <button type="button" data-f="cliente">Cliente <b></b></button>
+        </div>
+        <div class="ncp-hint">{% if current_quote_id %}Le <span class="ncp-h-cli">note cliente</span> si vedono in tutti i preventivi di questo cliente; le <span class="ncp-h-prev">note preventivo</span> solo qui.{% else %}Le <span class="ncp-h-cli">note cliente</span> si vedono in tutti i suoi preventivi; ogni <span class="ncp-h-prev">nota preventivo</span> solo nel suo preventivo.{% endif %} Non compaiono nelle stampe.</div>
         <div class="ncp-voci" id="noteClienteVoci"></div>
+        <div class="ncp-nuova">
+            <label for="noteNuovaTipo">Nuova nota:</label>
+            <select id="noteNuovaTipo" class="ncp-sel"></select>
+        </div>
         <button type="button" class="ncp-aggiungi" id="noteClienteAggiungi"><i class="fas fa-plus"></i> Aggiungi nota <span class="rp-tasto">Invio</span></button>
     </div>
     <div class="ncp-footer">
@@ -1578,57 +1608,109 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
 </aside>
 <script>
 (function () {
-    const url = "{{ url_for('api_note_cliente', client_id=current_client_id) }}";
+    // Pagina di un preventivo: note cliente + note di questo preventivo. Cartella cliente: tutte, con la scelta del preventivo.
+    const quote = {{ (current_quote_id or '') | tojson }};
+    const preventivi = {{ (current_client_quotes or []) | tojson }};
+    const url = "{{ url_for('api_note_cliente', client_id=current_client_id) }}" + (quote ? '?preventivo=' + encodeURIComponent(quote) : '');
     const panel = document.getElementById('noteClientePanel');
     const lista = document.getElementById('noteClienteVoci');
     const status = document.getElementById('noteClienteStatus');
     const dot = document.getElementById('noteClienteDot');
+    const filtroBox = document.getElementById('noteFiltro');
+    const nuovaTipo = document.getElementById('noteNuovaTipo');
     let salvate = [];   // voci come sono sul server
     let impronta = '[]';
+    let filtro = 'tutte';
 
     const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const dataIt = (q) => q ? q.slice(8, 10) + '/' + q.slice(5, 7) + '/' + q.slice(0, 4) + (q.length > 10 ? ' ' + q.slice(11, 16) : '') : '';
     function setStatus(msg, cls) { status.textContent = msg; status.className = 'ncp-status' + (cls ? ' ' + cls : ''); }
     function refreshDot() { dot.style.display = salvate.length ? 'block' : 'none'; }
     const autoGrow = (ta) => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
-    const leggi = () => [...lista.querySelectorAll('.ncp-voce')].map(r => ({ id: r.dataset.id || '', testo: r.querySelector('textarea').value.trim() }))
-                                                                  .filter(v => v.testo);
+
+    // il tipo di una voce come valore della tendina: 'cliente' oppure 'p:<numero>'
+    const chiave = (v) => v.tipo === 'preventivo' && (v.preventivo || quote) ? 'p:' + (v.preventivo || quote) : 'cliente';
+    function opzioni(scelta) {
+        const lst = [['cliente', 'Nota cliente']];
+        if (quote) lst.push(['p:' + quote, 'Nota preventivo ' + quote]);
+        else preventivi.forEach(p => lst.push(['p:' + p.numero, 'Preventivo ' + p.numero + (p.stato ? ' · ' + p.stato : '')]));
+        // preventivo non piu' in elenco (es. eliminato): la nota resta col suo numero
+        if (scelta && !lst.some(o => o[0] === scelta)) lst.push([scelta, 'Preventivo ' + scelta.slice(2)]);
+        return lst.map(([v, t]) => `<option value="${esc(v)}"${v === scelta ? ' selected' : ''}>${esc(t)}</option>`).join('');
+    }
+    const daChiave = (k) => k.startsWith('p:') ? { tipo: 'preventivo', preventivo: k.slice(2) } : { tipo: 'cliente', preventivo: '' };
+
+    const leggi = () => [...lista.querySelectorAll('.ncp-voce')].map(r => Object.assign(
+            { id: r.dataset.id || '', testo: r.querySelector('textarea').value.trim() }, daChiave(r.querySelector('.ncp-tipo').value)))
+        .filter(v => v.testo);
     const modificate = () => JSON.stringify(leggi()) !== impronta;
+    const segnaModifiche = () => setStatus(modificate() ? 'Modifiche non salvate' : '');
+
+    function coloraVoce(r) {
+        const prev = r.querySelector('.ncp-tipo').value !== 'cliente';
+        r.classList.toggle('is-prev', prev);
+        r.classList.toggle('is-cli', !prev);
+    }
+    function applicaFiltro() {
+        const voci = [...lista.querySelectorAll('.ncp-voce')];
+        const conta = { tutte: 0, cliente: 0, preventivo: 0 };
+        voci.forEach(r => {
+            const t = r.classList.contains('is-prev') ? 'preventivo' : 'cliente';
+            if (r.querySelector('textarea').value.trim()) { conta[t]++; conta.tutte++; }
+            r.hidden = filtro !== 'tutte' && filtro !== t;
+        });
+        filtroBox.querySelectorAll('button').forEach(b => {
+            b.classList.toggle('on', b.dataset.f === filtro);
+            b.querySelector('b').textContent = conta[b.dataset.f] || '';
+        });
+    }
 
     function nuovaVoce(v = {}, dopo = null) {
         const r = document.createElement('div');
         r.className = 'ncp-voce';
         r.dataset.id = v.id || '';
+        const tipo = v.tipo ? chiave(v) : nuovaTipo.value;
         const chi = [v.autore_nome, dataIt(v.quando)].filter(Boolean).join(' · ');
         r.innerHTML = `<i class="fas fa-circle"></i><textarea rows="1" placeholder="Scrivi una nota…"></textarea>
             <button type="button" class="ncp-togli" title="Togli nota"><i class="fas fa-times"></i></button>
-            <div class="ncp-meta">${esc(chi)}</div>`;
+            <div class="ncp-meta"><select class="ncp-tipo ncp-sel" title="Tipo di nota">${opzioni(tipo)}</select><span>${esc(chi)}</span></div>`;
         const ta = r.querySelector('textarea');
         ta.value = v.testo || '';
-        ta.addEventListener('input', () => { autoGrow(ta); setStatus(modificate() ? 'Modifiche non salvate' : ''); });
+        ta.addEventListener('input', () => { autoGrow(ta); segnaModifiche(); });
         ta.addEventListener('keydown', e => {
-            // Invio = nuova nota; Maiusc+Invio va a capo dentro la nota
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); nuovaVoce({}, r).querySelector('textarea').focus(); }
+            // Invio = nuova nota dello stesso tipo; Maiusc+Invio va a capo dentro la nota
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); nuovaVoce(daChiave(r.querySelector('.ncp-tipo').value), r).querySelector('textarea').focus(); }
             else if (e.key === 'Backspace' && ta.value === '' && lista.children.length > 1) {
                 e.preventDefault();
                 const prima = r.previousElementSibling || r.nextElementSibling;
                 r.remove();
                 const t = prima.querySelector('textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length);
-                setStatus(modificate() ? 'Modifiche non salvate' : '');
+                applicaFiltro(); segnaModifiche();
             }
         });
+        r.querySelector('.ncp-tipo').addEventListener('change', () => { coloraVoce(r); applicaFiltro(); segnaModifiche(); });
         r.querySelector('.ncp-togli').addEventListener('click', () => {
             r.remove();
             if (!lista.children.length) nuovaVoce();
-            setStatus(modificate() ? 'Modifiche non salvate' : '');
+            applicaFiltro(); segnaModifiche();
         });
-        if (dopo && dopo.nextSibling) lista.insertBefore(r, dopo.nextSibling); else lista.appendChild(r);
+        if (dopo === 'cima') lista.insertBefore(r, lista.firstChild);
+        else if (dopo && dopo.nextSibling) lista.insertBefore(r, dopo.nextSibling); else lista.appendChild(r);
+        coloraVoce(r);
+        // se il filtro nasconderebbe la nota nuova, si torna a "Tutte"
+        const t = r.classList.contains('is-prev') ? 'preventivo' : 'cliente';
+        if (filtro !== 'tutte' && filtro !== t) filtro = 'tutte';
+        applicaFiltro();
         requestAnimationFrame(() => autoGrow(ta));
         return r;
     }
     function riempi(voci) {
         lista.innerHTML = '';
-        (voci.length ? voci : [{}]).forEach(v => nuovaVoce(v));
+        // in cima le note preventivo, poi le note cliente
+        const ordinate = [...voci.filter(v => v.tipo === 'preventivo'), ...voci.filter(v => v.tipo !== 'preventivo')];
+        const f = filtro;
+        (ordinate.length ? ordinate : [{}]).forEach(v => nuovaVoce(v));
+        filtro = f; applicaFiltro();
         impronta = JSON.stringify(leggi());
     }
 
@@ -1647,15 +1729,27 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
                 if (!d.ok) throw new Error(d.error);
                 salvate = d.voci || [];
                 riempi(salvate); refreshDot(); setStatus('Salvato ✓', 'ok');
-            }).catch(() => setStatus('Errore nel salvataggio', 'err'));
+            }).catch((e) => setStatus(e && e.message && e.message !== 'Failed to fetch' ? e.message : 'Errore nel salvataggio', 'err'));
+    }
+    function aggiungi() {
+        const t = [...lista.querySelectorAll('.ncp-voce')].find(r => !r.querySelector('textarea').value.trim());
+        if (t) t.remove();   // la voce vuota lasciata aperta lascia il posto a quella del tipo scelto
+        return nuovaVoce(daChiave(nuovaTipo.value), dopoIlGruppo(nuovaTipo.value)).querySelector('textarea');
+    }
+    // la nota nuova va in fondo al suo gruppo (preventivo in cima, cliente sotto)
+    function dopoIlGruppo(k) {
+        const prev = k !== 'cliente';
+        const gruppo = [...lista.querySelectorAll('.ncp-voce')].filter(r => r.classList.contains('is-prev') === prev);
+        if (gruppo.length) return gruppo[gruppo.length - 1];
+        return prev ? 'cima' : null;
     }
     function open() {
         riempi(salvate); setStatus(''); panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false');
         load().then(() => {
-            // si apre pronto per una nota nuova in fondo (le voci vuote non si salvano)
-            let t = [...lista.querySelectorAll('textarea')].pop();
-            if (t && t.value.trim()) t = nuovaVoce().querySelector('textarea');
-            if (t) t.focus();
+            // si apre pronto per una nota nuova (le voci vuote non si salvano)
+            const vuota = [...lista.querySelectorAll('.ncp-voce')].find(r => !r.querySelector('textarea').value.trim());
+            (vuota ? vuota.querySelector('textarea') : aggiungi()).focus();
+            impronta = JSON.stringify(leggi());
         });
     }
     function close() {
@@ -1663,10 +1757,12 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
         panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true');
     }
 
+    nuovaTipo.innerHTML = opzioni(quote ? 'p:' + quote : 'cliente');   // da un preventivo: preselezionato quel preventivo
+    filtroBox.addEventListener('click', e => { const b = e.target.closest('button'); if (b) { filtro = b.dataset.f; applicaFiltro(); } });
     document.getElementById('noteClienteFab').addEventListener('click', () => panel.classList.contains('open') ? close() : open());
     document.getElementById('noteClienteClose').addEventListener('click', close);
     document.getElementById('noteClienteSave').addEventListener('click', save);
-    document.getElementById('noteClienteAggiungi').addEventListener('click', () => nuovaVoce().querySelector('textarea').focus());
+    document.getElementById('noteClienteAggiungi').addEventListener('click', () => aggiungi().focus());
     panel.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); } });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && panel.classList.contains('open')) close(); });
     load();

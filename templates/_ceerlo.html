@@ -260,7 +260,8 @@
         const cliente = box.dataset.cliente, per = box.dataset.notePer;
         if (!cliente || !per) return;
         let d = {};
-        try { d = await (await fetch(`/api/ceerlo/note-cliente/${encodeURIComponent(cliente)}?per=${per}`)).json(); } catch (e) { return; }
+        try { d = await (await fetch(`/api/ceerlo/note-cliente/${encodeURIComponent(cliente)}?per=${per}` +
+                                     (box.dataset.preventivo ? `&preventivo=${encodeURIComponent(box.dataset.preventivo)}` : ''))).json(); } catch (e) { return; }
         if (!d.ok || d.stato === 'nessuna') return;
         const chiave = `note:${per}:${cliente}:${d.impronta}`;
         const visti = leggi('ceerlo-note-viste', []);
