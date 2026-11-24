@@ -1633,7 +1633,7 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
     function opzioni(scelta) {
         const lst = [['cliente', 'Nota cliente']];
         if (quote) lst.push(['p:' + quote, 'Nota preventivo ' + quote]);
-        else preventivi.forEach(p => lst.push(['p:' + p.numero, 'Preventivo ' + p.numero + (p.stato ? ' · ' + p.stato : '')]));
+        else preventivi.forEach(p => lst.push(['p:' + p.numero, 'Preventivo ' + p.numero]));
         // preventivo non piu' in elenco (es. eliminato): la nota resta col suo numero
         if (scelta && !lst.some(o => o[0] === scelta)) lst.push([scelta, 'Preventivo ' + scelta.slice(2)]);
         return lst.map(([v, t]) => `<option value="${esc(v)}"${v === scelta ? ' selected' : ''}>${esc(t)}</option>`).join('');

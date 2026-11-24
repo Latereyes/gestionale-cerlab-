@@ -837,7 +837,7 @@ def inject_current_quote_client():
                    current_client_name=cli.cliente or cli.rag_sociale or cli.id_cliente)
         if not quote_id:
             out["current_client_quotes"] = [
-                {"numero": q.numero, "stato": q.stato or "", "data": (q.data or "")[:10]}
+                {"numero": q.numero}
                 for q in db.query(_Preventivo).filter_by(id_cliente=cli.id_cliente).order_by(_Preventivo.numero.desc()).all()]
         return out
     except Exception as e:
