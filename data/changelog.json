@@ -7,6 +7,7 @@
       "<b>Note unificate:</b> il pannello \"Note\" (tasto verde NOTE) raccoglie sia le <b>note cliente</b>, visibili in tutti i preventivi del cliente, sia le nuove <b>note preventivo</b>, visibili solo sul preventivo a cui appartengono.",
       "<b>Scelta del tipo:</b> sotto le note, \"Nuova nota\" permette di scegliere se la nota è del cliente o di un preventivo; aprendo le note da un preventivo è già scelto quel preventivo. Ogni nota ha la sua etichetta e il tipo si può cambiare anche dopo.",
       "<b>Colori e ordine:</b> le note preventivo sono arancioni e stanno sempre in cima, le note cliente sono verdi e stanno sotto.",
+      "<b>Salvataggio automatico:</b> le note si salvano da sole mentre si scrive (poco dopo che ci si ferma, con Invio, cambiando tipo, togliendo una nota o chiudendo). In cima c'è sempre una riga vuota pronta per la nota successiva: con Invio la nota appena scritta scende e si riparte dalla riga vuota.",
       "<b>Filtro:</b> in alto si sceglie se vedere Tutte, solo le note Preventivo o solo le note Cliente, con il numero di note per ciascuna.",
       "<b>Anche nella cartella cliente:</b> il tasto NOTE c'è ora anche nella Cartella Documenti del cliente: lì si vedono tutte le note, comprese quelle di ogni preventivo (con il numero), e si possono aggiungere scegliendo il preventivo.",
       "<b>Note già scritte:</b> restano tutte note cliente, come prima. Ceerlo, aprendo un preventivo, ricorda solo le note cliente e quelle di quel preventivo."

@@ -9066,6 +9066,7 @@ def api_note_cliente(client_id):
         if not isinstance(grezze, list):  # vecchio formato: testo libero, una voce per riga
             grezze = [{"testo": t} for t in str(data.get("note", "")).splitlines()]
         per_id = {v["id"]: v for v in in_vista}
+        usati = {v["id"] for v in tutte}
         adesso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         voci = []
         for g in grezze[:200]:
@@ -9074,7 +9075,7 @@ def api_note_cliente(client_id):
             testo = str(g.get("testo") or "").strip()[:2000]
             if not testo:
                 continue
-            prima = per_id.get(str(g.get("id") or ""))
+            prima = per_id.pop(str(g.get("id") or ""), None)  # pop: due voci con lo stesso id non diventano la stessa
             tipo, numero = "cliente", ""
             if g.get("tipo") == "preventivo":
                 numero = contesto or str(g.get("preventivo") or "").strip()
@@ -9085,10 +9086,14 @@ def api_note_cliente(client_id):
             if prima and prima["testo"] == testo:
                 voce = dict(prima)  # testo invariato: resta di chi l'ha scritta (anche se cambia solo il tipo)
             else:
-                voce = {"id": (prima or {}).get("id") or uuid.uuid4().hex[:8], "testo": testo,
+                # nota nuova: si tiene l'id scelto dal browser (serve al salvataggio automatico), se valido e libero
+                gid = str(g.get("id") or "")
+                nuovo_id = gid if re.fullmatch(r"[0-9a-z]{4,16}", gid) and gid not in usati else uuid.uuid4().hex[:8]
+                voce = {"id": (prima or {}).get("id") or nuovo_id, "testo": testo,
                         "autore": session["user_id"], "autore_nome": session.get("user_name") or session["user_id"],
                         "quando": adesso}
             voce["tipo"], voce["preventivo"] = tipo, numero
+            usati.add(voce["id"])
             voci.append(voce)
         # in cima le note preventivo, poi le note cliente (ognuna nel suo ordine)
         salvate = [v for v in voci + fuori if v["tipo"] == "preventivo"] + [v for v in voci + fuori if v["tipo"] == "cliente"]

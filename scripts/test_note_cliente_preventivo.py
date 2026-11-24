@@ -78,6 +78,14 @@ r = c.post(f"/api/cliente/{CL}/note", json={"voci": mod}).get_json()
 cambiata = next(v for v in r["voci"] if v["id"] == prima["id"])
 verifica(cambiata["tipo"] == "cliente" and cambiata["quando"] == prima["quando"], "cambio di tipo: resta autore e data")
 
+# 5b. salvataggio automatico: una nota nuova tiene l'id scelto dal browser; un id gia' usato viene cambiato
+tutte = c.get(f"/api/cliente/{CL}/note").get_json()["voci"]
+r = c.post(f"/api/cliente/{CL}/note", json={"voci": tutte + [{"id": "abc12345", "testo": "nota auto", "tipo": "cliente"}]}).get_json()
+verifica(any(v["id"] == "abc12345" and v["testo"] == "nota auto" for v in r["voci"]), "nota nuova: resta l'id del browser")
+r = c.post(f"/api/cliente/{CL}/note", json={"voci": r["voci"] + [{"id": "abc12345", "testo": "copia", "tipo": "cliente"}]}).get_json()
+verifica(len({v["id"] for v in r["voci"]}) == len(r["voci"]), "id doppio: la nota nuova prende un id diverso")
+r = c.post(f"/api/cliente/{CL}/note", json={"voci": [v for v in r["voci"] if v["testo"] not in ("nota auto", "copia")]}).get_json()
+
 # 6. note_interne (Ceerlo, ricerche): numero del preventivo davanti
 db = g._DBSession()
 testo = db.query(g._Cliente).filter_by(id_cliente=CL).first().note_interne

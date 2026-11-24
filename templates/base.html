@@ -1590,7 +1590,7 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
             <button type="button" data-f="preventivo">Preventivo <b></b></button>
             <button type="button" data-f="cliente">Cliente <b></b></button>
         </div>
-        <div class="ncp-hint">{% if current_quote_id %}Le <span class="ncp-h-cli">note cliente</span> si vedono in tutti i preventivi di questo cliente; le <span class="ncp-h-prev">note preventivo</span> solo qui.{% else %}Le <span class="ncp-h-cli">note cliente</span> si vedono in tutti i suoi preventivi; ogni <span class="ncp-h-prev">nota preventivo</span> solo nel suo preventivo.{% endif %} Non compaiono nelle stampe.</div>
+        <div class="ncp-hint">{% if current_quote_id %}Le <span class="ncp-h-cli">note cliente</span> si vedono in tutti i preventivi di questo cliente; le <span class="ncp-h-prev">note preventivo</span> solo qui.{% else %}Le <span class="ncp-h-cli">note cliente</span> si vedono in tutti i suoi preventivi; ogni <span class="ncp-h-prev">nota preventivo</span> solo nel suo preventivo.{% endif %} Si salvano da sole. Non compaiono nelle stampe.</div>
         <div class="ncp-voci" id="noteClienteVoci"></div>
         <div class="ncp-nuova">
             <label for="noteNuovaTipo">Nuova nota:</label>
@@ -1668,31 +1668,36 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
     function nuovaVoce(v = {}, dopo = null) {
         const r = document.createElement('div');
         r.className = 'ncp-voce';
-        r.dataset.id = v.id || '';
+        r.dataset.id = v.id || Math.random().toString(16).slice(2, 10);
         const tipo = v.tipo ? chiave(v) : nuovaTipo.value;
         const chi = [v.autore_nome, dataIt(v.quando)].filter(Boolean).join(' · ');
         r.innerHTML = `<i class="fas fa-circle"></i><textarea rows="1" placeholder="Scrivi una nota…"></textarea>
             <button type="button" class="ncp-togli" title="Togli nota"><i class="fas fa-times"></i></button>
-            <div class="ncp-meta"><select class="ncp-tipo ncp-sel" title="Tipo di nota">${opzioni(tipo)}</select><span>${esc(chi)}</span></div>`;
+            <div class="ncp-meta"><select class="ncp-tipo ncp-sel" title="Tipo di nota">${opzioni(tipo)}</select><span class="ncp-chi">${esc(chi)}</span></div>`;
         const ta = r.querySelector('textarea');
         ta.value = v.testo || '';
-        ta.addEventListener('input', () => { autoGrow(ta); segnaModifiche(); });
+        ta.addEventListener('input', () => { autoGrow(ta); segnaModifiche(); programma(); });
+        ta.addEventListener('blur', () => { programma(150); setTimeout(() => { if (!lista.contains(document.activeElement)) vuotaInCima(); }, 0); });
         ta.addEventListener('keydown', e => {
             // Invio = nuova nota dello stesso tipo; Maiusc+Invio va a capo dentro la nota
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); nuovaVoce(daChiave(r.querySelector('.ncp-tipo').value), r).querySelector('textarea').focus(); }
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!ta.value.trim()) return;
+                vuotaInCima(r.querySelector('.ncp-tipo').value).querySelector('textarea').focus(); programma(0);
+            }
             else if (e.key === 'Backspace' && ta.value === '' && lista.children.length > 1) {
                 e.preventDefault();
                 const prima = r.previousElementSibling || r.nextElementSibling;
                 r.remove();
                 const t = prima.querySelector('textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length);
-                applicaFiltro(); segnaModifiche();
+                applicaFiltro(); segnaModifiche(); programma(300);
             }
         });
-        r.querySelector('.ncp-tipo').addEventListener('change', () => { coloraVoce(r); applicaFiltro(); segnaModifiche(); });
+        r.querySelector('.ncp-tipo').addEventListener('change', () => { coloraVoce(r); applicaFiltro(); segnaModifiche(); programma(0); });
         r.querySelector('.ncp-togli').addEventListener('click', () => {
             r.remove();
             if (!lista.children.length) nuovaVoce();
-            applicaFiltro(); segnaModifiche();
+            applicaFiltro(); segnaModifiche(); programma(0);
         });
         if (dopo === 'cima') lista.insertBefore(r, lista.firstChild);
         else if (dopo && dopo.nextSibling) lista.insertBefore(r, dopo.nextSibling); else lista.appendChild(r);
@@ -1722,20 +1727,46 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
             refreshDot();
         }).catch(() => setStatus('Impossibile caricare le note', 'err'));
     }
+    // Salvataggio automatico: poco dopo che si smette di scrivere, uscendo da una nota, con Invio, cambiando tipo
+    // o togliendo una nota. Non ridisegna la lista: cursore e ordine restano dove sono (l'ordine si sistema riaprendo).
+    let timer = null, inCorso = null, ancora = false;
+    function programma(ritardo = 1200) { clearTimeout(timer); timer = setTimeout(save, ritardo); }
     function save() {
+        clearTimeout(timer);
+        if (inCorso) { ancora = true; return inCorso; }
+        if (!modificate()) return Promise.resolve();
+        const inviate = leggi();
         setStatus('Salvataggio...');
-        return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voci: leggi() }) })
+        inCorso = fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voci: inviate }) })
             .then(r => r.json()).then(d => {
                 if (!d.ok) throw new Error(d.error);
                 salvate = d.voci || [];
-                riempi(salvate); refreshDot(); setStatus('Salvato ✓', 'ok');
-            }).catch((e) => setStatus(e && e.message && e.message !== 'Failed to fetch' ? e.message : 'Errore nel salvataggio', 'err'));
+                impronta = JSON.stringify(inviate);
+                const perId = Object.fromEntries(salvate.map(v => [v.id, v]));
+                lista.querySelectorAll('.ncp-voce').forEach(r => {
+                    const v = perId[r.dataset.id];
+                    if (v) r.querySelector('.ncp-chi').textContent = [v.autore_nome, dataIt(v.quando)].filter(Boolean).join(' · ');
+                });
+                refreshDot(); applicaFiltro();
+                setStatus(modificate() ? 'Modifiche non salvate' : 'Salvato ✓', modificate() ? '' : 'ok');
+            }).catch((e) => setStatus(e && e.message && e.message !== 'Failed to fetch' ? e.message : 'Errore nel salvataggio', 'err'))
+            .finally(() => { inCorso = null; if (ancora) { ancora = false; save(); } });
+        return inCorso;
+    }
+    // In cima c'e' sempre una riga vuota pronta per la nota successiva (del tipo scelto in "Nuova nota",
+    // o dello stesso tipo della nota appena scritta con Invio). Le altre righe vuote si tolgono.
+    function vuotaInCima(tipo) {
+        const voci = [...lista.querySelectorAll('.ncp-voce')];
+        const vuote = voci.filter(r => !r.querySelector('textarea').value.trim());
+        let cima = voci[0] && vuote.includes(voci[0]) ? voci[0] : null;
+        vuote.filter(r => r !== cima && !r.contains(document.activeElement)).forEach(r => r.remove());
+        if (!cima) cima = nuovaVoce(daChiave(tipo || nuovaTipo.value), 'cima');
+        else if (tipo) { cima.querySelector('.ncp-tipo').value = tipo; coloraVoce(cima); }
+        applicaFiltro();
+        return cima;
     }
     function aggiungi() {
-        const t = [...lista.querySelectorAll('.ncp-voce')].find(r => !r.querySelector('textarea').value.trim());
-        if (t) t.remove();   // la voce vuota lasciata aperta lascia il posto a quella del tipo scelto
-        // la nota nuova sta sempre in cima, pronta da scrivere; salvando torna nel suo gruppo
-        const r = nuovaVoce(daChiave(nuovaTipo.value), 'cima');
+        const r = vuotaInCima(nuovaTipo.value);
         panel.querySelector('.ncp-body').scrollTop = 0;
         return r.querySelector('textarea');
     }
@@ -1743,16 +1774,18 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
         riempi(salvate); setStatus(''); panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false');
         load().then(() => {
             // si apre pronto per una nota nuova (le voci vuote non si salvano)
-            const vuota = [...lista.querySelectorAll('.ncp-voce')].find(r => !r.querySelector('textarea').value.trim());
-            (vuota ? vuota.querySelector('textarea') : aggiungi()).focus();
+            aggiungi().focus();
             impronta = JSON.stringify(leggi());
         });
     }
     function close() {
-        if (modificate() && !confirm('Ci sono modifiche non salvate alle note. Chiudere comunque?')) return;
+        if (modificate()) save();   // chiudendo si salva quello che resta
         panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true');
     }
 
+    window.addEventListener('pagehide', () => {
+        if (modificate()) navigator.sendBeacon && navigator.sendBeacon(url, new Blob([JSON.stringify({ voci: leggi() })], { type: 'application/json' }));
+    });
     nuovaTipo.addEventListener('change', () => {
         const vuota = [...lista.querySelectorAll('.ncp-voce')].find(r => !r.querySelector('textarea').value.trim());
         if (vuota) { vuota.querySelector('.ncp-tipo').value = nuovaTipo.value; coloraVoce(vuota); filtro = 'tutte'; applicaFiltro(); }
