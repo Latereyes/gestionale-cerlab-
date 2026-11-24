@@ -9031,7 +9031,7 @@ def voci_note_cliente(cli, preventivo=None):
 
 def testo_note_cliente(voci):
     """Il testo di 'note_interne' (per Ceerlo e le ricerche): le note preventivo portano il numero davanti."""
-    return "\n".join(f"• [Preventivo {v['preventivo']}] {v['testo']}" if v.get("tipo") == "preventivo" else f"• {v['testo']}"
+    return "\n".join(f"• [{v['preventivo']}] {v['testo']}" if v.get("tipo") == "preventivo" else f"• {v['testo']}"
                      for v in voci)
 
 

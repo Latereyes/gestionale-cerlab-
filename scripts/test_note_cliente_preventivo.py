@@ -82,7 +82,7 @@ verifica(cambiata["tipo"] == "cliente" and cambiata["quando"] == prima["quando"]
 db = g._DBSession()
 testo = db.query(g._Cliente).filter_by(id_cliente=CL).first().note_interne
 db.close()
-verifica("• [Preventivo P-B] colore grigio" in testo and "• paga a 60 giorni" in testo, "note_interne con il numero del preventivo")
+verifica("• [P-B] colore grigio" in testo and "• paga a 60 giorni" in testo, "note_interne con il numero del preventivo")
 
 # 7. Pagine: pulsante Note nel preventivo e nella cartella cliente (con l'elenco dei preventivi)
 pagina = c.get(f"/cliente/dettaglio/{CL}")
