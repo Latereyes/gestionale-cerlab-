@@ -1734,14 +1734,10 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
     function aggiungi() {
         const t = [...lista.querySelectorAll('.ncp-voce')].find(r => !r.querySelector('textarea').value.trim());
         if (t) t.remove();   // la voce vuota lasciata aperta lascia il posto a quella del tipo scelto
-        return nuovaVoce(daChiave(nuovaTipo.value), dopoIlGruppo(nuovaTipo.value)).querySelector('textarea');
-    }
-    // la nota nuova va in fondo al suo gruppo (preventivo in cima, cliente sotto)
-    function dopoIlGruppo(k) {
-        const prev = k !== 'cliente';
-        const gruppo = [...lista.querySelectorAll('.ncp-voce')].filter(r => r.classList.contains('is-prev') === prev);
-        if (gruppo.length) return gruppo[gruppo.length - 1];
-        return prev ? 'cima' : null;
+        // la nota nuova sta sempre in cima, pronta da scrivere; salvando torna nel suo gruppo
+        const r = nuovaVoce(daChiave(nuovaTipo.value), 'cima');
+        panel.querySelector('.ncp-body').scrollTop = 0;
+        return r.querySelector('textarea');
     }
     function open() {
         riempi(salvate); setStatus(''); panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false');
@@ -1757,6 +1753,10 @@ window.openQuickTask = function(quoteId, contextLabel, subjectName) {
         panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true');
     }
 
+    nuovaTipo.addEventListener('change', () => {
+        const vuota = [...lista.querySelectorAll('.ncp-voce')].find(r => !r.querySelector('textarea').value.trim());
+        if (vuota) { vuota.querySelector('.ncp-tipo').value = nuovaTipo.value; coloraVoce(vuota); filtro = 'tutte'; applicaFiltro(); }
+    });
     nuovaTipo.innerHTML = opzioni(quote ? 'p:' + quote : 'cliente');   // da un preventivo: preselezionato quel preventivo
     filtroBox.addEventListener('click', e => { const b = e.target.closest('button'); if (b) { filtro = b.dataset.f; applicaFiltro(); } });
     document.getElementById('noteClienteFab').addEventListener('click', () => panel.classList.contains('open') ? close() : open());
